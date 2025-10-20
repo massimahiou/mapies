@@ -1,0 +1,238 @@
+/* Leaflet CSS */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* More aggressive tile flashing fix */
+.leaflet-tile {
+  transition: none !important;
+  opacity: 1 !important;
+}
+
+/* Cool location zone pulse animation */
+@keyframes pulse {
+  0% {
+    opacity: 0.9;
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(1.1) rotate(180deg);
+  }
+  100% {
+    opacity: 0.9;
+    transform: scale(1) rotate(360deg);
+  }
+}
+
+/* Location zone glow effect - removed for clean design */
+
+/* Ensure pulse animation works on all circles */
+.leaflet-interactive[style*="animation"] {
+  animation: pulse 3s ease-in-out infinite !important;
+}
+
+/* Pulse animation class for public map - more specific */
+.pulse-animation {
+  animation: pulse 3s ease-in-out infinite !important;
+}
+
+/* Force animation on SVG elements in public map */
+.leaflet-zoom-animated .pulse-animation {
+  animation: pulse 3s ease-in-out infinite !important;
+}
+
+/* Force animation on all circle elements */
+svg .pulse-animation {
+  animation: pulse 3s ease-in-out infinite !important;
+}
+
+/* Unified Cluster System - Uses User's Marker Colors */
+.marker-cluster {
+  background-clip: padding-box;
+  border-radius: 50%;
+  color: white;
+  font-weight: bold;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1;
+  min-width: 35px;
+  min-height: 35px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  border: 3px solid #ffffff;
+}
+
+.marker-cluster:hover {
+  transform: scale(1.1);
+}
+
+.marker-cluster-small {
+  width: 35px;
+  height: 35px;
+  font-size: 10px;
+}
+
+.marker-cluster-medium {
+  width: 45px;
+  height: 45px;
+  font-size: 11px;
+}
+
+.marker-cluster-large {
+  width: 55px;
+  height: 55px;
+  font-size: 12px;
+}
+
+/* Clean Typography */
+.marker-cluster span {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 600;
+}
+
+.leaflet-tile-container {
+  transition: none !important;
+}
+
+.leaflet-tile-container {
+  transition: none !important;
+}
+
+.leaflet-tile-container {
+  transition: none !important;
+}
+
+.leaflet-tile-pane {
+  will-change: transform;
+}
+
+/* Disable Leaflet's default fade animations that cause flashing */
+.leaflet-fade-anim .leaflet-tile {
+  transition: none !important;
+}
+
+.leaflet-zoom-animated {
+  transition: transform 0.25s cubic-bezier(0,0,0.25,1) !important;
+}
+
+/* Force tiles to load without fade */
+.leaflet-tile-loaded {
+  opacity: 1 !important;
+}
+
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  body {
+    @apply bg-gray-50 text-gray-900;
+  }
+}
+
+@layer components {
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-100 hover:text-gray-900 transition-colors;
+  }
+  
+  .sidebar-item.active {
+    @apply bg-primary-50 text-primary-700 border-r-2 border-primary-500;
+  }
+
+  .safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  .btn-primary {
+    @apply bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors;
+  }
+  
+  .btn-secondary {
+    @apply bg-white text-gray-700 px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors;
+  }
+  
+         /* Ensure map doesn't interfere with modals */
+         .leaflet-container {
+           z-index: 1 !important;
+         }
+  
+         /* Hide Leaflet attribution completely */
+         .leaflet-control-attribution {
+           display: none !important;
+         }
+
+         /* Hide all Leaflet default controls */
+         .leaflet-control-zoom {
+           display: none !important;
+         }
+
+         .leaflet-control-layers {
+           display: none !important;
+         }
+
+         .leaflet-control-scale {
+           display: none !important;
+         }
+
+         /* Hide the entire control container */
+         .leaflet-control-container {
+           display: none !important;
+         }
+
+         /* Hide any other possible controls */
+         .leaflet-control {
+           display: none !important;
+         }
+  
+  /* Simple, clean popup styling */
+  .leaflet-popup-content-wrapper {
+    border-radius: 8px !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+  
+  .leaflet-popup-tip {
+    background: white !important;
+    border: none !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  }
+
+  /* Publish mode styles for full-page resizable preview */
+  .publish-mode {
+    overflow: visible !important;
+  }
+
+         .publish-mode .leaflet-container {
+           border-radius: 6px !important;
+         }
+
+         /* User location marker pulsing animation */
+         @keyframes pulse {
+           0% {
+             opacity: 1;
+           }
+           70% {
+             opacity: 0.7;
+           }
+           100% {
+             opacity: 1;
+           }
+         }
+
+         .user-location-marker {
+           animation: pulse 2s infinite !important;
+         }
+
+         /* Search bar responsive design */
+         @media (max-width: 768px) {
+           .search-container {
+             width: calc(100vw - 2rem) !important;
+             max-width: 320px !important;
+           }
+         }
+       }
