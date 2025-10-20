@@ -34,6 +34,7 @@ logs/
 .firebase/
 firebase-debug.log
 firestore-debug.log
+config/*.json
 
 # Temporary files
 *.tmp
