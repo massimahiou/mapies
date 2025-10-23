@@ -4,10 +4,11 @@ import L from 'leaflet'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
-import { MapPin, Navigation, Plus, Minus } from 'lucide-react'
+import { MapPin, Navigation, Plus, Minus, Search, X, List } from 'lucide-react'
 import { detectBusinessType } from '../utils/businessDetection'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
 import PublicMapSidebar from './PublicMapSidebar'
+import { MAPBOX_CONFIG } from '../config/mapbox'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -71,7 +72,6 @@ const PublicMap: React.FC = () => {
   const markersRef = useRef<L.Marker[]>([])
   const markerClusterRef = useRef<any>(null)
   const userLocationCircleRef = useRef<L.Circle | null>(null)
-  const userLocationPulseRef = useRef<L.Circle | null>(null)
   const tileLayerRef = useRef<L.TileLayer | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [markers, setMarkers] = useState<Marker[]>([])
@@ -103,27 +103,106 @@ const PublicMap: React.FC = () => {
   const [showNearbyPlaces, setShowNearbyPlaces] = useState(false)
   const [locationModeActive, setLocationModeActive] = useState(false)
   const [renamedMarkers] = useState<Record<string, string>>({})
+  const [showMobileResults, setShowMobileResults] = useState(false)
 
-  // Initialize search results when markers are loaded
-  useEffect(() => {
-    if (markers.length > 0) {
-      setSearchResults(markers)
-      // Don't auto-show dropdown, let user control it
+  // Geocoding function for postal codes - Using Mapbox API
+  const geocodePostalCode = async (postalCode: string): Promise<{lat: number, lng: number} | null> => {
+    try {
+      const cleanedPostalCode = postalCode.trim().replace(/\s+/g, '')
+      console.log('🌐 Attempting to geocode with Mapbox:', cleanedPostalCode)
+      
+      // Use Mapbox Geocoding API for postal codes
+      const response = await fetch(
+        `${MAPBOX_CONFIG.GEOCODING_API_URL}/${cleanedPostalCode}.json?access_token=${MAPBOX_CONFIG.ACCESS_TOKEN}&country=CA&types=postcode`
+      )
+      
+      if (!response.ok) {
+        throw new Error(`Mapbox API error: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      console.log('📍 Mapbox geocoding response:', data)
+      
+      if (data.features && data.features.length > 0) {
+        const coordinates = data.features[0].center
+        console.log(`✅ Found coordinates for ${cleanedPostalCode}:`, coordinates)
+        return {
+          lat: coordinates[1], // Mapbox returns [lng, lat]
+          lng: coordinates[0]
+        }
+      }
+      
+      console.log(`❌ No coordinates found for postal code: ${cleanedPostalCode}`)
+      return null
+    } catch (error) {
+      console.error('Mapbox geocoding error:', error)
+      return null
     }
-  }, [markers])
+  }
 
-  // Search functionality
-  const handleSearch = (term: string) => {
+  // Check if search term is a postal code (Canadian format: A1A 1A1 or A1A1A1)
+  const isPostalCode = (term: string): boolean => {
+    const cleaned = term.trim().replace(/\s+/g, '') // Remove all spaces
+    const postalCodeRegex = /^[A-Za-z]\d[A-Za-z]\d[A-Za-z]\d$/
+    return postalCodeRegex.test(cleaned)
+  }
+
+  // Search functionality with postal code support
+  const handleSearch = async (term: string) => {
     console.log('Search term:', term, 'Markers count:', markers.length)
     setSearchTerm(term)
     
-    // Filter results based on search term
-    const filtered = term.trim() === '' 
-      ? markers 
-      : markers.filter(marker => 
-          marker.name.toLowerCase().includes(term.toLowerCase()) ||
-          marker.address.toLowerCase().includes(term.toLowerCase())
-        )
+    if (!term.trim()) {
+      setSearchResults(markers)
+      setShowMobileResults(false) // Hide results when search is cleared
+          return
+        }
+
+    // Show mobile results panel when searching
+    setShowMobileResults(true)
+    
+    // Check if it's a postal code
+    if (isPostalCode(term)) {
+      console.log('🔍 Detected postal code:', term)
+      const coordinates = await geocodePostalCode(term)
+      if (coordinates) {
+        console.log('📍 Postal code coordinates:', coordinates)
+        
+        // For postal codes, use only first 3 characters for broader area search
+        const postalCodePrefix = term.trim().replace(/\s+/g, '').substring(0, 3)
+        console.log('🎯 Using postal code prefix for broader search:', postalCodePrefix)
+        
+        // Calculate distance for ALL markers and sort by distance
+        const markersWithDistance = markers.map(marker => ({
+          ...marker,
+          distance: calculateDistance(coordinates.lat, coordinates.lng, marker.lat, marker.lng)
+        })).sort((a, b) => a.distance - b.distance)
+        
+        // Show the closest 30 markers (regardless of distance)
+        const closestMarkers = markersWithDistance.slice(0, 30)
+        
+        console.log(`🎯 Showing ${closestMarkers.length} closest markers to ${postalCodePrefix} area`)
+        console.log('📍 Closest markers:', closestMarkers.map(m => ({ name: m.name, distance: m.distance })))
+        
+        setSearchResults(closestMarkers)
+        
+        // Center map on postal code location
+        if (mapInstance.current) {
+          mapInstance.current.setView([coordinates.lat, coordinates.lng], 12)
+        }
+        return
+      } else {
+        console.log('❌ Could not geocode postal code:', term)
+        console.log('🔄 Falling back to regular text search...')
+        // Fall through to regular text search
+      }
+    }
+    
+    // Regular text search
+    const filtered = markers.filter(marker => 
+      marker.name.toLowerCase().includes(term.toLowerCase()) ||
+      marker.address.toLowerCase().includes(term.toLowerCase())
+    )
     
     console.log('Filtered results:', filtered.length, filtered)
     setSearchResults(filtered)
@@ -239,6 +318,7 @@ const PublicMap: React.FC = () => {
       // Turn off location mode
       setLocationModeActive(false)
       setShowNearbyPlaces(false)
+      setShowMobileResults(false) // Hide results when location is deactivated
       
       // Remove any visual elements from the map
       if (mapInstance.current) {
@@ -252,10 +332,16 @@ const PublicMap: React.FC = () => {
       
       // Clear the circle ref
       userLocationCircleRef.current = null
-      userLocationPulseRef.current = null
     } else {
       // Turn on location mode - get current location
       getCurrentLocation()
+      setShowMobileResults(true) // Show results when location is activated
+      
+      // Show random results initially while waiting for location
+      console.log('🎲 Getting location - showing random results temporarily')
+      const shuffledMarkers = [...markers].sort(() => Math.random() - 0.5)
+      setSearchResults(shuffledMarkers.slice(0, 30))
+      setSearchTerm('') // Clear search term
     }
   }
 
@@ -272,59 +358,44 @@ const PublicMap: React.FC = () => {
       setNearbyMarkers(nearby)
       setShowNearbyPlaces(true)
       
-      // Add a temporary marker for current location
+      // Add a subtle marker for current location
       const currentLocationIcon = L.divIcon({
         className: 'current-location-marker',
-        html: '<div style="width: 20px; height: 20px; background-color: #3B82F6; border: 3px solid white; border-radius: 50%;"></div>',
-        iconSize: [20, 20],
-        iconAnchor: [10, 10]
+        html: '<div style="width: 16px; height: 16px; background-color: #10B981; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);"></div>',
+        iconSize: [16, 16],
+        iconAnchor: [8, 8]
       })
       
       const currentLocationMarker = L.marker([latitude, longitude], { icon: currentLocationIcon })
         .bindPopup('📍 Your current location')
         .addTo(mapInstance.current)
       
-      // Add a radius circle to show the search area with cool effects
+      // Add a static radius circle
       const radiusCircle = L.circle([latitude, longitude], {
-        color: '#2563EB',
-        fillColor: '#2563EB',
-        fillOpacity: 0.2,
-        weight: 4,
-        dashArray: '20, 10',
+        color: '#10B981', // Green color
+        fillColor: 'transparent', // No fill
+        weight: 2, // Thin line
         radius: 5000 // 5km radius
       }).addTo(mapInstance.current)
       
-      // Add a pulsing inner circle for extra cool effect
-      const pulseCircle = L.circle([latitude, longitude], {
-        color: '#3B82F6',
-        fillColor: '#3B82F6',
-        fillOpacity: 0.1,
-        weight: 3,
-        dashArray: '10, 10',
-        radius: 5000 // 5km radius
-      }).addTo(mapInstance.current)
-      
-      // Add CSS animation for pulsing effect
-      const pulseElement = pulseCircle.getElement() as HTMLElement
-      if (pulseElement) {
-        // Apply animation with a small delay to ensure element is rendered
+      // Add soft breathing glow animation
+      const circleElement = radiusCircle.getElement() as HTMLElement
+      if (circleElement) {
         setTimeout(() => {
-          pulseElement.style.animation = 'pulse 3s ease-in-out infinite'
-          pulseElement.classList.add('pulse-animation')
-          console.log('🎯 Animation applied to public map pulse circle:', pulseElement.style.animation)
+          circleElement.style.animation = 'soft-breathing-glow 3s ease-in-out infinite'
+          circleElement.classList.add('soft-breathing-glow-animation')
+          console.log('🎯 Soft breathing glow animation applied to location circle')
         }, 100)
       } else {
-        console.error('❌ Could not get pulse element for animation')
+        console.error('❌ Could not get circle element for animation')
       }
       
       // Store references for cleanup when toggling off
       ;(currentLocationMarker as any).isLocationMarker = true
       ;(radiusCircle as any).isLocationCircle = true
-      ;(pulseCircle as any).isLocationCircle = true
       
       // Store circle refs for direct access
       userLocationCircleRef.current = radiusCircle
-      userLocationPulseRef.current = pulseCircle
     }
   }
 
@@ -332,9 +403,26 @@ const PublicMap: React.FC = () => {
     if (!navigator.geolocation) {
       console.error('Geolocation is not supported by this browser.')
       // Use fallback location
-      createLocationCircles(45.5017, -73.5673) // Montreal fallback
-      setUserLocation({ lat: 45.5017, lng: -73.5673 })
+      const fallbackLat = 45.5017
+      const fallbackLng = -73.5673
+      setUserLocation({ lat: fallbackLat, lng: fallbackLng })
       setLocationModeActive(true)
+      
+      // Show nearest results to fallback location
+      console.log('📍 Geolocation not supported - showing nearest results to fallback')
+      const markersWithDistance = markers.map(marker => ({
+        ...marker,
+        distance: calculateDistance(fallbackLat, fallbackLng, marker.lat, marker.lng)
+      })).sort((a, b) => a.distance - b.distance)
+      
+      // Show the closest 30 markers
+      const nearestMarkers = markersWithDistance.slice(0, 30)
+      
+      console.log(`🎯 Showing ${nearestMarkers.length} nearest markers to fallback location`)
+      setSearchResults(nearestMarkers)
+      setSearchTerm('') // Clear search term to show "nearest" results
+      
+      createLocationCircles(fallbackLat, fallbackLng)
       return
     }
 
@@ -353,6 +441,22 @@ const PublicMap: React.FC = () => {
         setUserLocation({ lat: latitude, lng: longitude })
         setLocationModeActive(true) // Activate location mode
         
+        // Show nearest results now that we have the location
+        console.log('📍 Location obtained - showing nearest results')
+        const markersWithDistance = markers.map(marker => ({
+          ...marker,
+          distance: calculateDistance(latitude, longitude, marker.lat, marker.lng)
+        })).sort((a, b) => a.distance - b.distance)
+        
+        // Show the closest 30 markers
+        const nearestMarkers = markersWithDistance.slice(0, 30)
+        
+        console.log(`🎯 Showing ${nearestMarkers.length} nearest markers to user location`)
+        console.log('📍 Nearest markers:', nearestMarkers.map(m => ({ name: m.name, distance: m.distance })))
+        
+        setSearchResults(nearestMarkers)
+        setSearchTerm('') // Clear search term to show "nearest" results
+        
         // Create the circles using the same logic as blue test
         createLocationCircles(latitude, longitude)
       },
@@ -361,9 +465,26 @@ const PublicMap: React.FC = () => {
         console.log('📍 Geolocation failed, using fallback location (Montreal)')
         
         // Use fallback location
-        createLocationCircles(45.5017, -73.5673) // Montreal fallback
-        setUserLocation({ lat: 45.5017, lng: -73.5673 })
+        const fallbackLat = 45.5017
+        const fallbackLng = -73.5673
+        setUserLocation({ lat: fallbackLat, lng: fallbackLng })
         setLocationModeActive(true)
+        
+        // Show nearest results to fallback location
+        console.log('📍 Using fallback location - showing nearest results')
+        const markersWithDistance = markers.map(marker => ({
+          ...marker,
+          distance: calculateDistance(fallbackLat, fallbackLng, marker.lat, marker.lng)
+        })).sort((a, b) => a.distance - b.distance)
+        
+        // Show the closest 30 markers
+        const nearestMarkers = markersWithDistance.slice(0, 30)
+        
+        console.log(`🎯 Showing ${nearestMarkers.length} nearest markers to fallback location`)
+        setSearchResults(nearestMarkers)
+        setSearchTerm('') // Clear search term to show "nearest" results
+        
+        createLocationCircles(fallbackLat, fallbackLng)
         
         let errorMessage = 'Unable to get your location. '
         
@@ -757,8 +878,8 @@ const PublicMap: React.FC = () => {
         tileOptions.attribution = '© OpenStreetMap contributors © CARTO'
         break
       case 'toner':
-        tileUrl = 'https://api.maptiler.com/maps/toner/{z}/{x}/{y}.png?key=get_your_own_OpIi9ZULNHzrESv6T2vL'
-        tileOptions.attribution = '© MapTiler © OpenStreetMap contributors'
+        tileUrl = 'https://stamen-tiles-{s}.a.ssl.fastly.net/toner/{z}/{x}/{y}{r}.png'
+        tileOptions.attribution = '© OpenStreetMap contributors © Stamen Design'
         break
       case 'satellite':
         tileUrl = 'https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key=get_your_own_OpIi9ZULNHzrESv6T2vL'
@@ -912,11 +1033,50 @@ const PublicMap: React.FC = () => {
   }
 
   return (
-    <div className="w-full h-screen flex">
+    <div className="w-full h-screen flex md:flex-row">
       {/* Cache-busting meta tag */}
       <meta httpEquiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
       <meta httpEquiv="Pragma" content="no-cache" />
       <meta httpEquiv="Expires" content="0" />
+      
+      {/* Mobile Search Bar - Float on map */}
+      <div className="md:hidden absolute top-4 left-4 right-4 z-[1000]">
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Search className="h-4 w-4 text-gray-400" />
+          </div>
+          <input
+            type="text"
+            placeholder="Search locations or postal code..."
+            value={searchTerm}
+            onChange={(e) => handleSearch(e.target.value)}
+            className="block w-full pl-10 pr-20 py-3 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-lg text-base"
+            style={{ fontSize: '16px' }} // Prevents zoom on iOS
+          />
+          <div className="absolute inset-y-0 right-0 flex items-center">
+            {searchTerm ? (
+              <button
+                onClick={() => handleSearch('')}
+                className="absolute inset-y-0 right-12 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+            <button
+              onClick={toggleLocationMode}
+              className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors ${
+                locationModeActive
+                  ? 'text-blue-600 hover:text-blue-700'
+                  : 'text-gray-400 hover:text-gray-600'
+              }`}
+              title={locationModeActive ? "Turn off location mode" : "Find my location"}
+            >
+              <Navigation className="h-4 w-4" />
+            </button>
+          </div>
+          
+        </div>
+      </div>
       
       {/* Sidebar */}
         <PublicMapSidebar
@@ -936,7 +1096,7 @@ const PublicMap: React.FC = () => {
         />
 
       {/* Map Container */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative h-full">
         <div 
           ref={mapRef} 
           className="w-full h-full bg-gray-100"
@@ -957,8 +1117,19 @@ const PublicMap: React.FC = () => {
               }`} />
             </button>
 
-        {/* Zoom Controls */}
-        <div className="absolute bottom-4 right-4 z-[1000] flex flex-col gap-1">
+            {/* Show Results Button - Only show when results panel is hidden and on mobile */}
+            {!showMobileResults && (
+              <button
+                onClick={() => setShowMobileResults(true)}
+                className="md:hidden absolute bottom-4 left-4 z-[1000] p-3 rounded-lg shadow-lg border bg-white hover:bg-gray-50 text-gray-700 border-gray-200 hover:border-gray-300 hover:shadow-xl transition-all duration-200"
+                title="Show locations list"
+              >
+                <List className="w-5 h-5" />
+              </button>
+            )}
+
+        {/* Zoom Controls - Desktop only */}
+        <div className="hidden md:flex absolute bottom-4 right-4 z-[1000] flex-col gap-1">
           <button
             onClick={zoomIn}
             className="bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
@@ -985,6 +1156,61 @@ const PublicMap: React.FC = () => {
           </div>
         )}
       </div>
+      
+      {/* Mobile Results Horizontal Bar - Ultra-thin and efficient */}
+      {showMobileResults && (
+        <div className="md:hidden absolute bottom-3 left-3 right-3 z-[1000]">
+          {/* Close button */}
+          <div className="flex justify-end mb-1">
+            <button
+              onClick={() => setShowMobileResults(false)}
+              className="p-1.5 bg-white/90 backdrop-blur-sm text-gray-500 hover:text-gray-700 rounded-full shadow-lg hover:bg-white transition-all"
+              title="Close results"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          
+          {/* Ultra-thin horizontal scrolling results */}
+          <div className="bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-white/20 overflow-hidden">
+            <div className="flex overflow-x-auto scrollbar-hide py-2 px-3 space-x-2">
+              {(searchTerm || locationModeActive ? searchResults : markers.sort(() => Math.random() - 0.5)).slice(0, 30).map((marker) => (
+                <button
+                  key={marker.id}
+                  onClick={() => navigateToMarker(marker)}
+                  className="flex-shrink-0 w-32 p-2 text-left bg-gray-50/80 hover:bg-gray-100/90 rounded-lg border border-gray-200/50 transition-all hover:shadow-sm"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-900 text-xs truncate leading-tight">
+                        {renamedMarkers[marker.id] || marker.name}
+                      </div>
+                      <div className="text-xs text-gray-500 truncate mt-0.5 leading-tight">
+                        {marker.address}
+                      </div>
+                      {userLocation && (
+                        <div className="text-xs text-blue-600 mt-0.5 leading-tight">
+                          {calculateDistance(userLocation.lat, userLocation.lng, marker.lat, marker.lng).toFixed(1)}km
+                        </div>
+                      )}
+                    </div>
+                    <MapPin className="h-2.5 w-2.5 text-gray-400 flex-shrink-0 ml-1" />
+                  </div>
+                </button>
+              ))}
+              
+              {(searchTerm || locationModeActive ? searchResults : markers).length === 0 && (
+                <div className="flex-shrink-0 w-full flex items-center justify-center py-4 text-gray-500">
+                  <div className="text-center">
+                    <MapPin className="h-6 w-6 mx-auto mb-1 text-gray-300" />
+                    <div className="text-xs">No locations found</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

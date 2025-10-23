@@ -3,10 +3,11 @@ import L from 'leaflet'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
-import { Navigation, MapPin, Search, X } from 'lucide-react'
+import { Navigation, MapPin, Search, X, List } from 'lucide-react'
 import { Rnd } from 'react-rnd'
 import PublicMapSidebar from './PublicMapSidebar'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
+import { useResponsive } from '../hooks/useResponsive'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -49,6 +50,7 @@ interface MapProps {
 }
 
 const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMode, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {} }) => {
+  const { isMobile } = useResponsive()
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<L.Map | null>(null)
   const markersRef = useRef<L.Marker[]>([])
@@ -59,6 +61,8 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   const tileLayerRef = useRef<L.TileLayer | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [isLoadingTiles, setIsLoadingTiles] = useState(false)
+  const [showMobileResults, setShowMobileResults] = useState(false)
+  const [showEmbedMobileResults, setShowEmbedMobileResults] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [nearbyMarkers, setNearbyMarkers] = useState<Marker[]>([])
   const [showNearbyPlaces, setShowNearbyPlaces] = useState(false)
@@ -511,8 +515,8 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
         tileOptions.attribution = '© OpenStreetMap contributors © CARTO'
         break
       case 'toner':
-        tileUrl = 'https://api.maptiler.com/maps/toner/{z}/{x}/{y}.png?key=get_your_own_OpIi9ZULNHzrESv6T2vL'
-        tileOptions.attribution = '© MapTiler © OpenStreetMap contributors'
+        tileUrl = 'https://stamen-tiles-{s}.a.ssl.fastly.net/toner/{z}/{x}/{y}{r}.png'
+        tileOptions.attribution = '© OpenStreetMap contributors © Stamen Design'
         break
       case 'satellite':
         tileUrl = 'https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key=get_your_own_OpIi9ZULNHzrESv6T2vL'
@@ -668,6 +672,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   }, [])
 
   console.log('Map component rendering, markers:', markers, 'mapLoaded:', mapLoaded, 'userLocation:', userLocation)
+  console.log('Debug - isMobile:', isMobile, 'showMobileResults:', showMobileResults)
 
   return (
     <div className={`flex-1 bg-gray-100 relative ${isPublishMode ? 'publish-mode overflow-visible' : ''}`}>
@@ -676,10 +681,13 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
         <div className="w-full h-full relative overflow-visible">
           {/* Resizable Preview Container - Full Page */}
           <Rnd
-            size={{ width: iframeDimensions.width, height: iframeDimensions.height }}
-            position={{ x: 0, y: 0 }}
-            minWidth={300}
-            minHeight={200}
+            size={{ 
+              width: isMobile ? Math.min(iframeDimensions.width, window.innerWidth - 32) : iframeDimensions.width, 
+              height: isMobile ? Math.min(iframeDimensions.height, window.innerHeight - 100) : iframeDimensions.height 
+            }}
+            position={{ x: isMobile ? 16 : 0, y: isMobile ? 16 : 0 }}
+            minWidth={isMobile ? 280 : 300}
+            minHeight={isMobile ? 200 : 200}
             bounds="parent"
             onResize={(_, __, ref) => {
               const newWidth = parseInt(ref.style.width)
@@ -687,42 +695,123 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
               onIframeDimensionsChange({ width: newWidth, height: newHeight })
             }}
             enableResizing={{
-              top: true,
-              right: true,
-              bottom: true,
-              left: true,
-              topRight: true,
-              bottomRight: true,
-              bottomLeft: true,
-              topLeft: true
+              top: !isMobile,
+              right: !isMobile,
+              bottom: !isMobile,
+              left: !isMobile,
+              topRight: !isMobile,
+              bottomRight: !isMobile,
+              bottomLeft: !isMobile,
+              topLeft: !isMobile
             }}
-            className="z-50"
+            className="z-10"
             style={{
               border: '3px dashed #3B82F6',
-              borderRadius: '12px',
+              borderRadius: isMobile ? '8px' : '12px',
               backgroundColor: 'rgba(255, 255, 255, 0.98)',
-              backdropFilter: 'blur(8px)',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.15)'
+              boxShadow: isMobile ? '0 10px 20px rgba(0, 0, 0, 0.1)' : '0 20px 40px rgba(0, 0, 0, 0.15)',
+              maxWidth: isMobile ? 'calc(100vw - 32px)' : 'none',
+              maxHeight: isMobile ? 'calc(100vh - 100px)' : 'none'
             }}
           >
             <div className="w-full h-full flex flex-col">
               {/* Header */}
-              <div className="flex items-center justify-between p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200">
+              <div className={`flex items-center justify-between ${isMobile ? 'p-2' : 'p-3'} bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200`}>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                  <div className="text-sm font-semibold text-blue-800">
+                  <div className={`${isMobile ? 'text-xs' : 'text-sm'} font-semibold text-blue-800`}>
                     Embed Preview
                   </div>
                 </div>
-                <div className="text-sm text-blue-600 font-mono bg-white px-3 py-1 rounded border border-blue-200">
-                  {iframeDimensions.width} × {iframeDimensions.height}px
+                <div className="flex items-center gap-2">
+                  <div className={`${isMobile ? 'text-xs px-2 py-1' : 'text-sm px-3 py-1'} text-blue-600 font-mono bg-white rounded border border-blue-200`}>
+                    {iframeDimensions.width} × {iframeDimensions.height}px
+                  </div>
+                  {isMobile && (
+                    <button
+                      onClick={() => {/* Close embed preview - would need to be passed as prop */}}
+                      className="p-1 hover:bg-blue-100 rounded transition-colors"
+                      title="Close preview"
+                    >
+                      <X className="w-4 h-4 text-blue-600" />
+                    </button>
+                  )}
                 </div>
               </div>
+              
+              {/* Show Results Button - Only show in mobile-sized embed preview */}
+              {isMobile && !showEmbedMobileResults && (
+                <button
+                  onClick={() => setShowEmbedMobileResults(true)}
+                  className="absolute bottom-2 left-2 z-[1000] p-2 rounded-lg shadow-lg border bg-white hover:bg-gray-50 text-gray-700 border-gray-200 hover:border-gray-300 hover:shadow-xl transition-all duration-200"
+                  style={{
+                    minWidth: '36px',
+                    minHeight: '36px'
+                  }}
+                  title="Show locations list"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+              )}
+              
+              {/* Mobile Results Horizontal Bar - Always show in embed preview */}
+              {showEmbedMobileResults && (
+                <div className="absolute bottom-3 left-3 right-3 z-[1000]">
+                  {/* Close button */}
+                  <div className="flex justify-end mb-1">
+                    <button
+                      onClick={() => setShowEmbedMobileResults(false)}
+                      className="p-1.5 bg-white/90 backdrop-blur-sm text-gray-500 hover:text-gray-700 rounded-full shadow-lg hover:bg-white transition-all"
+                      title="Close results"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                  
+                  {/* Ultra-thin horizontal scrolling results */}
+                  <div className="bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-white/20 overflow-hidden">
+                    <div className="flex overflow-x-auto scrollbar-hide py-2 px-3 space-x-2">
+                      {(searchTerm || locationModeActive ? searchResults : markers.sort(() => Math.random() - 0.5)).slice(0, 30).map((marker) => (
+                        <button
+                          key={marker.id}
+                          onClick={() => navigateToMarker(marker)}
+                          className="flex-shrink-0 w-32 p-2 text-left bg-gray-50/80 hover:bg-gray-100/90 rounded-lg border border-gray-200/50 transition-all hover:shadow-sm"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-900 text-xs truncate leading-tight">
+                                {marker.name}
+                              </div>
+                              <div className="text-xs text-gray-500 truncate mt-0.5 leading-tight">
+                                {marker.address}
+                              </div>
+                              {userLocation && (
+                                <div className="text-xs text-blue-600 mt-0.5 leading-tight">
+                                  {calculateDistance(userLocation.lat, userLocation.lng, marker.lat, marker.lng).toFixed(1)}km
+                                </div>
+                              )}
+                            </div>
+                            <MapPin className="h-2.5 w-2.5 text-gray-400 flex-shrink-0 ml-1" />
+                          </div>
+                        </button>
+                      ))}
+                      
+                      {(searchTerm || locationModeActive ? searchResults : markers).length === 0 && (
+                        <div className="flex-shrink-0 w-full flex items-center justify-center py-4 text-gray-500">
+                          <div className="text-center">
+                            <div className="text-sm">No locations found</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
               
               {/* Actual Map Content */}
               <div className="flex-1 flex overflow-hidden">
                 {/* Sidebar */}
-                <div className="w-80 flex-shrink-0">
+                <div className={`${isMobile ? 'hidden' : 'w-80'} flex-shrink-0`}>
                   <PublicMapSidebar
                     searchTerm={searchTerm}
                     onSearchChange={handleSearch}
@@ -751,20 +840,45 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                     }} 
                   />
                   
-                  {/* Location Button */}
-                  <button
-                    onClick={locationModeActive ? clearLocationMode : getCurrentLocation}
-                    className={`absolute top-2 right-2 rounded p-1 shadow z-10 transition-all duration-200 ${
-                      locationModeActive 
-                        ? 'bg-blue-50 border border-blue-300 hover:bg-blue-100' 
-                        : 'bg-white hover:bg-gray-50 border border-gray-300'
-                    }`}
-                    title={locationModeActive ? "Clear location mode" : "Use my location"}
-                  >
-                    <Navigation className={`w-3 h-3 transition-colors ${
-                      locationModeActive ? 'text-blue-600' : 'text-gray-700'
-                    }`} />
-                  </button>
+              {/* Mobile Search Bar - Always show in embed preview */}
+              <div className="absolute top-2 left-2 right-2 z-[1000]">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search className="h-4 w-4 text-gray-400" />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Search locations or postal code..."
+                    value={searchTerm}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    className="block w-full pl-10 pr-20 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-lg text-sm"
+                    style={{ fontSize: '16px' }} // Prevents zoom on iOS
+                  />
+                  <div className="absolute inset-y-0 right-0 flex items-center">
+                    {searchTerm ? (
+                      <button
+                        onClick={() => handleSearch('')}
+                        className="absolute inset-y-0 right-12 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                    <button
+                      onClick={locationModeActive ? clearLocationMode : getCurrentLocation}
+                      className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors ${
+                        locationModeActive
+                          ? 'text-blue-600 hover:text-blue-700'
+                          : 'text-gray-400 hover:text-gray-600'
+                      }`}
+                      title={locationModeActive ? "Turn off location mode" : "Find my location"}
+                    >
+                      <Navigation className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+                  
+                  {/* Location Button - Hidden in embed preview since mobile search bar has location button */}
                 </div>
               </div>
             </div>

@@ -75,10 +75,104 @@ const EmbedMap: React.FC = () => {
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null)
   const [nearbyMarkers, setNearbyMarkers] = useState<Marker[]>([])
   const [showNearbyPlaces, setShowNearbyPlaces] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   // Get map ID from URL parameters
   const mapId = searchParams.get('mapId')
   const userId = searchParams.get('userId')
+
+  // Mobile detection and responsive behavior - Force mobile detection
+  useEffect(() => {
+    const checkMobile = () => {
+      // More aggressive mobile detection
+      const screenWidth = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth
+      const userAgent = navigator.userAgent.toLowerCase()
+      
+      // Force mobile for testing - remove this line in production
+      const forceMobile = window.location.search.includes('mobile=true')
+      
+      // Check if we're in an iframe
+      const inIframe = window !== window.top
+      
+      const mobile = 
+        forceMobile ||
+        screenWidth <= 768 || 
+        /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini|mobile/i.test(userAgent) ||
+        ('ontouchstart' in window) ||
+        (navigator.maxTouchPoints > 0) ||
+        // Additional mobile detection for iframe contexts
+        (inIframe && screenWidth <= 1024) ||
+        // Force mobile for any touch device
+        ('ontouchstart' in window && screenWidth <= 1024)
+      
+      console.log('🔍 Mobile detection:', {
+        screenWidth,
+        userAgent: navigator.userAgent,
+        hasTouch: 'ontouchstart' in window,
+        maxTouchPoints: navigator.maxTouchPoints,
+        forceMobile,
+        inIframe,
+        isMobile: mobile,
+        windowWidth: window.innerWidth,
+        documentWidth: document.documentElement.clientWidth
+      })
+      
+      // Additional debugging
+      console.log('📱 Mobile search bar should show:', mobile || window.location.search.includes('mobile=true'))
+      
+      setIsMobile(mobile)
+      
+      // Force mobile class on body if mobile detected
+      if (mobile) {
+        document.body.classList.add('mobile-embed')
+        document.documentElement.classList.add('mobile-embed')
+        console.log('📱 Mobile mode activated!')
+        
+        // Force mobile styles immediately
+        document.body.style.setProperty('--mobile-mode', '1', 'important')
+        document.documentElement.style.setProperty('--mobile-mode', '1', 'important')
+      } else {
+        document.body.classList.remove('mobile-embed')
+        document.documentElement.classList.remove('mobile-embed')
+        console.log('🖥️ Desktop mode activated!')
+        
+        // Remove mobile styles
+        document.body.style.removeProperty('--mobile-mode')
+        document.documentElement.style.removeProperty('--mobile-mode')
+      }
+    }
+    
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    window.addEventListener('orientationchange', checkMobile)
+    
+    return () => {
+      window.removeEventListener('resize', checkMobile)
+      window.removeEventListener('orientationchange', checkMobile)
+    }
+  }, [])
+
+  // Send message to parent window to request responsive iframe styling
+  useEffect(() => {
+    const requestResponsiveIframe = () => {
+      try {
+        // Send message to parent window requesting responsive iframe styling
+        window.parent.postMessage({
+          type: 'MAPIES_REQUEST_RESPONSIVE_IFRAME',
+          source: 'mapies-embed'
+        }, '*')
+        console.log('📤 Sent request to parent for responsive iframe styling')
+      } catch (e) {
+        console.log('📤 Could not send message to parent (cross-origin)')
+      }
+    }
+
+    // Request responsive styling after a short delay
+    const timeoutId = setTimeout(requestResponsiveIframe, 100)
+    
+    return () => clearTimeout(timeoutId)
+  }, [])
 
   // Initialize map
   useEffect(() => {
@@ -90,13 +184,18 @@ const EmbedMap: React.FC = () => {
       center: [45.5017, -73.5673],
       zoom: 10,
       attributionControl: false,
-      zoomControl: false,
+      zoomControl: !isMobile, // Show zoom controls on mobile for better UX
       zoomAnimation: true,
       fadeAnimation: true,
       markerZoomAnimation: true,
       // Fix tile flashing during zoom
       preferCanvas: false,
-      zoomAnimationThreshold: 4
+      zoomAnimationThreshold: 4,
+      // Mobile-specific options
+      touchZoom: true,
+      doubleClickZoom: true,
+      scrollWheelZoom: !isMobile, // Disable scroll wheel zoom on mobile to prevent conflicts
+      dragging: true
     })
 
     // Add simple tile layer
@@ -346,8 +445,8 @@ const EmbedMap: React.FC = () => {
         tileOptions.attribution = '© OpenStreetMap contributors © CARTO'
         break
       case 'toner':
-        tileUrl = 'https://api.maptiler.com/maps/toner/{z}/{x}/{y}.png?key=get_your_own_OpIi9ZULNHzrESv6T2vL'
-        tileOptions.attribution = '© MapTiler © OpenStreetMap contributors'
+        tileUrl = 'https://stamen-tiles-{s}.a.ssl.fastly.net/toner/{z}/{x}/{y}{r}.png'
+        tileOptions.attribution = '© OpenStreetMap contributors © Stamen Design'
         break
       case 'satellite':
         tileUrl = 'https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key=get_your_own_OpIi9ZULNHzrESv6T2vL'
@@ -447,6 +546,26 @@ const EmbedMap: React.FC = () => {
     return 11 // This level works well for 5km radius circles
   }
 
+  // Mobile search function
+  const handleMobileSearch = () => {
+    if (!searchQuery.trim()) return
+    
+    const filteredMarkers = markers.filter(marker => 
+      marker.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      marker.address.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    
+    if (filteredMarkers.length > 0 && mapInstance.current) {
+      // Show first result
+      const firstMarker = filteredMarkers[0]
+      mapInstance.current.setView([firstMarker.lat, firstMarker.lng], 15)
+      
+      // Show all filtered markers in a mobile-friendly list
+      setNearbyMarkers(filteredMarkers)
+      setShowNearbyPlaces(true)
+    }
+  }
+
   // Get current location
   const getCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -457,8 +576,15 @@ const EmbedMap: React.FC = () => {
 
     // Check if we're in an iframe and warn user
     const isInIframe = window !== window.top
-    if (isInIframe) {
-      console.log('Running in iframe - geolocation may require user permission')
+    
+    if (isInIframe && isMobile) {
+      console.log('Running in iframe on mobile - geolocation may require user permission')
+      // Show a more helpful message for mobile iframe users
+      if (confirm('To find your location, you may need to allow location access in your browser. Continue?')) {
+        // User confirmed, proceed with geolocation
+      } else {
+        return
+      }
     }
 
     navigator.geolocation.getCurrentPosition(
@@ -563,21 +689,71 @@ const EmbedMap: React.FC = () => {
   }
 
   return (
-    <div className="w-full h-full relative">
+    <div className="w-full h-full relative embed-map-container">
       <div ref={mapRef} className="w-full h-full" />
       
-      {/* Location Button */}
-      <button
-        onClick={getCurrentLocation}
-        className="absolute top-4 right-4 z-[1000] bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
-        title="Find my location"
-      >
-        <Navigation className="w-5 h-5" />
-      </button>
+           {/* Mobile Search Bar - Show on mobile or in iframe */}
+           {(isMobile || window.location.search.includes('mobile=true') || (window !== window.top && window.innerWidth <= 1024)) && (
+             <div className="absolute top-0 left-0 right-0 z-[1000] mobile-search-container" style={{
+               backgroundColor: 'rgba(255, 255, 255, 0.95)',
+               backdropFilter: 'blur(10px)',
+               padding: '1rem',
+               borderBottom: '1px solid #e5e7eb'
+             }}>
+               <div className="flex gap-2">
+                 <div className="flex-1 relative">
+                   <input
+                     type="text"
+                     placeholder="🔍 Search 255 locations..."
+                     value={searchQuery}
+                     onChange={(e) => setSearchQuery(e.target.value)}
+                     onKeyPress={(e) => e.key === 'Enter' && handleMobileSearch()}
+                     className="w-full px-4 py-3 pr-12 rounded-lg border border-gray-300 shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base mobile-search-input"
+                     style={{ 
+                       backgroundColor: '#ffffff',
+                       color: '#374151',
+                       fontSize: '16px' // Prevents zoom on iOS
+                     }}
+                   />
+                   <button
+                     onClick={handleMobileSearch}
+                     className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 text-gray-500 hover:text-gray-700"
+                   >
+                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                     </svg>
+                   </button>
+                 </div>
+                 <button
+                   onClick={getCurrentLocation}
+                   className="bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors mobile-location-btn"
+                   title="Find my location"
+                 >
+                   <Navigation className="w-5 h-5" />
+                 </button>
+               </div>
+               <div className="mt-2 text-center">
+                 <span className="text-xs text-gray-600 bg-white px-2 py-1 rounded-full shadow-sm">
+                   📱 Search bar - isMobile: {isMobile ? 'true' : 'false'} | Width: {window.innerWidth}px
+                 </span>
+               </div>
+             </div>
+           )}
+      
+      {/* Desktop Location Button */}
+      {!isMobile && (
+        <button
+          onClick={getCurrentLocation}
+          className="absolute top-4 right-4 z-[1000] bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
+          title="Find my location"
+        >
+          <Navigation className="w-5 h-5" />
+        </button>
+      )}
 
-      {/* Nearby Places Panel */}
+      {/* Nearby Places Panel - Mobile Responsive */}
       {showNearbyPlaces && nearbyMarkers.length > 0 && (
-        <div className="absolute top-4 left-4 z-[1000] w-80 rounded-lg shadow-lg border border-gray-200 max-h-96 overflow-hidden" style={{ backgroundColor: mapSettings.searchBarBackgroundColor }}>
+        <div className={`absolute z-[1000] rounded-lg shadow-lg border border-gray-200 max-h-96 overflow-hidden mobile-nearby-panel ${isMobile ? 'top-20 left-4 right-4' : 'top-4 left-4 w-80'}`} style={{ backgroundColor: mapSettings.searchBarBackgroundColor }}>
           <div className="p-3 border-b border-gray-200 bg-blue-50">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-blue-900">📍 Places Near You</h3>
@@ -603,13 +779,14 @@ const EmbedMap: React.FC = () => {
                       setShowNearbyPlaces(false)
                     }
                   }}
-                  className="w-full flex items-center gap-3 p-3 transition-colors text-left border-b border-gray-100 last:border-b-0"
+                  className="w-full flex items-center gap-3 p-3 transition-colors text-left border-b border-gray-100 last:border-b-0 touch-manipulation"
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = mapSettings.searchBarHoverColor
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = 'transparent'
                   }}
+                  style={{ minHeight: '60px' }} // Ensure touch-friendly height
                 >
                   <div className="flex-shrink-0">
                     <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">

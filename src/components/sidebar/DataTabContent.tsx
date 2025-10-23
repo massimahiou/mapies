@@ -1,22 +1,38 @@
 import React from 'react'
-import { Plus, Upload } from 'lucide-react'
+import { Plus, Upload, Maximize2 } from 'lucide-react'
 
 interface DataTabContentProps {
   onShowAddMarkerModal: () => void
   onShowCsvModal: () => void
   isUploading?: boolean
   uploadProgress?: { processed: number; total: number; currentAddress: string }
+  onOpenModal?: () => void
 }
 
 const DataTabContent: React.FC<DataTabContentProps> = ({
   onShowAddMarkerModal,
   onShowCsvModal,
   isUploading = false,
-  uploadProgress = { processed: 0, total: 0, currentAddress: '' }
+  uploadProgress = { processed: 0, total: 0, currentAddress: '' },
+  onOpenModal
 }) => {
   return (
     <div className="p-4">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Add Data</h3>
+      {/* Header with Modal Button */}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-gray-900">Add Data</h3>
+        {onOpenModal && (
+          <button
+            onClick={onOpenModal}
+            className="hidden sm:flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            title="Open in full screen"
+          >
+            <Maximize2 className="w-4 h-4" />
+            Open in Modal
+          </button>
+        )}
+      </div>
+      
       <div className="space-y-3">
         <button
           onClick={() => {

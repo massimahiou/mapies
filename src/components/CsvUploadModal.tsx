@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { X, Download, FileText, ArrowRight } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 import Papa from 'papaparse'
@@ -43,7 +43,9 @@ const CsvUploadModal: React.FC<CsvUploadModalProps> = ({
     lng: null
   })
 
-  console.log('CsvUploadModal rendering, isOpen:', isOpen)
+  console.log('🔍 CsvUploadModal rendering, isOpen:', isOpen)
+  console.log('🔍 CsvUploadModal props:', { isOpen, isUploading, uploadError, uploadProgress })
+  console.log('🔍 CsvUploadModal component stack:', new Error().stack)
 
   // Dropzone configuration
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -191,18 +193,29 @@ const CsvUploadModal: React.FC<CsvUploadModalProps> = ({
   }
 
   // Reset modal state
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setStep('upload')
     setSelectedFile(null)
     setCsvPreview(null)
     setColumnMapping({ name: null, address: null, lat: null, lng: null })
     onClose()
-  }
+  }, [onClose])
+
+  // Auto-close modal when upload is complete
+  useEffect(() => {
+    if (uploadProgress.currentAddress === 'Complete' && !isUploading) {
+      const timer = setTimeout(() => {
+        handleClose()
+      }, 2000) // Close after 2 seconds
+      
+      return () => clearTimeout(timer)
+    }
+  }, [uploadProgress.currentAddress, isUploading, handleClose])
 
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10001]">
       <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">
@@ -403,7 +416,7 @@ const CsvUploadModal: React.FC<CsvUploadModalProps> = ({
           </>
         )}
 
-        {/* Step 3: Processing Preview */}
+        {/* Step 3: Processing Complete */}
         {step === 'preview' && (
           <>
             {uploadError && (
@@ -412,43 +425,19 @@ const CsvUploadModal: React.FC<CsvUploadModalProps> = ({
               </div>
             )}
 
-            {isUploading && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm text-blue-600">Processing markers...</p>
-                  <p className="text-xs text-blue-500">
-                    {uploadProgress.total > 0 ? `${uploadProgress.processed}/${uploadProgress.total} markers loaded` : 'Preparing...'}
-                  </p>
-                </div>
-                <div className="w-full bg-blue-200 rounded-full h-2">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                    style={{ 
-                      width: uploadProgress.total > 0 
-                        ? `${(uploadProgress.processed / uploadProgress.total) * 100}%` 
-                        : '0%' 
-                    }}
-                  ></div>
-                </div>
-                {uploadProgress.currentAddress && uploadProgress.currentAddress !== 'Complete' && (
-                  <p className="text-xs text-blue-500 mt-2 truncate">
-                    Currently processing: {uploadProgress.currentAddress}
-                  </p>
-                )}
-                {uploadProgress.currentAddress === 'Complete' && (
-                  <p className="text-xs text-green-600 mt-2 font-medium">
-                    ✅ Upload complete! {uploadProgress.processed} markers added to map.
-                  </p>
-                )}
+            <div className="text-center py-8">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
               </div>
-            )}
-
-            <div className="mt-4 flex gap-2">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Your Data</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Your data is being processed. Please do not close the page until it finishes.
+              </p>
               <button
                 onClick={handleClose}
-                className="flex-1 btn-secondary"
+                className="btn-primary"
               >
-                Close
+                Understood!
               </button>
             </div>
           </>

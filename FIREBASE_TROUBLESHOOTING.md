@@ -86,3 +86,9 @@ The app now includes debug logging. Check the browser console for:
 3. Report any console errors
 4. Try alternative configuration if needed
 
+
+
+
+
+
+

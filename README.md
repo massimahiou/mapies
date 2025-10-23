@@ -146,3 +146,9 @@ For support, email support@mapies.com or create an issue in this repository.
 ---
 
 **Mapies** - Making maps interactive and accessible for everyone! 🗺️✨
+
+
+
+
+
+

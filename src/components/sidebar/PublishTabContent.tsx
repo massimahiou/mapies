@@ -1,14 +1,16 @@
 import React from 'react'
-import { Globe, Copy } from 'lucide-react'
+import { Globe, Copy, Maximize2 } from 'lucide-react'
 
 interface PublishTabContentProps {
   onShowPublishModal: () => void
   currentMapId: string | null
+  onOpenModal?: () => void
 }
 
 const PublishTabContent: React.FC<PublishTabContentProps> = ({
   onShowPublishModal,
-  currentMapId
+  currentMapId,
+  onOpenModal
 }) => {
   const generatePublicUrl = () => {
     if (!currentMapId) {
@@ -29,7 +31,20 @@ const PublishTabContent: React.FC<PublishTabContentProps> = ({
 
   return (
     <div className="p-4">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Publish Your Map</h3>
+      {/* Header with Modal Button */}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-gray-900">Publish Your Map</h3>
+        {onOpenModal && (
+          <button
+            onClick={onOpenModal}
+            className="hidden sm:flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            title="Open in full screen"
+          >
+            <Maximize2 className="w-4 h-4" />
+            Open in Modal
+          </button>
+        )}
+      </div>
       
       {/* Public Share Section */}
       <div className="mb-6">

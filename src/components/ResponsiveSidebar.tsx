@@ -32,6 +32,10 @@ interface ResponsiveSidebarProps {
   onShowCsvModal: () => void
   onShowAddMarkerModal: () => void
   onShowPublishModal: () => void
+  onOpenMarkerManagementModal: () => void
+  onOpenDataManagementModal: () => void
+  onOpenEditManagementModal: () => void
+  onOpenPublishManagementModal: () => void
   mapSettings: any
   onMapSettingsChange: (settings: any) => void
   currentMapId: string | null
@@ -41,8 +45,6 @@ interface ResponsiveSidebarProps {
   isUploading?: boolean
   uploadProgress?: { processed: number; total: number; currentAddress: string }
   onSignOut: () => void
-  nameRules: Array<{ id: string; contains: string; renameTo: string }>
-  onNameRulesChange: (rules: Array<{ id: string; contains: string; renameTo: string }>) => void
   userId: string
 }
 
@@ -90,6 +92,7 @@ const ResponsiveSidebar: React.FC<ResponsiveSidebarProps> = (props) => {
               onShowCsvModal={props.onShowCsvModal}
               isUploading={props.isUploading}
               uploadProgress={props.uploadProgress}
+              onOpenModal={props.onOpenDataManagementModal}
             />
           )}
           
@@ -100,10 +103,11 @@ const ResponsiveSidebar: React.FC<ResponsiveSidebarProps> = (props) => {
               onSearchChange={props.onSearchChange}
               onToggleMarkerVisibility={props.onToggleMarkerVisibility}
               onDeleteMarker={props.onDeleteMarker}
-              nameRules={props.nameRules}
-              onNameRulesChange={props.onNameRulesChange}
+              mapSettings={props.mapSettings}
+              onMapSettingsChange={props.onMapSettingsChange}
               userId={props.userId}
               mapId={props.currentMapId || undefined}
+              onOpenModal={props.onOpenMarkerManagementModal}
             />
           )}
           
@@ -111,6 +115,7 @@ const ResponsiveSidebar: React.FC<ResponsiveSidebarProps> = (props) => {
             <EditTabContent
               mapSettings={props.mapSettings}
               onMapSettingsChange={props.onMapSettingsChange}
+              onOpenModal={props.onOpenEditManagementModal}
             />
           )}
           
@@ -118,6 +123,7 @@ const ResponsiveSidebar: React.FC<ResponsiveSidebarProps> = (props) => {
             <PublishTabContent
               onShowPublishModal={props.onShowPublishModal}
               currentMapId={props.currentMapId}
+              onOpenModal={props.onOpenPublishManagementModal}
             />
           )}
         </MobileContentPanel>

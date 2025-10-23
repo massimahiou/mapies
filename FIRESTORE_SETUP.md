@@ -97,3 +97,9 @@ Once rules are set up:
 3. Test marker saving
 4. Test map settings saving
 
+
+
+
+
+
+

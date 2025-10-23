@@ -3,6 +3,7 @@ import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 import { getStorage } from 'firebase/storage'
 import { getAnalytics } from 'firebase/analytics'
+import { getFunctions } from 'firebase/functions'
 
 // Firebase configuration
 const firebaseConfig = {
@@ -29,5 +30,8 @@ export const storage = getStorage(app)
 
 // Initialize Analytics (only in browser environment)
 export const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null
+
+// Initialize Firebase Functions and get a reference to the service
+export const functions = getFunctions(app)
 
 export default app

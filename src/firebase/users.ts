@@ -31,9 +31,24 @@ export interface UserDocument {
     notifications: boolean
   }
   subscription?: {
-    plan: 'free' | 'pro' | 'enterprise'
+    plan: 'free' | 'pro' | 'enterprise' | 'freemium' | 'premium'
     status: 'active' | 'inactive' | 'cancelled'
     expiresAt?: Date
+    stripeCustomerId?: string
+  }
+  limits?: {
+    maps: number
+    markers: number
+    storage: number
+    maxMaps: number
+    maxMarkersPerMap: number
+  }
+  usage?: {
+    maps: number
+    markers: number
+    storage: number
+    mapsCount: number
+    markersCount: number
   }
 }
 
@@ -165,6 +180,23 @@ export const updateLastLogin = async (uid: string): Promise<void> => {
   } catch (error) {
     console.error('Error updating last login:', error)
     // Don't throw error for last login update failures
+  }
+}
+
+// Update subscription plan
+export const updateSubscriptionPlan = async (uid: string, plan: 'free' | 'pro' | 'enterprise' | 'freemium' | 'premium', stripeCustomerId?: string): Promise<void> => {
+  try {
+    const userRef = doc(db, 'users', uid)
+    await updateDoc(userRef, {
+      'subscription.plan': plan,
+      'subscription.status': 'active',
+      'subscription.stripeCustomerId': stripeCustomerId,
+      updatedAt: serverTimestamp()
+    })
+    console.log('Subscription plan updated successfully:', uid, plan)
+  } catch (error) {
+    console.error('Error updating subscription plan:', error)
+    throw error
   }
 }
 

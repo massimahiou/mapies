@@ -1,4 +1,5 @@
 import React from 'react'
+import { Maximize2 } from 'lucide-react'
 
 interface MapSettings {
   style: string
@@ -21,15 +22,30 @@ interface MapSettings {
 interface EditTabContentProps {
   mapSettings: MapSettings
   onMapSettingsChange: (settings: MapSettings) => void
+  onOpenModal?: () => void
 }
 
 const EditTabContent: React.FC<EditTabContentProps> = ({
   mapSettings,
-  onMapSettingsChange
+  onMapSettingsChange,
+  onOpenModal
 }) => {
   return (
     <div className="p-4">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Map Settings</h3>
+      {/* Header with Modal Button */}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-gray-900">Map Settings</h3>
+        {onOpenModal && (
+          <button
+            onClick={onOpenModal}
+            className="hidden sm:flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            title="Open in full screen"
+          >
+            <Maximize2 className="w-4 h-4" />
+            Open in Modal
+          </button>
+        )}
+      </div>
       
       {/* Map Style */}
       <div className="mb-6">

@@ -1,0 +1,122 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.createCustomerPortalSession = exports.createCheckoutSession = void 0;
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+const stripe_1 = require("stripe");
+// Initialize Firebase Admin if not already initialized
+if (!admin.apps.length) {
+    admin.initializeApp();
+}
+const stripe = new stripe_1.default(functions.config().stripe.secret_key, {
+    apiVersion: '2023-10-16',
+});
+exports.createCheckoutSession = functions.https.onCall(async (data, context) => {
+    try {
+        // Verify user is authenticated
+        if (!context.auth) {
+            throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+        }
+        const { priceId, userId, userEmail } = data;
+        if (!priceId || !userId || !userEmail) {
+            throw new functions.https.HttpsError('invalid-argument', 'Missing required parameters');
+        }
+        // Get or create Stripe customer
+        let customerId;
+        try {
+            // Try to find existing customer by email
+            const customers = await stripe.customers.list({
+                email: userEmail,
+                limit: 1
+            });
+            if (customers.data.length > 0) {
+                customerId = customers.data[0].id;
+            }
+            else {
+                // Create new customer
+                const customer = await stripe.customers.create({
+                    email: userEmail,
+                    metadata: {
+                        userId: userId
+                    }
+                });
+                customerId = customer.id;
+            }
+        }
+        catch (error) {
+            console.error('Error managing Stripe customer:', error);
+            throw new functions.https.HttpsError('internal', 'Failed to manage customer');
+        }
+        // Create checkout session
+        const sessionConfig = {
+            customer: customerId,
+            payment_method_types: ['card'],
+            line_items: [
+                {
+                    price: priceId,
+                    quantity: 1,
+                },
+            ],
+            mode: 'subscription',
+            allow_promotion_codes: true,
+            success_url: `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard?subscription=success`,
+            cancel_url: `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard?subscription=cancelled`,
+            metadata: {
+                userId: userId,
+                userEmail: userEmail
+            },
+            subscription_data: {
+                metadata: {
+                    userId: userId,
+                    userEmail: userEmail
+                }
+            },
+            // Additional configuration to ensure promotion codes work
+            payment_method_options: {
+                card: {
+                    request_three_d_secure: 'automatic'
+                }
+            }
+        };
+        const session = await stripe.checkout.sessions.create(sessionConfig);
+        return {
+            sessionId: session.id,
+            url: session.url
+        };
+    }
+    catch (error) {
+        console.error('Error creating checkout session:', error);
+        if (error instanceof functions.https.HttpsError) {
+            throw error;
+        }
+        throw new functions.https.HttpsError('internal', 'Failed to create checkout session');
+    }
+});
+exports.createCustomerPortalSession = functions.https.onCall(async (data, context) => {
+    try {
+        // Verify user is authenticated
+        if (!context.auth) {
+            throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+        }
+        const { customerId } = data;
+        if (!customerId) {
+            throw new functions.https.HttpsError('invalid-argument', 'Customer ID is required');
+        }
+        // Create customer portal session
+        const session = await stripe.billingPortal.sessions.create({
+            customer: customerId,
+            return_url: `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard`,
+        });
+        return {
+            url: session.url
+        };
+    }
+    catch (error) {
+        console.error('Error creating customer portal session:', error);
+        if (error instanceof functions.https.HttpsError) {
+            throw error;
+        }
+        throw new functions.https.HttpsError('internal', 'Failed to create customer portal session');
+    }
+});
+//# sourceMappingURL=checkout.js.map

@@ -9,6 +9,7 @@ import {
   getDoc,
   query, 
   orderBy,
+  where,
   onSnapshot,
   serverTimestamp
 } from 'firebase/firestore'
@@ -50,6 +51,26 @@ export interface MapDocument {
     markerCount: number
     lastUpdated: Date
   }
+  // Sharing settings
+  sharing?: {
+    isShared: boolean
+    sharedWith: SharedUser[]
+    permissions: {
+      canEdit: boolean
+      canDelete: boolean
+      canShare: boolean
+    }
+  }
+}
+
+// Shared user interface
+export interface SharedUser {
+  email: string
+  userId?: string
+  role: 'viewer' | 'editor' | 'admin'
+  invitedAt: Date
+  acceptedAt?: Date
+  invitedBy: string
 }
 
 // Marker interface (updated for new structure)
@@ -528,5 +549,185 @@ export const subscribeToMapDocument = (
       callback(null)
     }
   })
+}
+
+// Share map with user by email
+export const shareMapWithUser = async (
+  mapId: string,
+  ownerId: string,
+  email: string,
+  role: 'viewer' | 'editor' | 'admin' = 'viewer'
+): Promise<void> => {
+  try {
+    const mapRef = doc(db, 'users', ownerId, 'maps', mapId)
+    const mapDoc = await getDoc(mapRef)
+    
+    if (!mapDoc.exists()) {
+      throw new Error('Map not found')
+    }
+    
+    const mapData = mapDoc.data() as MapDocument
+    const currentSharing = mapData.sharing || {
+      isShared: false,
+      sharedWith: [],
+      permissions: {
+        canEdit: true,
+        canDelete: true,
+        canShare: true
+      }
+    }
+    
+    // Check if user is already shared
+    const existingUser = currentSharing.sharedWith.find(user => user.email === email)
+    if (existingUser) {
+      throw new Error('User already has access to this map')
+    }
+    
+    // Add new shared user
+    const newSharedUser: SharedUser = {
+      email,
+      role,
+      invitedAt: new Date(),
+      invitedBy: ownerId
+    }
+    
+    const updatedSharing = {
+      ...currentSharing,
+      isShared: true,
+      sharedWith: [...currentSharing.sharedWith, newSharedUser]
+    }
+    
+    await updateDoc(mapRef, {
+      sharing: updatedSharing,
+      updatedAt: serverTimestamp()
+    })
+    
+    console.log('Map shared successfully with:', email)
+  } catch (error) {
+    console.error('Error sharing map:', error)
+    throw error
+  }
+}
+
+// Remove user from shared map
+export const removeUserFromMap = async (
+  mapId: string,
+  ownerId: string,
+  email: string
+): Promise<void> => {
+  try {
+    const mapRef = doc(db, 'users', ownerId, 'maps', mapId)
+    const mapDoc = await getDoc(mapRef)
+    
+    if (!mapDoc.exists()) {
+      throw new Error('Map not found')
+    }
+    
+    const mapData = mapDoc.data() as MapDocument
+    const currentSharing = mapData.sharing
+    
+    if (!currentSharing) {
+      throw new Error('Map is not shared')
+    }
+    
+    const updatedSharedWith = currentSharing.sharedWith.filter(user => user.email !== email)
+    
+    const updatedSharing = {
+      ...currentSharing,
+      sharedWith: updatedSharedWith,
+      isShared: updatedSharedWith.length > 0
+    }
+    
+    await updateDoc(mapRef, {
+      sharing: updatedSharing,
+      updatedAt: serverTimestamp()
+    })
+    
+    console.log('User removed from map:', email)
+  } catch (error) {
+    console.error('Error removing user from map:', error)
+    throw error
+  }
+}
+
+// Update user role in shared map
+export const updateUserRole = async (
+  mapId: string,
+  ownerId: string,
+  email: string,
+  newRole: 'viewer' | 'editor' | 'admin'
+): Promise<void> => {
+  try {
+    const mapRef = doc(db, 'users', ownerId, 'maps', mapId)
+    const mapDoc = await getDoc(mapRef)
+    
+    if (!mapDoc.exists()) {
+      throw new Error('Map not found')
+    }
+    
+    const mapData = mapDoc.data() as MapDocument
+    const currentSharing = mapData.sharing
+    
+    if (!currentSharing) {
+      throw new Error('Map is not shared')
+    }
+    
+    const updatedSharedWith = currentSharing.sharedWith.map(user => 
+      user.email === email ? { ...user, role: newRole } : user
+    )
+    
+    const updatedSharing = {
+      ...currentSharing,
+      sharedWith: updatedSharedWith
+    }
+    
+    await updateDoc(mapRef, {
+      sharing: updatedSharing,
+      updatedAt: serverTimestamp()
+    })
+    
+    console.log('User role updated:', email, 'to', newRole)
+  } catch (error) {
+    console.error('Error updating user role:', error)
+    throw error
+  }
+}
+
+// Get maps shared with user
+export const getSharedMaps = async (userEmail: string): Promise<MapDocument[]> => {
+  try {
+    const sharedMaps: MapDocument[] = []
+    
+    // Search through all users' maps to find ones shared with this email
+    const usersQuery = query(collection(db, 'users'))
+    const usersSnapshot = await getDocs(usersQuery)
+    
+    for (const userDoc of usersSnapshot.docs) {
+      const mapsQuery = query(
+        collection(db, 'users', userDoc.id, 'maps'),
+        where('sharing.isShared', '==', true)
+      )
+      const mapsSnapshot = await getDocs(mapsQuery)
+      
+      for (const mapDoc of mapsSnapshot.docs) {
+        const mapData = mapDoc.data() as MapDocument
+        const isSharedWithUser = mapData.sharing?.sharedWith.some(
+          user => user.email === userEmail
+        )
+        
+        if (isSharedWithUser) {
+          sharedMaps.push({
+            id: mapDoc.id,
+            ...mapData
+          })
+        }
+      }
+    }
+    
+    return sharedMaps
+  } catch (error) {
+    console.error('Error getting shared maps:', error)
+    throw error
+  }
 }
 

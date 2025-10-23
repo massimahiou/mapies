@@ -1,6 +1,8 @@
-import React from 'react'
-import { User, LogOut } from 'lucide-react'
+import React, { useState } from 'react'
+import { User, LogOut, CreditCard } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import SubscriptionManagementModal from './SubscriptionManagementModal'
+import SubscriptionPlans from './SubscriptionPlans'
 
 interface UserProfileProps {
   onSignOut: () => void
@@ -8,6 +10,7 @@ interface UserProfileProps {
 
 const UserProfile: React.FC<UserProfileProps> = ({ onSignOut }) => {
   const { user, userDocument } = useAuth()
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
 
   if (!user) return null
 
@@ -30,14 +33,31 @@ const UserProfile: React.FC<UserProfileProps> = ({ onSignOut }) => {
             )}
           </div>
         </div>
-        <button
-          onClick={onSignOut}
-          className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-          title="Sign out"
-        >
-          <LogOut className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowSubscriptionModal(true)}
+            className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+            title="Manage subscription"
+          >
+            <CreditCard className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onSignOut}
+            className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+            title="Sign out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {/* Subscription Plans */}
+      <SubscriptionPlans onOpenSubscription={() => setShowSubscriptionModal(true)} />
+
+      {/* Subscription Management Modal */}
+      {showSubscriptionModal && (
+        <SubscriptionManagementModal onClose={() => setShowSubscriptionModal(false)} />
+      )}
     </div>
   )
 }

@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react'
-import { Eye, Share2, Plus, Upload, Trash2, MapPin, Settings, ChevronDown, Map, Globe, Copy, Check } from 'lucide-react'
+import React, { useState, useEffect, useRef } from 'react'
+import { Eye, Share2, Plus, Trash2, MapPin, Settings, ChevronDown, Map, Check, GripVertical, Edit2, X } from 'lucide-react'
 import UserProfile from './UserProfile'
 import { useAuth } from '../contexts/AuthContext'
-import { getUserMaps, createMap, deleteMap, MapDocument, NameRule } from '../firebase/maps'
+import { getUserMaps, createMap, deleteMap, updateMap, MapDocument, shareMapWithUser, removeUserFromMap, updateUserRole, SharedUser } from '../firebase/maps'
 import DeleteMapDialog from './DeleteMapDialog'
 import ManageTabContent from './sidebar/ManageTabContent'
+import DataTabContent from './sidebar/DataTabContent'
+import EditTabContent from './sidebar/EditTabContent'
+import PublishTabContent from './sidebar/PublishTabContent'
 
 interface Marker {
   id: string
@@ -27,6 +30,10 @@ interface SidebarProps {
   onShowCsvModal: () => void
   onShowAddMarkerModal: () => void
   onShowPublishModal: () => void
+  onOpenMarkerManagementModal: () => void
+  onOpenDataManagementModal: () => void
+  onOpenEditManagementModal: () => void
+  onOpenPublishManagementModal: () => void
   mapSettings: any
   onMapSettingsChange: (settings: any) => void
   currentMapId: string | null
@@ -49,6 +56,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   onShowCsvModal,
   onShowAddMarkerModal,
   onShowPublishModal,
+  onOpenMarkerManagementModal,
+  onOpenDataManagementModal,
+  onOpenEditManagementModal,
+  onOpenPublishManagementModal,
   mapSettings,
   onMapSettingsChange,
   currentMapId,
@@ -84,26 +95,62 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [mapToDelete, setMapToDelete] = useState<MapDocument | null>(null)
   const [isDeletingMap, setIsDeletingMap] = useState(false)
-  const [nameRules, setNameRules] = useState<NameRule[]>([])
+  
+  // Map rename state
+  const [editingMapId, setEditingMapId] = useState<string | null>(null)
+  const [editingMapName, setEditingMapName] = useState('')
+  const [isRenamingMap, setIsRenamingMap] = useState(false)
+  
+  // Map sharing state
+  const [showSharingModal, setShowSharingModal] = useState(false)
+  const [sharingEmail, setSharingEmail] = useState('')
+  const [sharingRole, setSharingRole] = useState<'viewer' | 'editor' | 'admin'>('viewer')
+  const [isSharing, setIsSharing] = useState(false)
+  
+  // Draggable sidebar state
+  const [sidebarWidth, setSidebarWidth] = useState(320) // Default width in pixels
+  const [isDragging, setIsDragging] = useState(false)
+  const dragRef = useRef<HTMLDivElement>(null)
+  const startXRef = useRef(0)
+  const startWidthRef = useRef(0)
 
-  const handleNameRulesChange = async (rules: NameRule[]) => {
-    setNameRules(rules)
+  // Handle drag start
+  const handleDragStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+    startXRef.current = e.clientX
+    startWidthRef.current = sidebarWidth
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  // Handle drag move
+  const handleDragMove = (e: MouseEvent) => {
+    if (!isDragging) return
     
-    // Save to Firestore if we have a current map
-    if (currentMapId && user) {
-      try {
-        const { updateMap } = await import('../firebase/maps')
-        await updateMap(user.uid, currentMapId, {
-          settings: {
-            ...mapSettings,
-            nameRules: rules
-          }
-        })
-      } catch (error) {
-        console.error('Error saving name rules:', error)
+    const deltaX = e.clientX - startXRef.current
+    const newWidth = Math.max(280, Math.min(600, startWidthRef.current + deltaX)) // Min 280px, Max 600px
+    setSidebarWidth(newWidth)
+  }
+
+  // Handle drag end
+  const handleDragEnd = () => {
+    setIsDragging(false)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+
+  // Add event listeners for drag
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleDragMove)
+      document.addEventListener('mouseup', handleDragEnd)
+      return () => {
+        document.removeEventListener('mousemove', handleDragMove)
+        document.removeEventListener('mouseup', handleDragEnd)
       }
     }
-  }
+  }, [isDragging])
 
   const handleSignOut = async () => {
     try {
@@ -134,40 +181,22 @@ const Sidebar: React.FC<SidebarProps> = ({
     loadMaps()
   }, [user, currentMapId, onMapsChange, onMapChange])
 
-  // Load name rules when map changes
-  useEffect(() => {
-    const loadNameRules = async () => {
-      if (currentMapId && user) {
-        try {
-          const { getMap } = await import('../firebase/maps')
-          const mapDoc = await getMap(user.uid, currentMapId)
-          if (mapDoc?.settings?.nameRules) {
-            setNameRules(mapDoc.settings.nameRules)
-          } else {
-            setNameRules([])
-          }
-        } catch (error) {
-          console.error('Error loading name rules:', error)
-          setNameRules([])
-        }
-      } else {
-        setNameRules([])
-      }
-    }
-    
-    loadNameRules()
-  }, [currentMapId, user])
-
   // Create a new map
   const handleCreateMap = async () => {
     if (!user || !newMapName.trim()) return
     
     setIsCreatingMap(true)
     try {
+      // Create map with default settings, ensuring nameRules is empty
+      const defaultMapSettings = {
+        ...mapSettings,
+        nameRules: [] // Always start with empty name rules
+      }
+      
       const mapId = await createMap(user.uid, {
         name: newMapName.trim(),
         description: 'New map',
-        settings: mapSettings
+        settings: defaultMapSettings
       })
       
       // Refresh maps list
@@ -181,7 +210,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       setNewMapName('')
       setShowMapSelector(false)
       
-      console.log('Created new map with settings:', mapId, mapSettings)
+      console.log('Created new map with empty name rules:', mapId)
     } catch (error) {
       console.error('Error creating map:', error)
     } finally {
@@ -200,6 +229,81 @@ const Sidebar: React.FC<SidebarProps> = ({
     e.stopPropagation() // Prevent map selection
     setMapToDelete(map)
     setShowDeleteDialog(true)
+  }
+
+  // Handle map rename
+  const handleRenameMap = async (mapId: string, newName: string) => {
+    if (!newName.trim() || newName === editingMapName) {
+      setEditingMapId(null)
+      setEditingMapName('')
+      return
+    }
+
+    setIsRenamingMap(true)
+    try {
+      await updateMap(user!.uid, mapId, { name: newName.trim() })
+      console.log('Map renamed successfully')
+      setEditingMapId(null)
+      setEditingMapName('')
+    } catch (error) {
+      console.error('Error renaming map:', error)
+    } finally {
+      setIsRenamingMap(false)
+    }
+  }
+
+  const startEditingMap = (map: MapDocument, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingMapId(map.id!)
+    setEditingMapName(map.name)
+  }
+
+  const cancelEditingMap = () => {
+    setEditingMapId(null)
+    setEditingMapName('')
+  }
+
+  // Handle map sharing
+  const handleShareMap = async () => {
+    if (!currentMapId || !user || !sharingEmail.trim()) return
+
+    setIsSharing(true)
+    try {
+      await shareMapWithUser(currentMapId, user.uid, sharingEmail.trim(), sharingRole)
+      setSharingEmail('')
+      setSharingRole('viewer')
+      setShowSharingModal(false)
+      console.log('Map shared successfully')
+    } catch (error) {
+      console.error('Error sharing map:', error)
+      alert('Failed to share map. Please try again.')
+    } finally {
+      setIsSharing(false)
+    }
+  }
+
+  const handleRemoveUser = async (email: string) => {
+    if (!currentMapId || !user) return
+
+    try {
+      await removeUserFromMap(currentMapId, user.uid, email)
+      console.log('User removed from map')
+    } catch (error) {
+      console.error('Error removing user:', error)
+      alert('Failed to remove user. Please try again.')
+    }
+  }
+
+  const handleUpdateUserRole = async (email: string, newRole: 'viewer' | 'editor' | 'admin') => {
+    if (!currentMapId || !user) return
+
+    try {
+      await updateUserRole(currentMapId, user.uid, email, newRole)
+      console.log('User role updated')
+    } catch (error) {
+      console.error('Error updating user role:', error)
+      alert('Failed to update user role. Please try again.')
+    }
   }
 
   const confirmDeleteMap = async () => {
@@ -235,12 +339,26 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'data', label: 'Data', icon: Plus },
     { id: 'manage', label: 'Manage', icon: Eye },
     { id: 'edit', label: 'Edit', icon: Settings },
-    { id: 'publish', label: 'Publish', icon: Share2 }
+    { id: 'publish', label: 'Publish', icon: Share2 },
   ]
 
 
   return (
-    <div className="w-80 bg-white shadow-lg flex flex-col">
+    <div 
+      className="bg-white shadow-lg flex flex-col relative"
+      style={{ width: `${sidebarWidth}px` }}
+    >
+      {/* Drag Handle */}
+      <div
+        ref={dragRef}
+        onMouseDown={handleDragStart}
+        className="absolute top-0 right-0 w-1 h-full bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors z-10"
+        title="Drag to resize sidebar"
+      >
+        <div className="absolute top-1/2 right-0 transform -translate-y-1/2 translate-x-1/2">
+          <GripVertical className="w-3 h-3 text-gray-400" />
+        </div>
+      </div>
               {/* Header */}
               <div className="p-6 border-b border-gray-200">
                 <div className="text-center mb-4">
@@ -305,27 +423,86 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   }`}
                                 >
                                   <div className="flex items-center justify-between">
-                                    <button
-                                      onClick={() => {
-                                        onMapChange(map.id!)
-                                        setShowMapSelector(false)
-                                      }}
-                                      className="flex-1 text-left"
-                                    >
-                                      <div className="flex items-center justify-between">
-                                        <span className="text-sm font-medium truncate">{map.name}</span>
-                                        <span className="text-xs text-gray-500">
-                                          {map.stats?.markerCount || 0} markers
-                                        </span>
+                                    {editingMapId === map.id ? (
+                                      // Edit mode
+                                      <div className="flex-1 flex items-center gap-2">
+                                        <input
+                                          type="text"
+                                          value={editingMapName}
+                                          onChange={(e) => setEditingMapName(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              handleRenameMap(map.id!, editingMapName)
+                                            } else if (e.key === 'Escape') {
+                                              cancelEditingMap()
+                                            }
+                                          }}
+                                          className="flex-1 text-sm font-medium bg-white border border-blue-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                          autoFocus
+                                          disabled={isRenamingMap}
+                                        />
+                                        <button
+                                          onClick={() => handleRenameMap(map.id!, editingMapName)}
+                                          disabled={isRenamingMap}
+                                          className="p-1 text-green-600 hover:text-green-700 transition-colors"
+                                          title="Save"
+                                        >
+                                          <Check className="w-3 h-3" />
+                                        </button>
+                                        <button
+                                          onClick={cancelEditingMap}
+                                          disabled={isRenamingMap}
+                                          className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                                          title="Cancel"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
                                       </div>
-                                    </button>
-                                    <button
-                                      onClick={(e) => handleDeleteMap(map, e)}
-                                      className="ml-2 p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                      title="Delete map"
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                    </button>
+                                    ) : (
+                                      // Normal mode
+                                      <>
+                                        <button
+                                          onClick={() => {
+                                            onMapChange(map.id!)
+                                            setShowMapSelector(false)
+                                          }}
+                                          className="flex-1 text-left"
+                                        >
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-sm font-medium truncate">{map.name}</span>
+                                            <span className="text-xs text-gray-500">
+                                              {map.stats?.markerCount || 0} markers
+                                            </span>
+                                          </div>
+                                        </button>
+                                        <div className="flex items-center gap-1 ml-2">
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setShowSharingModal(true)
+                                            }}
+                                            className="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                                            title="Share map"
+                                          >
+                                            <Share2 className="w-3 h-3" />
+                                          </button>
+                                          <button
+                                            onClick={(e) => startEditingMap(map, e)}
+                                            className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+                                            title="Rename map"
+                                          >
+                                            <Edit2 className="w-3 h-3" />
+                                          </button>
+                                          <button
+                                            onClick={(e) => handleDeleteMap(map, e)}
+                                            className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                            title="Delete map"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                               ))
@@ -340,6 +517,100 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <UserProfile onSignOut={handleSignOut} />
               </div>
 
+      {/* CSV Progress Bar */}
+      {(isUploading || uploadProgress.total > 0) && (
+        <div className="px-4 py-3 border-b border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-700">Markers: {uploadProgress.processed} / {uploadProgress.total}</span>
+            <div className="flex items-center gap-2">
+              {isUploading && (
+                <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              )}
+              <span className="text-sm font-medium text-blue-600 drop-shadow-sm">
+                {uploadProgress.total > 0 ? Math.round((uploadProgress.processed / uploadProgress.total) * 100) : 0}%
+              </span>
+            </div>
+          </div>
+          <div className="relative w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div 
+              className="absolute top-0 left-0 h-2 bg-gradient-to-r from-blue-500 via-blue-400 to-blue-500 rounded-full transition-all duration-500 ease-out animate-glow"
+              style={{ 
+                width: uploadProgress.total > 0 
+                  ? `${(uploadProgress.processed / uploadProgress.total) * 100}%` 
+                  : '0%',
+                animation: uploadProgress.total > 0 ? 'glow 2s ease-in-out infinite' : 'none'
+              }}
+            >
+              {/* Animated shimmer effect */}
+              <div 
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-40"
+                style={{
+                  animation: uploadProgress.total > 0 ? 'shimmer 2s ease-in-out infinite' : 'none'
+                }}
+              ></div>
+            </div>
+            {/* Glow effect overlay */}
+            <div 
+              className="absolute top-0 left-0 h-2 bg-blue-400 rounded-full blur-sm opacity-70 transition-all duration-500 ease-out"
+              style={{ 
+                width: uploadProgress.total > 0 
+                  ? `${(uploadProgress.processed / uploadProgress.total) * 100}%` 
+                  : '0%',
+                animation: uploadProgress.total > 0 ? 'progressGlow 3s ease-in-out infinite' : 'none'
+              }}
+            ></div>
+          </div>
+          
+          {/* Processing Details */}
+          {uploadProgress.currentAddress && uploadProgress.currentAddress !== 'Complete' && (
+            <div className="mt-2 text-xs text-gray-600">
+              <div className="flex items-center gap-1 mb-1">
+                {uploadProgress.currentAddress.includes('✅ Processed:') ? (
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                ) : (
+                  <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                )}
+                <span className="font-medium">
+                  {uploadProgress.currentAddress.includes('✅ Processed:') ? 'Completed:' : 'Processing:'}
+                </span>
+              </div>
+              <div className="pl-4 space-y-1">
+                {uploadProgress.currentAddress.includes('🌍 Geocoding:') ? (
+                  <div>
+                    <div className="text-gray-700 font-medium">
+                      {uploadProgress.currentAddress.replace('🌍 Geocoding: ', '').split(' | ')[0]}
+                    </div>
+                    <div className="text-gray-500 text-xs">
+                      📍 {uploadProgress.currentAddress.replace('🌍 Geocoding: ', '').split(' | ')[1]}
+                    </div>
+                  </div>
+                ) : uploadProgress.currentAddress.includes('✅ Processed:') ? (
+                  <div>
+                    <div className="text-green-700 font-medium">
+                      {uploadProgress.currentAddress.replace('✅ Processed: ', '').split(' | ')[0]}
+                    </div>
+                    <div className="text-green-600 text-xs">
+                      📍 {uploadProgress.currentAddress.replace('✅ Processed: ', '').split(' | ')[1]}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-gray-700 truncate">
+                    {uploadProgress.currentAddress}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {uploadProgress.currentAddress === 'Complete' && (
+            <div className="mt-2 text-xs text-green-600 flex items-center gap-1">
+              <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+              <span className="font-medium">✅ Upload complete! {uploadProgress.processed} markers added to map.</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Navigation Tabs */}
       <div className="p-4 border-b border-gray-200">
         <nav className="space-y-1">
@@ -349,12 +620,14 @@ const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.id}
                 onClick={() => onTabChange(item.id)}
-                className={`sidebar-item w-full text-left ${
-                  activeTab === item.id ? 'active' : ''
+                className={`sidebar-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                  activeTab === item.id 
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200' 
+                    : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                <Icon className="w-5 h-5" />
-                {item.label}
+                <Icon className="w-5 h-5 flex-shrink-0" />
+                <span className="truncate">{item.label}</span>
               </button>
             )
           })}
@@ -364,66 +637,13 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Content based on active tab */}
       <div className="flex-1 overflow-y-auto">
         {activeTab === 'data' && (
-          <div className="p-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Add Data</h3>
-                   <div className="space-y-3">
-                     <button
-                       onClick={() => {
-                         console.log('Add marker button clicked')
-                         onShowAddMarkerModal()
-                       }}
-                       className="btn-primary w-full flex items-center gap-2"
-                     >
-                       <Plus className="w-4 h-4" />
-                       Add a marker
-                     </button>
-                     <button
-                       onClick={() => {
-                         console.log('Import CSV button clicked')
-                         onShowCsvModal()
-                       }}
-                       className="btn-secondary w-full flex items-center gap-2"
-                     >
-                       <Upload className="w-4 h-4" />
-                       Import a Spreadsheet
-                     </button>
-                     
-                     {/* Upload Progress Bar */}
-                     {isUploading && (
-                       <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                         <div className="flex items-center justify-between mb-2">
-                           <p className="text-sm text-blue-600">Processing markers...</p>
-                           <p className="text-xs text-blue-500">
-                             {uploadProgress.total > 0 ? `${uploadProgress.processed}/${uploadProgress.total} markers loaded` : 'Preparing...'}
-                           </p>
-                         </div>
-                         <div className="w-full bg-blue-200 rounded-full h-2">
-                           <div 
-                             className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                             style={{ 
-                               width: uploadProgress.total > 0 
-                                 ? `${(uploadProgress.processed / uploadProgress.total) * 100}%` 
-                                 : '0%' 
-                             }}
-                           ></div>
-                         </div>
-                         {uploadProgress.currentAddress && uploadProgress.currentAddress !== 'Complete' && (
-                           <p className="text-xs text-blue-500 mt-2 truncate">
-                             Currently processing: {uploadProgress.currentAddress}
-                           </p>
-                         )}
-                         {uploadProgress.currentAddress === 'Complete' && (
-                           <p className="text-xs text-green-600 mt-2 font-medium">
-                             ✅ Upload complete! {uploadProgress.processed} markers added to map.
-                           </p>
-                         )}
-                       </div>
-                     )}
-                   </div>
-            <div className="mt-6 text-sm text-gray-600">
-              <p>Add markers manually or import them from a CSV file with name and address columns.</p>
-            </div>
-          </div>
+          <DataTabContent
+            onShowAddMarkerModal={onShowAddMarkerModal}
+            onShowCsvModal={onShowCsvModal}
+            isUploading={isUploading}
+            uploadProgress={uploadProgress}
+            onOpenModal={onOpenDataManagementModal}
+          />
         )}
 
         {activeTab === 'manage' && (
@@ -433,14 +653,24 @@ const Sidebar: React.FC<SidebarProps> = ({
             onSearchChange={onSearchChange}
             onToggleMarkerVisibility={onToggleMarkerVisibility}
             onDeleteMarker={onDeleteMarker}
-            nameRules={nameRules}
-            onNameRulesChange={handleNameRulesChange}
+            mapSettings={mapSettings}
+            onMapSettingsChange={onMapSettingsChange}
             userId={userId}
             mapId={currentMapId || undefined}
+            onOpenModal={onOpenMarkerManagementModal}
           />
         )}
 
         {activeTab === 'edit' && (
+          <EditTabContent
+            mapSettings={mapSettings}
+            onMapSettingsChange={onMapSettingsChange}
+            onOpenModal={onOpenEditManagementModal}
+          />
+        )}
+
+        {/* Original edit tab content removed - now using EditTabContent component */}
+        {false && (
           <div className="p-4">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Map Design</h3>
             
@@ -899,47 +1129,13 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
 
         {activeTab === 'publish' && (
-          <div className="p-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Publish Map</h3>
-            <div className="space-y-3">
-              {/* Public Share Button */}
-              <button 
-                onClick={copyPublicUrl}
-                className="w-full flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-              >
-                {publicCopied ? <Check className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
-                {publicCopied ? 'Copied!' : 'Share Public Link'}
-              </button>
-              
-              {/* Embed Code Button */}
-              <button 
-                onClick={() => {
-                  console.log('Publish button clicked')
-                  onShowPublishModal()
-                }}
-                className="btn-primary w-full flex items-center gap-2"
-              >
-                <Copy className="w-4 h-4" />
-                Generate Embed Code
-              </button>
-            </div>
-            <div className="mt-6 text-sm text-gray-600">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Globe className="w-4 h-4 text-green-600" />
-                  <span>Share a simple link that anyone can view</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Copy className="w-4 h-4 text-blue-600" />
-                  <span>Generate embed code for websites</span>
-                </div>
-              </div>
-              <p className="mt-3 text-xs text-gray-500">
-                {markers.filter(m => m.visible).length} markers will be included
-              </p>
-            </div>
-          </div>
+          <PublishTabContent
+            onShowPublishModal={onShowPublishModal}
+            currentMapId={currentMapId}
+            onOpenModal={onOpenPublishManagementModal}
+          />
         )}
+
       </div>
 
       {/* Delete Map Dialog */}
@@ -951,6 +1147,108 @@ const Sidebar: React.FC<SidebarProps> = ({
         markerCount={mapToDelete?.stats?.markerCount || 0}
         isDeleting={isDeletingMap}
       />
+
+      {/* Sharing Modal */}
+      {showSharingModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Share Map</h3>
+              <button
+                onClick={() => setShowSharingModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  value={sharingEmail}
+                  onChange={(e) => setSharingEmail(e.target.value)}
+                  placeholder="Enter email address"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Permission Level
+                </label>
+                <select
+                  value={sharingRole}
+                  onChange={(e) => setSharingRole(e.target.value as 'viewer' | 'editor' | 'admin')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="viewer">Viewer - Can view map only</option>
+                  <option value="editor">Editor - Can edit markers</option>
+                  <option value="admin">Admin - Full access</option>
+                </select>
+              </div>
+
+              {/* Current shared users */}
+              {currentMapId && maps.find(m => m.id === currentMapId)?.sharing?.sharedWith && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Shared With
+                  </label>
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {maps.find(m => m.id === currentMapId)?.sharing?.sharedWith.map((user: SharedUser, index: number) => (
+                      <div key={index} className="flex items-center justify-between bg-gray-50 rounded-lg p-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-700">{user.email}</span>
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                            {user.role}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <select
+                            value={user.role}
+                            onChange={(e) => handleUpdateUserRole(user.email, e.target.value as 'viewer' | 'editor' | 'admin')}
+                            className="text-xs border border-gray-300 rounded px-1 py-0.5"
+                          >
+                            <option value="viewer">Viewer</option>
+                            <option value="editor">Editor</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                          <button
+                            onClick={() => handleRemoveUser(user.email)}
+                            className="p-1 text-red-500 hover:text-red-700"
+                            title="Remove user"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={handleShareMap}
+                  disabled={!sharingEmail.trim() || isSharing}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isSharing ? 'Sharing...' : 'Share Map'}
+                </button>
+                <button
+                  onClick={() => setShowSharingModal(false)}
+                  className="px-4 py-2 bg-gray-500 text-white text-sm font-medium rounded-lg hover:bg-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
