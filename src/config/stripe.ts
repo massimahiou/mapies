@@ -6,6 +6,7 @@ export const STRIPE_CONFIG = {
   
   // Price IDs for each subscription plan
   PRICE_IDS: {
+    freemium: 'price_1SLn4xQ5zKkScSt2aMRLmPCq',
     starter: 'price_1SLn1lQ5zKkScSt26QWJ1kfz',
     professional: 'price_1SLn1mQ5zKkScSt2ptUM9Lr0',
     enterprise: 'price_1SLn1mQ5zKkScSt2qKv1dRDs',

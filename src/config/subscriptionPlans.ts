@@ -43,7 +43,7 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     price: 0,
     name: 'Freemium',
     description: 'Perfect for getting started',
-    stripePriceId: undefined,
+    stripePriceId: 'price_1SLn4xQ5zKkScSt2aMRLmPCq',
     trialDays: undefined
   },
   starter: {
