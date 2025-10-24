@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { User, LogOut, CreditCard } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import EnhancedSubscriptionModal from './EnhancedSubscriptionModal'
+import SubscriptionManagementModal from './SubscriptionManagementModal'
 import SubscriptionPlans from './SubscriptionPlans'
 import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 
@@ -60,7 +60,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onSignOut }) => {
 
       {/* Subscription Management Modal */}
       {showSubscriptionModal && (
-        <EnhancedSubscriptionModal onClose={() => setShowSubscriptionModal(false)} />
+        <SubscriptionManagementModal onClose={() => setShowSubscriptionModal(false)} />
       )}
     </div>
   )

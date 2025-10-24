@@ -66,6 +66,14 @@ class StripeService {
     const plan = SUBSCRIPTION_PLANS[planId]
     console.log('Plan found:', plan)
     
+    // Handle freemium plan - redirect to success page since it's free
+    if (planId === 'freemium') {
+      console.log('Freemium plan selected - redirecting to success page')
+      const successUrl = options?.successUrl || `${window.location.origin}/dashboard?subscription=success&plan=freemium`
+      window.location.href = successUrl
+      return { sessionId: 'freemium', url: successUrl }
+    }
+    
     if (!plan || !plan.stripePriceId) {
       console.error('Plan not found or no Stripe price ID:', { planId, plan })
       throw new Error(`Plan ${planId} does not have a Stripe price ID`)
