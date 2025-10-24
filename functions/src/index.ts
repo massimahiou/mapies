@@ -367,3 +367,4 @@ export const leaveSharedMap = functions.https.onCall(async (data, context) => {
 
 // Export checkout functions
 export { createCheckoutSession, createCustomerPortalSession };
+export { listPrices } from './listPrices';

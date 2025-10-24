@@ -59,7 +59,7 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     price: 14,
     name: 'Starter',
     description: 'Great for small businesses',
-    stripePriceId: 'price_starter_monthly', // Replace with actual Stripe price ID
+    stripePriceId: 'price_1SLn1lQ5zKkScSt26QWJ1kfz',
     trialDays: 14
   },
   professional: {
@@ -76,7 +76,7 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     name: 'Professional',
     description: 'Most popular choice',
     popular: true,
-    stripePriceId: 'price_professional_monthly', // Replace with actual Stripe price ID
+    stripePriceId: 'price_1SLn1mQ5zKkScSt2ptUM9Lr0',
     trialDays: 14
   },
   enterprise: {
@@ -92,7 +92,7 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     price: 48,
     name: 'Enterprise',
     description: 'For large organizations',
-    stripePriceId: 'price_enterprise_monthly', // Replace with actual Stripe price ID
+    stripePriceId: 'price_1SLn1mQ5zKkScSt2qKv1dRDs',
     trialDays: 14
   }
 }

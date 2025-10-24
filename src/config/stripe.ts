@@ -2,13 +2,13 @@
 export const STRIPE_CONFIG = {
   // This should match your Stripe publishable key
   // You can get this from your Stripe dashboard
-  PUBLISHABLE_KEY: 'pk_live_51LyknqBahmrTOdT23WcBoPPpLz9gc6ZFNra6rR98S32P547h6a71q0KMAV8cllMGhL4imTNxW7ADPNB66UiXxpp700xPagofqS',
+  PUBLISHABLE_KEY: 'pk_live_51SK8ygQ5zKkScSt2KVBDjW6xSG7F9PA5ZNyEDNnxvbsKwKjAKBrse5Gbny075AxL0kOjJOOayD9ug9Jh8961y2nF00WJc5ASHz',
   
   // Price IDs for each subscription plan
   PRICE_IDS: {
-    starter: 'price_1SK8VZBahmrTOdT2vMeKI2qQ', // Using existing premium price ID for now
-    professional: 'price_1SK8VZBahmrTOdT2vMeKI2qQ', // Using existing premium price ID for now
-    enterprise: 'price_1SK8VZBahmrTOdT2vMeKI2qQ', // Using existing premium price ID for now
+    starter: 'price_1SLn1lQ5zKkScSt26QWJ1kfz',
+    professional: 'price_1SLn1mQ5zKkScSt2ptUM9Lr0',
+    enterprise: 'price_1SLn1mQ5zKkScSt2qKv1dRDs',
   },
   
   // Legacy support
