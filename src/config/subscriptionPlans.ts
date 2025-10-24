@@ -23,6 +23,10 @@ export interface SubscriptionPlan {
   name: string
   description: string
   popular?: boolean
+  
+  // Stripe integration
+  stripePriceId?: string
+  trialDays?: number
 }
 
 export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
@@ -38,7 +42,9 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     maxStorageMB: 10,
     price: 0,
     name: 'Freemium',
-    description: 'Perfect for getting started'
+    description: 'Perfect for getting started',
+    stripePriceId: undefined,
+    trialDays: undefined
   },
   starter: {
     maxMarkersPerMap: 500,
@@ -52,7 +58,9 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     maxStorageMB: 100,
     price: 14,
     name: 'Starter',
-    description: 'Great for small businesses'
+    description: 'Great for small businesses',
+    stripePriceId: 'price_starter_monthly', // Replace with actual Stripe price ID
+    trialDays: 14
   },
   professional: {
     maxMarkersPerMap: 1500,
@@ -67,7 +75,9 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     price: 36,
     name: 'Professional',
     description: 'Most popular choice',
-    popular: true
+    popular: true,
+    stripePriceId: 'price_professional_monthly', // Replace with actual Stripe price ID
+    trialDays: 14
   },
   enterprise: {
     maxMarkersPerMap: 3000,
@@ -81,7 +91,9 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     maxStorageMB: 2000,
     price: 48,
     name: 'Enterprise',
-    description: 'For large organizations'
+    description: 'For large organizations',
+    stripePriceId: 'price_enterprise_monthly', // Replace with actual Stripe price ID
+    trialDays: 14
   }
 }
 

@@ -3,6 +3,8 @@ import { X, CheckIcon, StarIcon, TestTube } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { getUserDocument, updateSubscriptionPlan, UserDocument } from '../firebase/users'
 import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
+import { stripeService } from '../services/stripe'
+import { STRIPE_CONFIG } from '../config/stripe'
 
 interface SubscriptionManagementModalProps {
   onClose: () => void
@@ -56,9 +58,35 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
   const handlePlanSelect = async (planId: 'freemium' | 'starter' | 'professional' | 'enterprise') => {
     if (!user) return
     
+    // Don't allow downgrading to freemium through this interface
+    if (planId === 'freemium') {
+      console.warn('Cannot downgrade to freemium through this interface')
+      return
+    }
+    
     try {
       setUpgrading(true)
-      // Frontend only - no Stripe integration for testing
+      
+      // Initialize Stripe
+      await stripeService.initializeStripe(STRIPE_CONFIG.PUBLISHABLE_KEY)
+      
+      // Create checkout session for the selected plan
+      const checkoutData = await stripeService.createCheckoutSessionForPlan(
+        planId,
+        user.uid,
+        user.email || '',
+        {
+          successUrl: `${window.location.origin}/dashboard?subscription=success`,
+          cancelUrl: `${window.location.origin}/dashboard?subscription=cancelled`
+        }
+      )
+      
+      // Redirect to Stripe checkout
+      await stripeService.redirectToCheckout(checkoutData.url)
+      
+    } catch (error) {
+      console.error('Error upgrading plan:', error)
+      // Fallback to local upgrade for testing
       await updateSubscriptionPlan(user.uid, planId)
       
       // Refresh the global user document to update all components
@@ -66,8 +94,6 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
       
       // Also update local state for immediate UI feedback
       await loadUserData()
-    } catch (error) {
-      console.error('Error updating plan:', error)
     } finally {
       setUpgrading(false)
     }

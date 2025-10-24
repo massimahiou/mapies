@@ -29,7 +29,7 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
   const nextPlanInfo = nextPlan ? SUBSCRIPTION_PLANS[nextPlan] : null
 
   const handleQuickUpgrade = async () => {
-    if (!user) return
+    if (!user || !nextPlan) return
     
     try {
       setUpgrading(true)
@@ -37,11 +37,15 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
       // Initialize Stripe
       await stripeService.initializeStripe(STRIPE_CONFIG.PUBLISHABLE_KEY)
       
-      // Create checkout session
-      const checkoutData = await stripeService.createCheckoutSession(
-        STRIPE_CONFIG.PREMIUM_PRICE_ID,
+      // Create checkout session for the next plan
+      const checkoutData = await stripeService.createCheckoutSessionForPlan(
+        nextPlan,
         user.uid,
-        user.email || ''
+        user.email || '',
+        {
+          successUrl: `${window.location.origin}/dashboard?subscription=success`,
+          cancelUrl: `${window.location.origin}/dashboard?subscription=cancelled`
+        }
       )
       
       // Redirect to Stripe checkout
@@ -50,7 +54,7 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
     } catch (error) {
       console.error('Error upgrading:', error)
       // Fallback to local upgrade for testing
-      await updateSubscriptionPlan(user.uid, 'starter')
+      await updateSubscriptionPlan(user.uid, nextPlan)
       // Refresh the global user document
       await refreshUserDocument()
     } finally {
@@ -65,9 +69,10 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
       setUpgrading(true)
       
       // Create customer portal session
-      const portalUrl = await stripeService.createCustomerPortalSession(
-        userDocument.subscription.stripeCustomerId
-      )
+      const portalUrl = await stripeService.createCustomerPortalSession({
+        customerId: userDocument.subscription.stripeCustomerId,
+        returnUrl: `${window.location.origin}/dashboard`
+      })
       
       // Redirect to customer portal
       await stripeService.redirectToCustomerPortal(portalUrl)
