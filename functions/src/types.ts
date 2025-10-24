@@ -95,13 +95,14 @@ export interface UserSubscriptionData {
   stripeCustomerId: string;
   subscriptionStatus: 'active' | 'canceled' | 'past_due' | 'unpaid' | 'trialing' | 'free';
   subscriptionId?: string;
-  subscriptionTier: 'free' | 'premium' | 'pro';
+  subscriptionTier: 'freemium' | 'starter' | 'professional' | 'enterprise';
   subscriptionStartDate?: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
   subscriptionEndDate?: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
   lastPaymentDate?: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
   nextBillingDate?: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
   cancelAtPeriodEnd?: boolean;
   canceledAt?: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
+  trialEnd?: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
   email?: string;
 }
 

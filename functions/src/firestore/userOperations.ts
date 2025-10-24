@@ -71,7 +71,7 @@ export class UserOperations {
         stripeCustomerId,
         email,
         subscriptionStatus: 'free',
-        subscriptionTier: 'free',
+        subscriptionTier: 'freemium',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         ...subscriptionData

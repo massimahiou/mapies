@@ -26,7 +26,7 @@ class CustomerManager {
             const userSubscriptionData = {
                 stripeCustomerId: customer.id,
                 subscriptionStatus: 'free',
-                subscriptionTier: 'free'
+                subscriptionTier: 'freemium'
             };
             await userOperations_1.UserOperations.createUserWithSubscription(userId, customer.id, customer.email || '', userSubscriptionData);
             this.logger.info(`Customer created successfully for user ${userId}`, {
@@ -88,7 +88,7 @@ class CustomerManager {
             // Update user to free tier
             const userSubscriptionData = {
                 subscriptionStatus: 'canceled',
-                subscriptionTier: 'free',
+                subscriptionTier: 'freemium',
                 subscriptionId: undefined,
                 subscriptionEndDate: undefined,
                 cancelAtPeriodEnd: false,

@@ -186,12 +186,54 @@ async function processEventByType(eventType: string, stripeObject: any): Promise
       await SubscriptionManager.handleInvoicePaymentFailed(stripeObject);
       break;
 
+    case 'invoice.upcoming':
+      await SubscriptionManager.handleInvoiceUpcoming(stripeObject);
+      break;
+
+    case 'invoice.created':
+      await SubscriptionManager.handleInvoiceCreated(stripeObject);
+      break;
+
+    case 'invoice.finalized':
+      await SubscriptionManager.handleInvoiceFinalized(stripeObject);
+      break;
+
     // Payment Intent events
     case 'payment_intent.payment_failed':
-      logger.warn('Payment intent failed', {
-        paymentIntentId: stripeObject.id,
-        customerId: stripeObject.customer,
-        amount: stripeObject.amount
+      await SubscriptionManager.handlePaymentIntentFailed(stripeObject);
+      break;
+
+    case 'payment_intent.succeeded':
+      await SubscriptionManager.handlePaymentIntentSucceeded(stripeObject);
+      break;
+
+    // Checkout events
+    case 'checkout.session.completed':
+      await SubscriptionManager.handleCheckoutSessionCompleted(stripeObject);
+      break;
+
+    case 'checkout.session.expired':
+      logger.info('Checkout session expired', {
+        sessionId: stripeObject.id,
+        customerId: stripeObject.customer
+      });
+      break;
+
+    // Customer Portal events
+    case 'billing_portal.session.created':
+      logger.info('Customer portal session created', {
+        sessionId: stripeObject.id,
+        customerId: stripeObject.customer
+      });
+      break;
+
+    // Coupon events
+    case 'coupon.created':
+    case 'coupon.updated':
+    case 'coupon.deleted':
+      logger.info(`Coupon event: ${eventType}`, {
+        couponId: stripeObject.id,
+        name: stripeObject.name
       });
       break;
 
@@ -201,6 +243,23 @@ async function processEventByType(eventType: string, stripeObject: any): Promise
       logger.info(`Price event: ${eventType}`, {
         priceId: stripeObject.id,
         productId: stripeObject.product
+      });
+      break;
+
+    case 'product.created':
+    case 'product.updated':
+      logger.info(`Product event: ${eventType}`, {
+        productId: stripeObject.id,
+        name: stripeObject.name
+      });
+      break;
+
+    // Tax events
+    case 'tax_rate.created':
+    case 'tax_rate.updated':
+      logger.info(`Tax rate event: ${eventType}`, {
+        taxRateId: stripeObject.id,
+        displayName: stripeObject.display_name
       });
       break;
 

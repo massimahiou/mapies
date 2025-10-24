@@ -18,7 +18,15 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
       throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
     }
 
-    const { priceId, userId, userEmail } = data;
+    const { 
+      priceId, 
+      userId, 
+      userEmail, 
+      successUrl, 
+      cancelUrl, 
+      trialPeriodDays, 
+      couponId 
+    } = data;
 
     if (!priceId || !userId || !userEmail) {
       throw new functions.https.HttpsError('invalid-argument', 'Missing required parameters');
@@ -51,7 +59,6 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
       throw new functions.https.HttpsError('internal', 'Failed to manage customer');
     }
 
-
     // Create checkout session
     const sessionConfig: any = {
       customer: customerId,
@@ -63,9 +70,9 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
         },
       ],
       mode: 'subscription',
-      allow_promotion_codes: true, // Enable Stripe's native promotion code feature
-      success_url: `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard?subscription=success`,
-      cancel_url: `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard?subscription=cancelled`,
+      allow_promotion_codes: true,
+      success_url: successUrl || `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard?subscription=success`,
+      cancel_url: cancelUrl || `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard?subscription=cancelled`,
       metadata: {
         userId: userId,
         userEmail: userEmail
@@ -76,13 +83,24 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
           userEmail: userEmail
         }
       },
-      // Additional configuration to ensure promotion codes work
       payment_method_options: {
         card: {
           request_three_d_secure: 'automatic'
         }
       }
     };
+
+    // Add trial period if specified
+    if (trialPeriodDays && trialPeriodDays > 0) {
+      sessionConfig.subscription_data.trial_period_days = trialPeriodDays;
+    }
+
+    // Add coupon if specified
+    if (couponId) {
+      sessionConfig.discounts = [{
+        coupon: couponId
+      }];
+    }
 
     const session = await stripe.checkout.sessions.create(sessionConfig);
 
@@ -107,7 +125,7 @@ export const createCustomerPortalSession = functions.https.onCall(async (data, c
       throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
     }
 
-    const { customerId } = data;
+    const { customerId, returnUrl } = data;
 
     if (!customerId) {
       throw new functions.https.HttpsError('invalid-argument', 'Customer ID is required');
@@ -116,7 +134,7 @@ export const createCustomerPortalSession = functions.https.onCall(async (data, c
     // Create customer portal session
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard`,
+      return_url: returnUrl || `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard`,
     });
 
     return {

@@ -49,7 +49,7 @@ class UserOperations {
         try {
             const userRef = this.db.collection('users').doc(userId);
             await userRef.set(Object.assign({ stripeCustomerId,
-                email, subscriptionStatus: 'free', subscriptionTier: 'free', createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, subscriptionData));
+                email, subscriptionStatus: 'free', subscriptionTier: 'freemium', createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, subscriptionData));
             this.logger.logUserUpdate(userId, 'user_created', { stripeCustomerId, email });
         }
         catch (error) {

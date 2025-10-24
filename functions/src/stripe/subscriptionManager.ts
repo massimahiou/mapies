@@ -19,19 +19,24 @@ export class SubscriptionManager {
   /**
    * Determine subscription tier based on price ID
    */
-  private static getSubscriptionTier(priceId: string): 'premium' | 'pro' {
-    const premiumPriceId = process.env.STRIPE_PRICE_ID_PREMIUM;
-    const proPriceId = process.env.STRIPE_PRICE_ID_PRO;
+  private static getSubscriptionTier(priceId: string): 'freemium' | 'starter' | 'professional' | 'enterprise' {
+    const config = {
+      starter: process.env.STRIPE_PRICE_ID_STARTER,
+      professional: process.env.STRIPE_PRICE_ID_PROFESSIONAL,
+      enterprise: process.env.STRIPE_PRICE_ID_ENTERPRISE,
+      // Legacy support
+      premium: process.env.STRIPE_PRICE_ID_PREMIUM,
+      pro: process.env.STRIPE_PRICE_ID_PRO
+    };
 
-    if (priceId === proPriceId) {
-      return 'pro';
-    }
-    if (priceId === premiumPriceId) {
-      return 'premium';
-    }
+    if (priceId === config.enterprise) return 'enterprise';
+    if (priceId === config.professional) return 'professional';
+    if (priceId === config.starter) return 'starter';
+    if (priceId === config.pro) return 'professional'; // Legacy mapping
+    if (priceId === config.premium) return 'starter'; // Legacy mapping
     
-    // Default to premium if price ID doesn't match
-    return 'premium';
+    // Default to freemium if price ID doesn't match
+    return 'freemium';
   }
 
   /**
@@ -167,7 +172,7 @@ export class SubscriptionManager {
       // Update user subscription data
       const userSubscriptionData: Partial<UserSubscriptionData> = {
         subscriptionStatus: 'canceled',
-        subscriptionTier: 'free',
+        subscriptionTier: 'freemium',
         subscriptionId: undefined,
         subscriptionEndDate: undefined,
         cancelAtPeriodEnd: false,
@@ -257,6 +262,183 @@ export class SubscriptionManager {
 
     } catch (error) {
       this.logger.error('Error handling invoice payment failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle invoice upcoming event
+   */
+  static async handleInvoiceUpcoming(invoice: any): Promise<void> {
+    try {
+      this.logger.logStripeEvent('invoice.upcoming', invoice.id);
+
+      const customerId = invoice.customer;
+      const userId = await UserOperations.getUserByStripeCustomerId(customerId);
+
+      if (!userId) {
+        this.logger.warn(`No user found for customer ${customerId}`);
+        return;
+      }
+
+      // Log upcoming invoice for monitoring
+      this.logger.info(`Upcoming invoice for user ${userId}`, {
+        invoiceId: invoice.id,
+        amount: invoice.amount_due,
+        dueDate: invoice.due_date
+      });
+
+    } catch (error) {
+      this.logger.error('Error handling invoice upcoming:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle invoice created event
+   */
+  static async handleInvoiceCreated(invoice: any): Promise<void> {
+    try {
+      this.logger.logStripeEvent('invoice.created', invoice.id);
+
+      const customerId = invoice.customer;
+      const userId = await UserOperations.getUserByStripeCustomerId(customerId);
+
+      if (!userId) {
+        this.logger.warn(`No user found for customer ${customerId}`);
+        return;
+      }
+
+      // Log invoice creation for monitoring
+      this.logger.info(`Invoice created for user ${userId}`, {
+        invoiceId: invoice.id,
+        amount: invoice.amount_due,
+        subscription: invoice.subscription
+      });
+
+    } catch (error) {
+      this.logger.error('Error handling invoice created:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle invoice finalized event
+   */
+  static async handleInvoiceFinalized(invoice: any): Promise<void> {
+    try {
+      this.logger.logStripeEvent('invoice.finalized', invoice.id);
+
+      const customerId = invoice.customer;
+      const userId = await UserOperations.getUserByStripeCustomerId(customerId);
+
+      if (!userId) {
+        this.logger.warn(`No user found for customer ${customerId}`);
+        return;
+      }
+
+      // Log invoice finalization for monitoring
+      this.logger.info(`Invoice finalized for user ${userId}`, {
+        invoiceId: invoice.id,
+        amount: invoice.amount_due,
+        dueDate: invoice.due_date
+      });
+
+    } catch (error) {
+      this.logger.error('Error handling invoice finalized:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle payment intent failed event
+   */
+  static async handlePaymentIntentFailed(paymentIntent: any): Promise<void> {
+    try {
+      this.logger.logStripeEvent('payment_intent.payment_failed', paymentIntent.id);
+
+      const customerId = paymentIntent.customer;
+      if (!customerId) {
+        this.logger.warn(`No customer ID in payment intent ${paymentIntent.id}`);
+        return;
+      }
+
+      const userId = await UserOperations.getUserByStripeCustomerId(customerId);
+
+      if (!userId) {
+        this.logger.warn(`No user found for customer ${customerId}`);
+        return;
+      }
+
+      // Log payment intent failure for monitoring
+      this.logger.warn(`Payment intent failed for user ${userId}`, {
+        paymentIntentId: paymentIntent.id,
+        amount: paymentIntent.amount,
+        lastPaymentError: paymentIntent.last_payment_error
+      });
+
+    } catch (error) {
+      this.logger.error('Error handling payment intent failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle payment intent succeeded event
+   */
+  static async handlePaymentIntentSucceeded(paymentIntent: any): Promise<void> {
+    try {
+      this.logger.logStripeEvent('payment_intent.succeeded', paymentIntent.id);
+
+      const customerId = paymentIntent.customer;
+      if (!customerId) {
+        this.logger.warn(`No customer ID in payment intent ${paymentIntent.id}`);
+        return;
+      }
+
+      const userId = await UserOperations.getUserByStripeCustomerId(customerId);
+
+      if (!userId) {
+        this.logger.warn(`No user found for customer ${customerId}`);
+        return;
+      }
+
+      // Log payment intent success for monitoring
+      this.logger.info(`Payment intent succeeded for user ${userId}`, {
+        paymentIntentId: paymentIntent.id,
+        amount: paymentIntent.amount
+      });
+
+    } catch (error) {
+      this.logger.error('Error handling payment intent succeeded:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle checkout session completed event
+   */
+  static async handleCheckoutSessionCompleted(session: any): Promise<void> {
+    try {
+      this.logger.logStripeEvent('checkout.session.completed', session.id);
+
+      const customerId = session.customer;
+      const userId = session.metadata?.userId;
+
+      if (!userId) {
+        this.logger.warn(`No user ID in checkout session metadata ${session.id}`);
+        return;
+      }
+
+      // Log checkout completion for monitoring
+      this.logger.info(`Checkout session completed for user ${userId}`, {
+        sessionId: session.id,
+        customerId: customerId,
+        subscriptionId: session.subscription
+      });
+
+    } catch (error) {
+      this.logger.error('Error handling checkout session completed:', error);
       throw error;
     }
   }

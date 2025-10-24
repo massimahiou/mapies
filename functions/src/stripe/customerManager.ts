@@ -34,7 +34,7 @@ export class CustomerManager {
       const userSubscriptionData = {
         stripeCustomerId: customer.id,
         subscriptionStatus: 'free' as const,
-        subscriptionTier: 'free' as const
+        subscriptionTier: 'freemium' as const
       };
 
       await UserOperations.createUserWithSubscription(
@@ -114,7 +114,7 @@ export class CustomerManager {
       // Update user to free tier
       const userSubscriptionData = {
         subscriptionStatus: 'canceled' as const,
-        subscriptionTier: 'free' as const,
+        subscriptionTier: 'freemium' as const,
         subscriptionId: undefined,
         subscriptionEndDate: undefined,
         cancelAtPeriodEnd: false,
