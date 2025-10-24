@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { X, CheckIcon, StarIcon, TestTube } from 'lucide-react'
+import { X, CheckIcon, StarIcon, CreditCard } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import { getUserDocument, updateSubscriptionPlan, UserDocument } from '../firebase/users'
+import { getUserDocument, UserDocument } from '../firebase/users'
 import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 import { stripeService } from '../services/stripe'
 import { STRIPE_CONFIG } from '../config/stripe'
@@ -30,7 +30,7 @@ const PRICING_PLANS = Object.entries(SUBSCRIPTION_PLANS).map(([id, plan]) => ({
 }))
 
 const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = ({ onClose }) => {
-  const { user, refreshUserDocument } = useAuth()
+  const { user } = useAuth()
   const [userDoc, setUserDoc] = useState<UserDocument | null>(null)
   const [loading, setLoading] = useState(true)
   const [upgrading, setUpgrading] = useState(false)
@@ -87,15 +87,7 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
       
     } catch (error) {
       console.error('Error upgrading plan:', error)
-      // Fallback to local upgrade for testing
-      console.log('Falling back to local upgrade...')
-      await updateSubscriptionPlan(user.uid, planId)
-      
-      // Refresh the global user document to update all components
-      await refreshUserDocument()
-      
-      // Also update local state for immediate UI feedback
-      await loadUserData()
+      alert('Payment processing failed. Please try again or contact support.')
     } finally {
       setUpgrading(false)
     }
@@ -122,13 +114,13 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h2 className="text-3xl font-bold text-gray-900">Choose Your Plan</h2>
-              <div className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
-                <TestTube className="w-3 h-3" />
-                Testing Mode
+              <div className="flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                <CreditCard className="w-3 h-3" />
+                Live Payment
               </div>
             </div>
             <p className="text-gray-600 mt-1">Select the perfect plan for your mapping needs</p>
-            <p className="text-sm text-blue-600 mt-1">💡 Changes are applied instantly for testing limitations</p>
+            <p className="text-sm text-green-600 mt-1">💳 Secure payment processing with Stripe</p>
           </div>
           <button
             onClick={onClose}
