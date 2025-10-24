@@ -8,6 +8,7 @@ interface DeleteMapDialogProps {
   mapName: string
   markerCount: number
   isDeleting: boolean
+  isOwnedMap?: boolean
 }
 
 const DeleteMapDialog: React.FC<DeleteMapDialogProps> = ({
@@ -16,7 +17,8 @@ const DeleteMapDialog: React.FC<DeleteMapDialogProps> = ({
   onConfirm,
   mapName,
   markerCount,
-  isDeleting
+  isDeleting,
+  isOwnedMap = true
 }) => {
   if (!isOpen) return null
 
@@ -29,17 +31,24 @@ const DeleteMapDialog: React.FC<DeleteMapDialogProps> = ({
               <AlertTriangle className="w-5 h-5 text-red-600" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Delete Map</h3>
-              <p className="text-sm text-gray-500">This action cannot be undone</p>
+              <h3 className="text-lg font-semibold text-gray-900">
+                {isOwnedMap ? 'Delete Map' : 'Leave Map'}
+              </h3>
+              <p className="text-sm text-gray-500">
+                {isOwnedMap ? 'This action cannot be undone' : 'You can rejoin if invited again'}
+              </p>
             </div>
           </div>
 
           <div className="mb-6">
             <p className="text-gray-700 mb-2">
-              Are you sure you want to delete <strong>"{mapName}"</strong>?
+              Are you sure you want to {isOwnedMap ? 'delete' : 'leave'} <strong>"{mapName}"</strong>?
             </p>
             <p className="text-sm text-gray-600">
-              This will permanently delete the map and all <strong>{markerCount}</strong> markers in it.
+              {isOwnedMap 
+                ? `This will permanently delete the map and all ${markerCount} markers in it.`
+                : `You will no longer have access to this map and its ${markerCount} markers.`
+              }
             </p>
           </div>
 
@@ -59,10 +68,10 @@ const DeleteMapDialog: React.FC<DeleteMapDialogProps> = ({
               {isDeleting ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Deleting...
+                  {isOwnedMap ? 'Deleting...' : 'Leaving...'}
                 </>
               ) : (
-                'Delete Map'
+                isOwnedMap ? 'Delete Map' : 'Leave Map'
               )}
             </button>
           </div>

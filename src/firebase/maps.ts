@@ -14,6 +14,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore'
 import { db } from './config'
+import { UsageTracker } from '../utils/usageTracker'
 import { detectBusinessType } from '../utils/businessDetection'
 
 export interface NameRule {
@@ -99,6 +100,14 @@ export interface MarkerDocument {
 // Create a new map
 export const createMap = async (userId: string, mapData: Omit<MapDocument, 'id' | 'createdAt' | 'updatedAt' | 'userId'>): Promise<string> => {
   try {
+    // Check map limit before creating
+    const userMaps = await getUserMaps(userId)
+    const mapLimitCheck = await UsageTracker.checkMapLimit(userId, userMaps.length)
+    
+    if (!mapLimitCheck.allowed) {
+      throw new Error(`Map limit reached: ${mapLimitCheck.message}`)
+    }
+    
     // Create map in user's collection
     const mapRef = collection(db, 'users', userId, 'maps')
     const docRef = await addDoc(mapRef, {
@@ -112,22 +121,22 @@ export const createMap = async (userId: string, mapData: Omit<MapDocument, 'id' 
       }
     })
     
-            // Also create a public map entry for easy access
-            const publicMapRef = doc(db, 'publicMaps', docRef.id)
-            await setDoc(publicMapRef, {
-              id: docRef.id,
-              ...mapData,
-              userId,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              stats: {
-                markerCount: 0,
-                lastUpdated: serverTimestamp()
-              }
-            })
-            
-            // Create empty public markers collection for future use
-            // Collection is ready for future markers
+    // Update usage statistics
+    await UsageTracker.updateUsage(userId, 'maps', userMaps.length + 1)
+    
+    // Also create a public map entry for easy access
+    const publicMapRef = doc(db, 'publicMaps', docRef.id)
+    await setDoc(publicMapRef, {
+      id: docRef.id,
+      ...mapData,
+      userId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      stats: {
+        markerCount: 0,
+        lastUpdated: serverTimestamp()
+      }
+    })
     
     console.log('Map created successfully:', docRef.id)
     return docRef.id
@@ -330,12 +339,39 @@ export const getMapById = async (mapId: string): Promise<MapDocument | null> => 
 // Update a map
 export const updateMap = async (userId: string, mapId: string, updates: Partial<MapDocument>): Promise<void> => {
   try {
+    console.log('Updating map:', { userId, mapId, updates })
     const mapRef = doc(db, 'users', userId, 'maps', mapId)
-    await updateDoc(mapRef, {
+    console.log('Map reference path:', mapRef.path)
+    
+    // Use updateDoc directly instead of setDoc with merge
+    const updateData = {
       ...updates,
       updatedAt: serverTimestamp()
-    })
-    console.log('Map updated successfully:', mapId)
+    }
+    
+    console.log('Update data to save:', updateData)
+    
+    // Update the user's private map collection
+    await updateDoc(mapRef, updateData)
+    console.log('Map updated successfully in user collection:', mapId)
+    
+    // Also update the public map collection
+    try {
+      const publicMapRef = doc(db, 'publicMaps', mapId)
+      const publicMapSnap = await getDoc(publicMapRef)
+      
+      if (publicMapSnap.exists()) {
+        console.log('Updating public map collection...')
+        await updateDoc(publicMapRef, updateData)
+        console.log('Map updated successfully in public collection:', mapId)
+      } else {
+        console.log('Public map does not exist, skipping public update')
+      }
+    } catch (publicError) {
+      console.error('Error updating public map collection:', publicError)
+      // Don't throw - we don't want to fail the entire operation if public update fails
+    }
+    
   } catch (error) {
     console.error('Error updating map:', error)
     throw error
@@ -345,19 +381,57 @@ export const updateMap = async (userId: string, mapId: string, updates: Partial<
 // Delete a map and all its markers
 export const deleteMap = async (userId: string, mapId: string): Promise<void> => {
   try {
-    // First, delete all markers in the map
+    console.log('Deleting map:', { userId, mapId })
+    
+    // First, delete all markers in the user's private map
     const markersRef = collection(db, 'users', userId, 'maps', mapId, 'markers')
     const markersSnapshot = await getDocs(markersRef)
     
-    // Delete all markers
+    console.log('Found markers to delete:', markersSnapshot.docs.length)
+    
+    // Delete all markers from user's private collection
     const deletePromises = markersSnapshot.docs.map(markerDoc => 
       deleteDoc(doc(db, 'users', userId, 'maps', mapId, 'markers', markerDoc.id))
     )
     await Promise.all(deletePromises)
+    console.log('Deleted all markers from user collection')
     
-    // Then delete the map itself
+    // Also delete markers from public collection
+    try {
+      const publicMarkersRef = collection(db, 'publicMaps', mapId, 'markers')
+      const publicMarkersSnapshot = await getDocs(publicMarkersRef)
+      
+      if (publicMarkersSnapshot.docs.length > 0) {
+        console.log('Found public markers to delete:', publicMarkersSnapshot.docs.length)
+        const publicDeletePromises = publicMarkersSnapshot.docs.map(markerDoc => 
+          deleteDoc(doc(db, 'publicMaps', mapId, 'markers', markerDoc.id))
+        )
+        await Promise.all(publicDeletePromises)
+        console.log('Deleted all markers from public collection')
+      }
+    } catch (publicError) {
+      console.error('Error deleting public markers:', publicError)
+      // Don't throw - we don't want to fail the entire operation if public deletion fails
+    }
+    
+    // Delete the map from user's private collection
     const mapRef = doc(db, 'users', userId, 'maps', mapId)
     await deleteDoc(mapRef)
+    console.log('Deleted map from user collection')
+    
+    // Also delete the map from public collection
+    try {
+      const publicMapRef = doc(db, 'publicMaps', mapId)
+      const publicMapSnap = await getDoc(publicMapRef)
+      
+      if (publicMapSnap.exists()) {
+        await deleteDoc(publicMapRef)
+        console.log('Deleted map from public collection')
+      }
+    } catch (publicError) {
+      console.error('Error deleting public map:', publicError)
+      // Don't throw - we don't want to fail the entire operation if public deletion fails
+    }
     
     console.log('Map and all markers deleted successfully:', mapId)
   } catch (error) {
@@ -384,10 +458,10 @@ export const getMapMarkers = async (userId: string, mapId: string): Promise<Mark
 }
 
 // Add marker to map
-export const addMarkerToMap = async (userId: string, mapId: string, markerData: Omit<MarkerDocument, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'mapId'>): Promise<string> => {
+export const addMarkerToMap = async (userId: string, mapId: string, markerData: Omit<MarkerDocument, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'mapId'>, hasSmartGrouping: boolean = true): Promise<string> => {
   try {
     // Detect business category
-    const businessDetection = detectBusinessType(markerData.name, markerData.address)
+    const businessDetection = detectBusinessType(markerData.name, markerData.address, hasSmartGrouping)
     
     const markerWithCategory = {
       ...markerData,
@@ -484,11 +558,28 @@ export const updateMapStats = async (userId: string, mapId: string): Promise<voi
     const markers = await getMapMarkers(userId, mapId)
     const mapRef = doc(db, 'users', userId, 'maps', mapId)
     
-    await updateDoc(mapRef, {
+    const statsUpdate = {
       'stats.markerCount': markers.length,
       'stats.lastUpdated': serverTimestamp(),
       updatedAt: serverTimestamp()
-    })
+    }
+    
+    // Update user's private map collection
+    await updateDoc(mapRef, statsUpdate)
+    
+    // Also update the public map collection
+    try {
+      const publicMapRef = doc(db, 'publicMaps', mapId)
+      const publicMapSnap = await getDoc(publicMapRef)
+      
+      if (publicMapSnap.exists()) {
+        await updateDoc(publicMapRef, statsUpdate)
+        console.log('Map stats updated in public collection:', mapId)
+      }
+    } catch (publicError) {
+      console.error('Error updating public map stats:', publicError)
+      // Don't throw - we don't want to fail the entire operation if public update fails
+    }
   } catch (error) {
     console.error('Error updating map stats:', error)
     // Don't throw error for stats update failures
@@ -616,21 +707,62 @@ export const removeUserFromMap = async (
   email: string
 ): Promise<void> => {
   try {
+    console.log('🔍 removeUserFromMap called with:', { mapId, ownerId, email })
+    
     const mapRef = doc(db, 'users', ownerId, 'maps', mapId)
+    console.log('📄 Map reference:', mapRef.path)
+    
     const mapDoc = await getDoc(mapRef)
+    console.log('📄 Map document exists:', mapDoc.exists())
     
     if (!mapDoc.exists()) {
       throw new Error('Map not found')
     }
     
     const mapData = mapDoc.data() as MapDocument
+    console.log('📄 Map data:', mapData)
+    
     const currentSharing = mapData.sharing
+    console.log('📄 Current sharing:', currentSharing)
     
     if (!currentSharing) {
       throw new Error('Map is not shared')
     }
     
-    const updatedSharedWith = currentSharing.sharedWith.filter(user => user.email !== email)
+    // Handle different sharing data structures (old vs new maps)
+    let sharedWithList: any[] = []
+    if (Array.isArray(currentSharing.sharedWith)) {
+      sharedWithList = currentSharing.sharedWith
+    } else if (currentSharing.sharedWith && typeof currentSharing.sharedWith === 'object') {
+      // Handle case where sharedWith might be an object instead of array
+      sharedWithList = Object.values(currentSharing.sharedWith)
+    } else {
+      console.log('📄 No valid sharedWith data found')
+      throw new Error('Map sharing data is invalid')
+    }
+    
+    console.log('📄 Shared with list (normalized):', sharedWithList)
+    
+    // Validate that the user is actually in the shared list
+    const userInSharedList = sharedWithList.some((user: any) => {
+      // Handle different user object structures
+      const userEmail = user.email || user.userEmail || user
+      return userEmail === email
+    })
+    
+    console.log('📄 User in shared list:', userInSharedList)
+    console.log('📄 Looking for email:', email)
+    console.log('📄 Available emails:', sharedWithList.map((user: any) => user.email || user.userEmail || user))
+    
+    if (!userInSharedList) {
+      throw new Error('User is not in the shared list')
+    }
+    
+    const updatedSharedWith = sharedWithList.filter((user: any) => {
+      const userEmail = user.email || user.userEmail || user
+      return userEmail !== email
+    })
+    console.log('📄 Updated shared with:', updatedSharedWith)
     
     const updatedSharing = {
       ...currentSharing,
@@ -638,14 +770,22 @@ export const removeUserFromMap = async (
       isShared: updatedSharedWith.length > 0
     }
     
-    await updateDoc(mapRef, {
+    console.log('📄 Updated sharing object:', updatedSharing)
+    console.log('📄 About to update document...')
+    
+    // Ensure we're updating with the correct structure
+    const updateData: any = {
       sharing: updatedSharing,
       updatedAt: serverTimestamp()
-    })
+    }
     
-    console.log('User removed from map:', email)
+    console.log('📄 Update data:', updateData)
+    
+    await updateDoc(mapRef, updateData)
+    
+    console.log('✅ User removed from map successfully:', email)
   } catch (error) {
-    console.error('Error removing user from map:', error)
+    console.error('❌ Error removing user from map:', error)
     throw error
   }
 }
@@ -729,5 +869,31 @@ export const getSharedMaps = async (userEmail: string): Promise<MapDocument[]> =
     console.error('Error getting shared maps:', error)
     throw error
   }
+}
+
+// Helper function to determine if a map is owned by the current user
+export const isMapOwnedByUser = (map: MapDocument, userId: string): boolean => {
+  return map.userId === userId
+}
+
+// Leave a shared map (remove current user from shared map)
+export const leaveSharedMap = async (
+  mapId: string,
+  ownerId: string,
+  userEmail: string
+): Promise<void> => {
+  try {
+    console.log('Leaving shared map:', { mapId, ownerId, userEmail })
+    await removeUserFromMap(mapId, ownerId, userEmail)
+    console.log('Successfully left shared map:', mapId)
+  } catch (error) {
+    console.error('Error leaving shared map:', error)
+    throw error
+  }
+}
+
+// Get map's owner ID from shared maps
+export const getMapOwnerId = (map: MapDocument): string => {
+  return map.userId
 }
 

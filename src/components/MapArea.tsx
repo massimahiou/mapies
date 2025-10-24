@@ -21,11 +21,13 @@ interface MapAreaProps {
   iframeDimensions: { width: number; height: number }
   onIframeDimensionsChange: (dimensions: { width: number; height: number }) => void
   folderIcons?: Record<string, string>
+  onOpenSubscription?: () => void
+  currentMap?: any // Add current map data to determine ownership
 }
 
-const MapArea: React.FC<MapAreaProps> = ({ markers, activeTab, mapSettings, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {} }) => {
+const MapArea: React.FC<MapAreaProps> = ({ markers, activeTab, mapSettings, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {}, onOpenSubscription, currentMap }) => {
   const isPublishMode = activeTab === 'publish'
-  return <Map markers={markers} activeTab={activeTab} mapSettings={mapSettings} isPublishMode={isPublishMode} userLocation={userLocation} locationError={locationError} onGetCurrentLocation={onGetCurrentLocation} iframeDimensions={iframeDimensions} onIframeDimensionsChange={onIframeDimensionsChange} folderIcons={folderIcons} />
+  return <Map markers={markers} activeTab={activeTab} mapSettings={mapSettings} isPublishMode={isPublishMode} userLocation={userLocation} locationError={locationError} onGetCurrentLocation={onGetCurrentLocation} iframeDimensions={iframeDimensions} onIframeDimensionsChange={onIframeDimensionsChange} folderIcons={folderIcons} onOpenSubscription={onOpenSubscription} currentMap={currentMap} />
 }
 
 export default MapArea

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { X, Plus, Trash2 } from 'lucide-react'
+import { X, Plus, Trash2, AlertTriangle } from 'lucide-react'
 import { addMarkerToMap, getMapMarkers } from '../firebase/maps'
 import { checkForDuplicates, AddressData } from '../utils/duplicateDetection'
+import { useFeatureAccess } from '../hooks/useFeatureAccess'
 
 interface Marker {
   id: string
@@ -46,6 +47,7 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
   onShowDuplicateNotification
 }) => {
   console.log('AddMarkerModal rendering, isOpen:', isOpen)
+  const { hasGeocoding, hasSmartGrouping, canAddMarkers } = useFeatureAccess()
   const [markerRows, setMarkerRows] = useState<MarkerRow[]>([
     { id: '1', name: '', address: '' }
   ])
@@ -53,6 +55,12 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
   // Geocoding function using OpenStreetMap Nominatim
   const geocodeAddress = async (address: string): Promise<{lat: number, lng: number} | null> => {
     try {
+      // Check if user has geocoding access
+      if (!hasGeocoding) {
+        console.log('❌ Geocoding not available in current plan')
+        return null
+      }
+
       console.log('Using Nominatim for geocoding:', address)
       
       // Try multiple address variations
@@ -190,6 +198,12 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
       return
     }
 
+    // Check if user has geocoding access for address-based markers
+    if (!hasGeocoding) {
+      alert('❌ Geocoding is not available in your current plan. Please upgrade to add markers by address.')
+      return
+    }
+
     // Prepare address data for duplicate checking
     const addressData: AddressData[] = validRows.map(row => ({
       name: row.name.trim(),
@@ -208,6 +222,12 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
       }))
     } catch (error) {
       console.error('Error loading existing markers:', error)
+    }
+
+    // Check marker limits before processing
+    if (!canAddMarkers(existingMarkers.length)) {
+      alert(`Cannot add more markers. You've reached your limit of ${existingMarkers.length} markers. Upgrade your plan to add more.`)
+      return
     }
 
     // Check for duplicates
@@ -242,7 +262,7 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
             lng: coordinates.lng,
             type: 'other',
             visible: true
-          })
+          }, hasSmartGrouping)
           
           // Also add to local state for immediate UI update
           const marker: Marker = {
@@ -307,6 +327,23 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
+
+        {/* Geocoding Limitation Warning */}
+        {!hasGeocoding && (
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-yellow-600" />
+              <div className="flex-1">
+                <p className="text-sm text-yellow-800 font-medium">
+                  Address Geocoding Limited
+                </p>
+                <p className="text-xs text-yellow-700 mt-1">
+                  Address geocoding is not available in your current plan. You'll need to provide exact coordinates (lat/lng) for markers.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mb-4">
           <p className="text-sm text-gray-600">

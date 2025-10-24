@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Eye, Share2, Plus, Trash2, Settings, ChevronDown, Map, Check, GripVertical, Edit2, X } from 'lucide-react'
+import { Eye, Share2, Plus, Trash2, Settings, ChevronDown, Map, Check, GripVertical, Edit2, X, AlertTriangle } from 'lucide-react'
 import UserProfile from './UserProfile'
 import { useAuth } from '../contexts/AuthContext'
-import { getUserMaps, createMap, deleteMap, updateMap, MapDocument, shareMapWithUser, removeUserFromMap, updateUserRole, SharedUser } from '../firebase/maps'
+import { useToast } from '../contexts/ToastContext'
+import { getUserMaps, createMap, deleteMap, updateMap, MapDocument, shareMapWithUser, removeUserFromMap, updateUserRole, SharedUser, isMapOwnedByUser, leaveSharedMap } from '../firebase/maps'
 import DeleteMapDialog from './DeleteMapDialog'
 import ManageTabContent from './sidebar/ManageTabContent'
 import DataTabContent from './sidebar/DataTabContent'
 import EditTabContent from './sidebar/EditTabContent'
 import PublishTabContent from './sidebar/PublishTabContent'
+import { useFeatureAccess, useUsageWarning } from '../hooks/useFeatureAccess'
 
 interface Marker {
   id: string
@@ -71,6 +73,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   userId
 }) => {
   const { signOut, user } = useAuth()
+  const { showToast } = useToast()
+  const { canCreateMap } = useFeatureAccess()
+  const { showWarning, showError, limit, currentCount } = useUsageWarning('maps', maps.length)
 
   // Generate public share URL
 
@@ -85,6 +90,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [editingMapId, setEditingMapId] = useState<string | null>(null)
   const [editingMapName, setEditingMapName] = useState('')
   const [isRenamingMap, setIsRenamingMap] = useState(false)
+  const editingInputRef = useRef<HTMLInputElement>(null)
   
   // Map sharing state
   const [showSharingModal, setShowSharingModal] = useState(false)
@@ -170,6 +176,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   const handleCreateMap = async () => {
     if (!user || !newMapName.trim()) return
     
+    // Check if user can create more maps
+    if (!canCreateMap(maps.length)) {
+      showToast({
+        type: 'error',
+        title: 'Map Limit Reached',
+        message: `You've reached your map limit (${currentCount}/${limit}). Upgrade your plan to create more maps.`
+      })
+      return
+    }
+    
     setIsCreatingMap(true)
     try {
       // Create map with default settings, ensuring nameRules is empty
@@ -195,17 +211,41 @@ const Sidebar: React.FC<SidebarProps> = ({
       setNewMapName('')
       setShowMapSelector(false)
       
+      showToast({
+        type: 'success',
+        title: 'Success',
+        message: 'Map created successfully!'
+      })
       console.log('Created new map with empty name rules:', mapId)
     } catch (error) {
       console.error('Error creating map:', error)
+      if (error instanceof Error && error.message.includes('Map limit reached')) {
+        showToast({
+          type: 'error',
+          title: 'Map Limit Reached',
+          message: error.message
+        })
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Error',
+          message: 'Failed to create map. Please try again.'
+        })
+      }
     } finally {
       setIsCreatingMap(false)
     }
   }
 
+  // Debug maps changes
+  useEffect(() => {
+    console.log('Maps array changed:', maps.length, 'maps:', maps.map(m => ({ id: m.id, name: m.name })))
+  }, [maps])
+
   // Get current map name
   const getCurrentMapName = () => {
     const currentMap = maps.find(map => map.id === currentMapId)
+    console.log('getCurrentMapName called:', { currentMapId, maps: maps.length, currentMap: currentMap?.name })
     return currentMap ? currentMap.name : 'No map selected'
   }
 
@@ -218,7 +258,10 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   // Handle map rename
   const handleRenameMap = async (mapId: string, newName: string) => {
-    if (!newName.trim() || newName === editingMapName) {
+    console.log('handleRenameMap called:', { mapId, newName, editingMapName })
+    
+    if (!newName.trim()) {
+      console.log('Skipping rename - empty name')
       setEditingMapId(null)
       setEditingMapName('')
       return
@@ -226,12 +269,35 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     setIsRenamingMap(true)
     try {
+      console.log('Calling updateMap with:', { userId: user!.uid, mapId, name: newName.trim() })
       await updateMap(user!.uid, mapId, { name: newName.trim() })
       console.log('Map renamed successfully')
+      
+      // Wait a moment for Firestore to propagate the changes
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Manually refresh the maps list to ensure UI updates
+      console.log('Manually refreshing maps list...')
+      const userMaps = await getUserMaps(user!.uid)
+      console.log('Refreshed maps:', userMaps)
+      onMapsChange(userMaps)
+      
+      // Show success toast
+      showToast({
+        type: 'success',
+        title: 'Success',
+        message: 'Map renamed successfully!'
+      })
+      
       setEditingMapId(null)
       setEditingMapName('')
     } catch (error) {
       console.error('Error renaming map:', error)
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to rename map. Please try again.'
+      })
     } finally {
       setIsRenamingMap(false)
     }
@@ -292,30 +358,121 @@ const Sidebar: React.FC<SidebarProps> = ({
   }
 
   const confirmDeleteMap = async () => {
-    if (!user || !mapToDelete) return
+    if (!user || !mapToDelete) {
+      console.log('Cannot delete map - missing user or mapToDelete:', { user: !!user, mapToDelete: !!mapToDelete })
+      return
+    }
 
+    console.log('Starting map deletion:', { userId: user.uid, mapId: mapToDelete.id, mapName: mapToDelete.name })
     setIsDeletingMap(true)
+    
     try {
       await deleteMap(user.uid, mapToDelete.id!)
+      console.log('Map deletion completed successfully')
       
       // Refresh maps list
+      console.log('Refreshing maps list...')
       const userMaps = await getUserMaps(user.uid)
+      console.log('Refreshed maps:', userMaps.length, 'maps')
       onMapsChange(userMaps)
       
       // If we deleted the current map, select the first available map or clear selection
       if (mapToDelete.id === currentMapId) {
+        console.log('Deleted current map, selecting new map...')
         if (userMaps.length > 0) {
           onMapChange(userMaps[0].id!)
+          console.log('Selected new map:', userMaps[0].name)
         } else {
           onMapChange('')
+          console.log('No maps left, cleared selection')
         }
       }
       
       setShowDeleteDialog(false)
       setMapToDelete(null)
+      
+      showToast({
+        type: 'success',
+        title: 'Success',
+        message: 'Map deleted successfully!'
+      })
     } catch (error) {
       console.error('Error deleting map:', error)
-      alert('Failed to delete map. Please try again.')
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to delete map. Please try again.'
+      })
+    } finally {
+      setIsDeletingMap(false)
+    }
+  }
+
+  // Handle leaving a shared map
+  const handleLeaveMap = (map: MapDocument, e: React.MouseEvent) => {
+    e.stopPropagation() // Prevent map selection
+    setMapToDelete(map)
+    setShowDeleteDialog(true)
+  }
+
+  const confirmLeaveMap = async () => {
+    if (!user || !mapToDelete) {
+      console.log('Cannot leave map - missing user or mapToDelete:', { user: !!user, mapToDelete: !!mapToDelete })
+      return
+    }
+
+    console.log('Starting leave map:', { userId: user.uid, mapId: mapToDelete.id, mapName: mapToDelete.name, ownerId: mapToDelete.userId })
+    setIsDeletingMap(true)
+    
+    try {
+      await leaveSharedMap(mapToDelete.id!, mapToDelete.userId, user.email || '')
+      console.log('Leave map completed successfully')
+      
+      // Refresh maps list - need to refresh both user maps and shared maps
+      console.log('Refreshing maps list...')
+      
+      // Get user's own maps
+      const userMaps = await getUserMaps(user.uid)
+      console.log('User maps:', userMaps.length, 'maps')
+      
+      // Get shared maps
+      const { getSharedMaps } = await import('../firebase/maps')
+      const sharedMaps = await getSharedMaps(user.email || '')
+      console.log('Shared maps:', sharedMaps.length, 'maps')
+      
+      // Combine both lists
+      const allMaps = [...userMaps, ...sharedMaps]
+      console.log('Total maps after refresh:', allMaps.length, 'maps')
+      
+      onMapsChange(allMaps)
+      
+      // If we left the current map, select the first available map or clear selection
+      if (mapToDelete.id === currentMapId) {
+        console.log('Left current map, selecting new map...')
+        if (allMaps.length > 0) {
+          onMapChange(allMaps[0].id!)
+          console.log('Selected new map:', allMaps[0].name)
+        } else {
+          onMapChange('')
+          console.log('No maps left, cleared selection')
+        }
+      }
+      
+      setShowDeleteDialog(false)
+      setMapToDelete(null)
+      
+      showToast({
+        type: 'success',
+        title: 'Success',
+        message: 'Left map successfully!'
+      })
+    } catch (error) {
+      console.error('Error leaving map:', error)
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to leave map. Please try again.'
+      })
     } finally {
       setIsDeletingMap(false)
     }
@@ -356,6 +513,39 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
                 
+                {/* Map Usage Warning */}
+                {(showWarning || showError) && (
+                  <div className={`mb-4 p-3 border rounded-lg ${
+                    showError 
+                      ? 'bg-red-50 border-red-200' 
+                      : 'bg-yellow-50 border-yellow-200'
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className={`w-4 h-4 ${
+                        showError ? 'text-red-600' : 'text-yellow-600'
+                      }`} />
+                      <p className={`text-sm ${
+                        showError ? 'text-red-800' : 'text-yellow-800'
+                      }`}>
+                        {showError 
+                          ? `You've reached your map limit (${currentCount}/${limit}). Upgrade your plan to create more maps.`
+                          : `You're approaching your map limit (${currentCount}/${limit}). Consider upgrading your plan for more capacity.`
+                        }
+                      </p>
+                    </div>
+                    {showError && (
+                      <div className="mt-2">
+                        <button 
+                          onClick={() => {/* TODO: Open upgrade modal */}}
+                          className="text-sm text-red-600 hover:text-red-700 underline"
+                        >
+                          Upgrade Now
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Map Selector */}
                 <div className="mb-4">
                   <div className="relative">
@@ -415,12 +605,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                                       // Edit mode
                                       <div className="flex-1 flex items-center gap-2">
                                         <input
+                                          ref={editingInputRef}
                                           type="text"
                                           value={editingMapName}
                                           onChange={(e) => setEditingMapName(e.target.value)}
                                           onKeyDown={(e) => {
                                             if (e.key === 'Enter') {
-                                              handleRenameMap(map.id!, editingMapName)
+                                              handleRenameMap(map.id!, (e.target as HTMLInputElement).value)
                                             } else if (e.key === 'Escape') {
                                               cancelEditingMap()
                                             }
@@ -430,7 +621,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                                           disabled={isRenamingMap}
                                         />
                                         <button
-                                          onClick={() => handleRenameMap(map.id!, editingMapName)}
+                                          onClick={() => {
+                                            const currentValue = editingInputRef.current?.value || editingMapName
+                                            handleRenameMap(map.id!, currentValue)
+                                          }}
                                           disabled={isRenamingMap}
                                           className="p-1 text-green-600 hover:text-green-700 transition-colors"
                                           title="Save"
@@ -464,27 +658,38 @@ const Sidebar: React.FC<SidebarProps> = ({
                                           </div>
                                         </button>
                                         <div className="flex items-center gap-1 ml-2">
+                                          {isMapOwnedByUser(map, user!.uid) && (
+                                            <>
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  setShowSharingModal(true)
+                                                }}
+                                                className="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                                                title="Share map"
+                                              >
+                                                <Share2 className="w-3 h-3" />
+                                              </button>
+                                              <button
+                                                onClick={(e) => startEditingMap(map, e)}
+                                                className="p-1 text-gray-400 hover:text-pinz-600 transition-colors"
+                                                title="Rename map"
+                                              >
+                                                <Edit2 className="w-3 h-3" />
+                                              </button>
+                                            </>
+                                          )}
                                           <button
                                             onClick={(e) => {
-                                              e.stopPropagation()
-                                              setShowSharingModal(true)
+                                              const isOwned = isMapOwnedByUser(map, user!.uid)
+                                              if (isOwned) {
+                                                handleDeleteMap(map, e)
+                                              } else {
+                                                handleLeaveMap(map, e)
+                                              }
                                             }}
-                                            className="p-1 text-gray-400 hover:text-green-600 transition-colors"
-                                            title="Share map"
-                                          >
-                                            <Share2 className="w-3 h-3" />
-                                          </button>
-                                          <button
-                                            onClick={(e) => startEditingMap(map, e)}
-                                            className="p-1 text-gray-400 hover:text-pinz-600 transition-colors"
-                                            title="Rename map"
-                                          >
-                                            <Edit2 className="w-3 h-3" />
-                                          </button>
-                                          <button
-                                            onClick={(e) => handleDeleteMap(map, e)}
                                             className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                            title="Delete map"
+                                            title={isMapOwnedByUser(map, user!.uid) ? "Delete map" : "Leave map"}
                                           >
                                             <Trash2 className="w-3 h-3" />
                                           </button>
@@ -631,6 +836,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             isUploading={isUploading}
             uploadProgress={uploadProgress}
             onOpenModal={onOpenDataManagementModal}
+            currentMarkerCount={markers.length}
           />
         )}
 
@@ -646,6 +852,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             userId={userId}
             mapId={currentMapId || undefined}
             onOpenModal={onOpenMarkerManagementModal}
+            currentMap={maps.find(m => m.id === currentMapId)}
           />
         )}
 
@@ -1130,10 +1337,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       <DeleteMapDialog
         isOpen={showDeleteDialog}
         onClose={() => setShowDeleteDialog(false)}
-        onConfirm={confirmDeleteMap}
+        onConfirm={mapToDelete && user ? (isMapOwnedByUser(mapToDelete, user.uid) ? confirmDeleteMap : confirmLeaveMap) : confirmDeleteMap}
         mapName={mapToDelete?.name || ''}
         markerCount={mapToDelete?.stats?.markerCount || 0}
         isDeleting={isDeletingMap}
+        isOwnedMap={mapToDelete && user ? isMapOwnedByUser(mapToDelete, user.uid) : true}
       />
 
       {/* Sharing Modal */}

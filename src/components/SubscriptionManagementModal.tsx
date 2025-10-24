@@ -1,86 +1,34 @@
 import React, { useState, useEffect } from 'react'
-import { X, CheckIcon, StarIcon } from 'lucide-react'
+import { X, CheckIcon, StarIcon, TestTube } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { getUserDocument, updateSubscriptionPlan, UserDocument } from '../firebase/users'
+import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 
 interface SubscriptionManagementModalProps {
   onClose: () => void
 }
 
-// Pricing plans data structure
-const PRICING_PLANS = [
-  {
-    id: 'freemium',
-    name: 'Freemium',
-    price: 0,
-    positions: '0-50',
-    perPosition: 0.000,
-    features: {
-      watermark: true,
-      bulkImport: true,
-      customization: 'Basic',
-      geocoding: false,
-      smartGrouping: false,
-      maps: 1
-    },
-    popular: false,
-    description: 'Perfect for getting started'
+// Convert SUBSCRIPTION_PLANS to display format
+const PRICING_PLANS = Object.entries(SUBSCRIPTION_PLANS).map(([id, plan]) => ({
+  id,
+  name: plan.name,
+  price: plan.price,
+  positions: `0-${plan.maxMarkersPerMap}`,
+  perPosition: plan.price > 0 ? plan.price / plan.maxMarkersPerMap : 0,
+  features: {
+    watermark: plan.watermark,
+    bulkImport: plan.bulkImport,
+    customization: plan.customizationLevel === 'premium' ? 'Premium' : 'Basic',
+    geocoding: plan.geocoding,
+    smartGrouping: plan.smartGrouping,
+    maps: plan.maxMaps
   },
-  {
-    id: 'premium',
-    name: 'Starter',
-    price: 14,
-    positions: '50-500',
-    perPosition: 0.028,
-    features: {
-      watermark: false,
-      bulkImport: true,
-      customization: 'Premium',
-      geocoding: true,
-      smartGrouping: false,
-      maps: 3
-    },
-    popular: false,
-    description: 'Great for small businesses'
-  },
-  {
-    id: 'pro',
-    name: 'Professional',
-    price: 36,
-    positions: '501-1500',
-    perPosition: 0.024,
-    features: {
-      watermark: false,
-      bulkImport: true,
-      customization: 'Premium',
-      geocoding: true,
-      smartGrouping: true,
-      maps: 5
-    },
-    popular: true,
-    description: 'Most popular choice'
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    price: 48,
-    positions: '1501-3000',
-    perPosition: 0.016,
-    features: {
-      watermark: false,
-      bulkImport: true,
-      customization: 'Premium',
-      geocoding: true,
-      smartGrouping: true,
-      maps: 10
-    },
-    popular: false,
-    description: 'For large organizations'
-  }
-]
+  popular: plan.popular || false,
+  description: plan.description
+}))
 
 const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = ({ onClose }) => {
-  const { user } = useAuth()
+  const { user, refreshUserDocument } = useAuth()
   const [userDoc, setUserDoc] = useState<UserDocument | null>(null)
   const [loading, setLoading] = useState(true)
   const [upgrading, setUpgrading] = useState(false)
@@ -105,13 +53,18 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
     }
   }
 
-  const handlePlanSelect = async (planId: 'free' | 'pro' | 'enterprise' | 'freemium' | 'premium') => {
+  const handlePlanSelect = async (planId: 'freemium' | 'starter' | 'professional' | 'enterprise') => {
     if (!user) return
     
     try {
       setUpgrading(true)
-      // Frontend only - no Stripe integration for now
+      // Frontend only - no Stripe integration for testing
       await updateSubscriptionPlan(user.uid, planId)
+      
+      // Refresh the global user document to update all components
+      await refreshUserDocument()
+      
+      // Also update local state for immediate UI feedback
       await loadUserData()
     } catch (error) {
       console.error('Error updating plan:', error)
@@ -139,8 +92,15 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div>
-            <h2 className="text-3xl font-bold text-gray-900">Choose Your Plan</h2>
+            <div className="flex items-center gap-3 mb-2">
+              <h2 className="text-3xl font-bold text-gray-900">Choose Your Plan</h2>
+              <div className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
+                <TestTube className="w-3 h-3" />
+                Testing Mode
+              </div>
+            </div>
             <p className="text-gray-600 mt-1">Select the perfect plan for your mapping needs</p>
+            <p className="text-sm text-blue-600 mt-1">💡 Changes are applied instantly for testing limitations</p>
           </div>
           <button
             onClick={onClose}
@@ -257,7 +217,7 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
 
                 {/* Action Button */}
                 <button
-                  onClick={() => handlePlanSelect(plan.id as 'free' | 'pro' | 'enterprise' | 'freemium' | 'premium')}
+                  onClick={() => handlePlanSelect(plan.id as 'freemium' | 'starter' | 'professional' | 'enterprise')}
                   disabled={upgrading || currentPlan === plan.id}
                   className={`w-full py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
                     currentPlan === plan.id
@@ -275,9 +235,9 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
                   ) : currentPlan === plan.id ? (
                     'Current Plan'
                   ) : plan.price === 0 ? (
-                    'Get Started'
+                    'Test Freemium'
                   ) : (
-                    'Choose Plan'
+                    'Test This Plan'
                   )}
                 </button>
               </div>

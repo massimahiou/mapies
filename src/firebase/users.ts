@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore'
 import { db } from './config'
 import { User } from 'firebase/auth'
+import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 
 // User document interface
 export interface UserDocument {
@@ -31,17 +32,35 @@ export interface UserDocument {
     notifications: boolean
   }
   subscription?: {
-    plan: 'free' | 'pro' | 'enterprise' | 'freemium' | 'premium'
+    plan: 'freemium' | 'starter' | 'professional' | 'enterprise'
     status: 'active' | 'inactive' | 'cancelled'
     expiresAt?: Date
     stripeCustomerId?: string
   }
   limits?: {
+    // Marker limits
+    maxMarkersPerMap: number
+    maxTotalMarkers: number
+    
+    // Map limits
+    maxMaps: number
+    
+    // Feature flags
+    watermark: boolean
+    bulkImport: boolean
+    geocoding: boolean
+    smartGrouping: boolean
+    
+    // Customization levels
+    customizationLevel: 'basic' | 'premium'
+    
+    // Storage limits
+    maxStorageMB: number
+    
+    // Legacy fields for backward compatibility
     maps: number
     markers: number
     storage: number
-    maxMaps: number
-    maxMarkersPerMap: number
   }
   usage?: {
     maps: number
@@ -56,42 +75,72 @@ export interface UserDocument {
 export const createUserDocument = async (user: User, additionalData?: Partial<UserDocument>): Promise<void> => {
   try {
     const userRef = doc(db, 'users', user.uid)
+    const existingDoc = await getDoc(userRef)
     
-    const userDoc: UserDocument = {
-      uid: user.uid,
-      email: user.email || '',
-      displayName: user.displayName || '',
-      emailVerified: user.emailVerified,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      lastLoginAt: new Date(),
-      profile: {
-        firstName: '',
-        lastName: '',
-        company: '',
-        phone: '',
-        avatar: ''
-      },
-      preferences: {
-        theme: 'light',
-        language: 'en',
-        notifications: true
-      },
-      subscription: {
-        plan: 'free',
-        status: 'active'
-      },
-      ...additionalData
+    if (!existingDoc.exists()) {
+      const plan = additionalData?.subscription?.plan || 'freemium'
+      const planLimits = SUBSCRIPTION_PLANS[plan]
+      
+      const userDoc: UserDocument = {
+        uid: user.uid,
+        email: user.email || '',
+        displayName: user.displayName || '',
+        emailVerified: user.emailVerified,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastLoginAt: new Date(),
+        profile: {
+          firstName: '',
+          lastName: '',
+          company: '',
+          phone: '',
+          avatar: ''
+        },
+        preferences: {
+          theme: 'light',
+          language: 'en',
+          notifications: true
+        },
+        subscription: {
+          plan: plan as any,
+          status: 'active',
+          ...additionalData?.subscription
+        },
+        limits: {
+          // Set limits based on plan
+          maxMarkersPerMap: planLimits.maxMarkersPerMap,
+          maxTotalMarkers: planLimits.maxTotalMarkers,
+          maxMaps: planLimits.maxMaps,
+          watermark: planLimits.watermark,
+          bulkImport: planLimits.bulkImport,
+          geocoding: planLimits.geocoding,
+          smartGrouping: planLimits.smartGrouping,
+          customizationLevel: planLimits.customizationLevel,
+          maxStorageMB: planLimits.maxStorageMB,
+          // Legacy fields
+          maps: planLimits.maxMaps,
+          markers: planLimits.maxMarkersPerMap,
+          storage: planLimits.maxStorageMB
+        },
+        usage: {
+          maps: 0,
+          markers: 0,
+          storage: 0,
+          mapsCount: 0,
+          markersCount: 0
+        },
+        ...additionalData
+      }
+
+      await setDoc(userRef, {
+        ...userDoc,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp()
+      })
+
+      console.log('User document created successfully:', user.uid)
     }
-
-    await setDoc(userRef, {
-      ...userDoc,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      lastLoginAt: serverTimestamp()
-    })
-
-    console.log('User document created successfully:', user.uid)
   } catch (error) {
     console.error('Error creating user document:', error)
     throw error
@@ -184,15 +233,38 @@ export const updateLastLogin = async (uid: string): Promise<void> => {
 }
 
 // Update subscription plan
-export const updateSubscriptionPlan = async (uid: string, plan: 'free' | 'pro' | 'enterprise' | 'freemium' | 'premium', stripeCustomerId?: string): Promise<void> => {
+export const updateSubscriptionPlan = async (uid: string, plan: 'freemium' | 'starter' | 'professional' | 'enterprise', stripeCustomerId?: string): Promise<void> => {
   try {
     const userRef = doc(db, 'users', uid)
-    await updateDoc(userRef, {
+    const planLimits = SUBSCRIPTION_PLANS[plan]
+    
+    // Build update object dynamically to avoid undefined values
+    const updateData: any = {
       'subscription.plan': plan,
       'subscription.status': 'active',
-      'subscription.stripeCustomerId': stripeCustomerId,
+      // Update limits based on new plan
+      'limits.maxMarkersPerMap': planLimits.maxMarkersPerMap,
+      'limits.maxTotalMarkers': planLimits.maxTotalMarkers,
+      'limits.maxMaps': planLimits.maxMaps,
+      'limits.watermark': planLimits.watermark,
+      'limits.bulkImport': planLimits.bulkImport,
+      'limits.geocoding': planLimits.geocoding,
+      'limits.smartGrouping': planLimits.smartGrouping,
+      'limits.customizationLevel': planLimits.customizationLevel,
+      'limits.maxStorageMB': planLimits.maxStorageMB,
+      // Legacy fields
+      'limits.maps': planLimits.maxMaps,
+      'limits.markers': planLimits.maxMarkersPerMap,
+      'limits.storage': planLimits.maxStorageMB,
       updatedAt: serverTimestamp()
-    })
+    }
+    
+    // Only add stripeCustomerId if provided
+    if (stripeCustomerId !== undefined) {
+      updateData['subscription.stripeCustomerId'] = stripeCustomerId
+    }
+    
+    await updateDoc(userRef, updateData)
     console.log('Subscription plan updated successfully:', uid, plan)
   } catch (error) {
     console.error('Error updating subscription plan:', error)

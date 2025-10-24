@@ -1,5 +1,6 @@
 import React from 'react'
 import { Plus, Upload, Maximize2 } from 'lucide-react'
+import { useFeatureAccess } from '../../hooks/useFeatureAccess'
 
 interface DataTabContentProps {
   onShowAddMarkerModal: () => void
@@ -7,6 +8,7 @@ interface DataTabContentProps {
   isUploading?: boolean
   uploadProgress?: { processed: number; total: number; currentAddress: string }
   onOpenModal?: () => void
+  currentMarkerCount?: number
 }
 
 const DataTabContent: React.FC<DataTabContentProps> = ({
@@ -14,8 +16,13 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
   onShowCsvModal,
   isUploading = false,
   uploadProgress = { processed: 0, total: 0, currentAddress: '' },
-  onOpenModal
+  onOpenModal,
+  currentMarkerCount = 0
 }) => {
+  const { hasBulkImport, hasGeocoding, canAddMarkers } = useFeatureAccess()
+  
+  // Check if user can add more markers
+  const canAddMoreMarkers = canAddMarkers(currentMarkerCount)
   return (
     <div className="p-4">
       {/* Header with Modal Button */}
@@ -39,7 +46,19 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
             console.log('Add marker button clicked')
             onShowAddMarkerModal()
           }}
-          className="btn-primary w-full flex items-center gap-2"
+          disabled={!hasGeocoding || !canAddMoreMarkers}
+          className={`w-full flex items-center gap-2 ${
+            hasGeocoding && canAddMoreMarkers
+              ? 'btn-primary' 
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200'
+          }`}
+          title={
+            !hasGeocoding 
+              ? 'Geocoding not available in your plan' 
+              : !canAddMoreMarkers 
+                ? 'Marker limit reached - upgrade your plan' 
+                : 'Add a marker by address'
+          }
         >
           <Plus className="w-4 h-4" />
           Add a marker
@@ -49,7 +68,19 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
             console.log('Import CSV button clicked')
             onShowCsvModal()
           }}
-          className="btn-secondary w-full flex items-center gap-2"
+          disabled={!hasBulkImport || !canAddMoreMarkers}
+          className={`w-full flex items-center gap-2 ${
+            hasBulkImport && canAddMoreMarkers
+              ? 'btn-secondary' 
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200'
+          }`}
+          title={
+            !hasBulkImport 
+              ? 'CSV import not available in your plan' 
+              : !canAddMoreMarkers 
+                ? 'Marker limit reached - upgrade your plan' 
+                : 'Import markers from CSV file'
+          }
         >
           <Upload className="w-4 h-4" />
           Import a Spreadsheet

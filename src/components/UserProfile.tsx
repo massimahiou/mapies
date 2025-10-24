@@ -3,6 +3,7 @@ import { User, LogOut, CreditCard } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SubscriptionManagementModal from './SubscriptionManagementModal'
 import SubscriptionPlans from './SubscriptionPlans'
+import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 
 interface UserProfileProps {
   onSignOut: () => void
@@ -13,6 +14,9 @@ const UserProfile: React.FC<UserProfileProps> = ({ onSignOut }) => {
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
 
   if (!user) return null
+
+  const currentPlan = userDocument?.subscription?.plan || 'freemium'
+  const planInfo = SUBSCRIPTION_PLANS[currentPlan] || SUBSCRIPTION_PLANS.freemium
 
   return (
     <div className="space-y-3">
@@ -28,7 +32,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onSignOut }) => {
             {userDocument && (
               <div className="flex items-center gap-1 text-pinz-600">
                 <span className="text-xs">•</span>
-                <span className="text-xs capitalize">{userDocument.subscription?.plan || 'free'}</span>
+                <span className="text-xs">{planInfo.name}</span>
               </div>
             )}
           </div>

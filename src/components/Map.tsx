@@ -7,7 +7,13 @@ import { Navigation, MapPin, Search, X, List } from 'lucide-react'
 import { Rnd } from 'react-rnd'
 import PublicMapSidebar from './PublicMapSidebar'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
+import { useSharedMapFeatureAccess } from '../hooks/useSharedMapFeatureAccess'
+import MapFeatureLevelHeader from './MapFeatureLevelHeader'
 import { useResponsive } from '../hooks/useResponsive'
+import { useAuth } from '../contexts/AuthContext'
+import InteractiveWatermark from './InteractiveWatermark'
+import { validateMapAgainstPlan, getPremiumFeatureDescription } from '../utils/mapValidation'
+import { isMapOwnedByUser } from '../firebase/maps'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -47,10 +53,14 @@ interface MapProps {
   iframeDimensions: { width: number; height: number }
   onIframeDimensionsChange: (dimensions: { width: number; height: number }) => void
   folderIcons?: Record<string, string>
+  onOpenSubscription?: () => void // New prop for opening subscription modal
+  currentMap?: any // Add current map data to determine ownership
 }
 
-const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMode, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {} }) => {
+const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMode, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {}, onOpenSubscription, currentMap }) => {
   const { isMobile } = useResponsive()
+  const { showWatermark, planLimits, currentPlan, mapInheritance } = useSharedMapFeatureAccess(currentMap)
+  const { user } = useAuth()
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<L.Map | null>(null)
   const markersRef = useRef<L.Marker[]>([])
@@ -71,11 +81,26 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   
   const visibleMarkers = markers.filter(marker => marker.visible)
   
+  // Determine if this is a shared map or owned map
+  const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid) : true
+  
+  // For owned maps: validate against owner's plan (current behavior)
+  // For shared maps: allow shared user to use their own permissions without disabling the map
+  const mapValidation = isOwnedMap 
+    ? validateMapAgainstPlan(markers, mapSettings, currentPlan, folderIcons)
+    : { isValid: true, premiumFeaturesUsed: [] } // Always allow shared maps
+  
+  const isMapDisabled = !mapValidation.isValid
+  
   console.log('📍 Map component - visibleMarkers:', {
     isPublishMode,
     dashboardMarkersCount: markers.length,
     visibleMarkersCount: visibleMarkers.length,
-    visibleMarkers: visibleMarkers
+    visibleMarkers: visibleMarkers,
+    isMapDisabled,
+    maxMarkersPerMap: planLimits.maxMarkersPerMap,
+    isOwnedMap,
+    currentPlan
   })
 
   // Calculate distance between two points using Haversine formula
@@ -558,11 +583,22 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       mapLoaded,
       markerClusterRef: !!markerClusterRef.current,
       visibleMarkersCount: visibleMarkers.length,
-      isPublishMode
+      isPublishMode,
+      isMapDisabled
     })
     
-    if (!mapInstance.current || !mapLoaded || !markerClusterRef.current) {
-      console.log('📍 Skipping markers update - missing requirements')
+    // Only disable markers in publish mode (embed preview), not in manage tab
+    const shouldDisableMarkers = isPublishMode && isMapDisabled
+    
+    if (!mapInstance.current || !mapLoaded || !markerClusterRef.current || shouldDisableMarkers) {
+      console.log('📍 Skipping markers update - missing requirements or map disabled in publish mode:', {
+        mapInstance: !!mapInstance.current,
+        mapLoaded,
+        markerCluster: !!markerClusterRef.current,
+        isPublishMode,
+        isMapDisabled,
+        shouldDisableMarkers
+      })
       return
     }
 
@@ -575,8 +611,22 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     // Add new markers to cluster group
     visibleMarkers.forEach(marker => {
       // Check if marker belongs to a folder with custom icon
-      const markerRenamedName = applyNameRules(marker.name, mapSettings.nameRules || [])
-      const folderIconUrl = folderIcons[markerRenamedName]
+      const markerRenamedName = applyNameRules(marker.name, mapSettings.nameRules || [], true)
+      
+      // Try to find folder icon with case-insensitive matching
+      let folderIconUrl = folderIcons[markerRenamedName]
+      if (!folderIconUrl) {
+        // Try case-insensitive matching
+        const availableKeys = Object.keys(folderIcons)
+        const matchingKey = availableKeys.find(key => 
+          key.toLowerCase() === markerRenamedName.toLowerCase() ||
+          markerRenamedName.toLowerCase().includes(key.toLowerCase()) ||
+          key.toLowerCase().includes(markerRenamedName.toLowerCase())
+        )
+        if (matchingKey) {
+          folderIconUrl = folderIcons[matchingKey]
+        }
+      }
       
       // Create marker using unified utility that respects ALL user settings
       // Use 24px for publish mode (embed preview), otherwise use user's size setting
@@ -596,7 +646,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       const markerInstance = L.marker([marker.lat, marker.lng], { icon: customIcon })
         .bindPopup(`
           <div style="padding: 8px; font-family: system-ui, sans-serif;">
-            <div style="font-weight: 600; color: #000; font-size: 14px; margin: 0 0 4px 0;">${applyNameRules(marker.name, mapSettings.nameRules)}</div>
+            <div style="font-weight: 600; color: #000; font-size: 14px; margin: 0 0 4px 0;">${applyNameRules(marker.name, mapSettings.nameRules, true)}</div>
             <div style="color: #666; font-size: 12px; margin: 0;">${marker.address}</div>
           </div>
         `)
@@ -612,7 +662,20 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       mapInstance.current.invalidateSize()
       mapInstance.current.fitBounds(markerClusterRef.current.getBounds().pad(0.1))
     }
-  }, [visibleMarkers, mapLoaded, mapSettings.markerShape, mapSettings.markerColor, mapSettings.markerSize, mapSettings.markerBorder, mapSettings.markerBorderWidth, mapSettings.clusteringEnabled, mapSettings.clusterRadius, folderIcons])
+  }, [visibleMarkers, mapLoaded, mapSettings.markerShape, mapSettings.markerColor, mapSettings.markerSize, mapSettings.markerBorder, mapSettings.markerBorderWidth, mapSettings.clusteringEnabled, mapSettings.clusterRadius, folderIcons, isPublishMode, isMapDisabled])
+
+  // Clear markers when map becomes disabled in publish mode
+  useEffect(() => {
+    if (!mapInstance.current || !mapLoaded || !markerClusterRef.current) return
+    
+    const shouldDisableMarkers = isPublishMode && isMapDisabled
+    
+    if (shouldDisableMarkers) {
+      console.log('📍 Clearing markers due to map disabled in publish mode')
+      markerClusterRef.current.clearLayers()
+      markersRef.current = []
+    }
+  }, [isPublishMode, isMapDisabled, mapLoaded])
 
   // Update user location marker
   useEffect(() => {
@@ -681,6 +744,14 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
 
   return (
     <div className={`flex-1 bg-gray-100 relative ${isPublishMode ? 'publish-mode overflow-visible' : ''}`}>
+      {/* Map Feature Level Header - Only show for shared maps */}
+      {mapInheritance && !isPublishMode && (
+        <MapFeatureLevelHeader 
+          mapInheritance={mapInheritance} 
+          onUpgrade={onOpenSubscription}
+        />
+      )}
+      
       {isPublishMode ? (
         // Embed preview mode - full page resizable container
         <div className="w-full h-full relative overflow-visible">
@@ -744,8 +815,41 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                 </div>
               </div>
               
-              {/* Show Results Button - Only show in mobile-sized embed preview */}
-              {isMobile && !showEmbedMobileResults && (
+              {/* Disabled Map Message - Show if limits exceeded */}
+              {isMapDisabled && (
+                <div className="flex-1 flex items-center justify-center bg-gray-50">
+                  <div className="text-center p-6">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+                      <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Map Disabled</h3>
+                    <p className="text-gray-600 mb-4">
+                      This map uses premium features not available in your current plan.
+                    </p>
+                    {mapValidation.premiumFeaturesUsed.length > 0 && (
+                      <div className="text-sm text-gray-500 mb-4">
+                        <p className="font-medium mb-2">Premium features used:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          {mapValidation.premiumFeaturesUsed.map(feature => (
+                            <li key={feature}>{getPremiumFeatureDescription(feature)}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <p className="text-sm text-gray-500">
+                      Upgrade your plan to continue using this map.
+                    </p>
+                  </div>
+                </div>
+              )}
+              
+              {/* Map Content - Only show if not disabled */}
+              {!isMapDisabled && (
+                <>
+                  {/* Show Results Button - Only show in mobile-sized embed preview */}
+                  {isMobile && !showEmbedMobileResults && (
                 <button
                   onClick={() => setShowEmbedMobileResults(true)}
                   className="absolute bottom-2 left-2 z-[1000] p-2 rounded-lg shadow-lg border bg-white hover:bg-gray-50 text-gray-700 border-gray-200 hover:border-gray-300 hover:shadow-xl transition-all duration-200"
@@ -776,7 +880,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                   {/* Ultra-thin horizontal scrolling results */}
                   <div className="bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-white/20 overflow-hidden">
                     <div className="flex overflow-x-auto scrollbar-hide py-2 px-3 space-x-2">
-                      {(searchTerm || locationModeActive ? searchResults : markers.sort(() => Math.random() - 0.5)).slice(0, 30).map((marker) => (
+                      {(searchTerm || locationModeActive ? searchResults : (isMapDisabled ? [] : markers.sort(() => Math.random() - 0.5))).slice(0, 30).map((marker) => (
                         <button
                           key={marker.id}
                           onClick={() => navigateToMarker(marker)}
@@ -843,7 +947,15 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                       width: '100%', 
                       zIndex: 1 
                     }} 
-                  />
+                    className="relative"
+                  >
+                    {/* Interactive Watermark - Only show if required by subscription */}
+                    {showWatermark && (
+                      <InteractiveWatermark 
+                        mode="static"
+                      />
+                    )}
+                  </div>
                   
               {/* Mobile Search Bar - Always show in embed preview */}
               <div className="absolute top-2 left-2 right-2 z-[1000]">
@@ -886,13 +998,23 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                   {/* Location Button - Hidden in embed preview since mobile search bar has location button */}
                 </div>
               </div>
+                </>
+              )}
             </div>
           </Rnd>
         </div>
       ) : (
         // Regular dashboard mode - use existing layout
         <>
-          <div ref={mapRef} style={{ height: '100%', width: '100%', zIndex: 1 }} />
+          <div ref={mapRef} style={{ height: '100%', width: '100%', zIndex: 1 }} className="relative">
+            {/* Interactive Watermark - Only show if required by subscription */}
+            {showWatermark && (
+              <InteractiveWatermark 
+                mode="dashboard"
+                onUpgrade={onOpenSubscription}
+              />
+            )}
+          </div>
           {isLoadingTiles && (
             <div className="absolute top-4 right-4 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center gap-2 z-10">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
@@ -999,7 +1121,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                           <span className="text-lg">{getMarkerIcon(marker.type)}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate" style={{ color: mapSettings.searchBarTextColor }}>
-                              {applyNameRules(marker.name, mapSettings.nameRules)}
+                              {applyNameRules(marker.name, mapSettings.nameRules, true)}
                             </p>
                             <p className="text-xs truncate" style={{ color: mapSettings.searchBarTextColor, opacity: 0.7 }}>
                               {marker.address}

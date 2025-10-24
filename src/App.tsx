@@ -24,6 +24,8 @@ import { createMap, addMarkerToMap, MapDocument, getMapMarkers, deleteMapMarker,
 import { migrateSpecificMap } from './firebase/migration'
 import { checkForDuplicates, checkForInternalDuplicates, AddressData } from './utils/duplicateDetection'
 import DuplicateNotification from './components/DuplicateNotification'
+import SubscriptionManagementModal from './components/SubscriptionManagementModal'
+import { useFeatureAccess } from './hooks/useFeatureAccess'
 
 
 // Types
@@ -42,6 +44,7 @@ const mockMarkers: Marker[] = []
 
 const AppContent: React.FC = () => {
   const { user, loading, signOut } = useAuth()
+  const { hasGeocoding, hasSmartGrouping, canAddMarkers } = useFeatureAccess()
 
   // Handle sign out
   const handleSignOut = async () => {
@@ -84,6 +87,7 @@ const AppContent: React.FC = () => {
   const [showDataManagementModal, setShowDataManagementModal] = useState(false)
   const [showEditManagementModal, setShowEditManagementModal] = useState(false)
   const [showPublishManagementModal, setShowPublishManagementModal] = useState(false)
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null)
   const [locationError, setLocationError] = useState('')
   
@@ -132,8 +136,14 @@ const AppContent: React.FC = () => {
     const newVisibility = !marker.visible
 
     try {
+      // Determine the correct user ID for marker operations
+      // For owned maps: use current user's ID
+      // For shared maps: use map owner's ID
+      const currentMap = maps.find(m => m.id === currentMapId)
+      const mapOwnerId = currentMap?.userId || user.uid
+
       // Update in Firestore
-      await updateMapMarker(user.uid, currentMapId, id, {
+      await updateMapMarker(mapOwnerId, currentMapId, id, {
         visible: newVisibility
       })
       
@@ -156,8 +166,14 @@ const AppContent: React.FC = () => {
     }
 
     try {
+      // Determine the correct user ID for marker operations
+      // For owned maps: use current user's ID
+      // For shared maps: use map owner's ID
+      const currentMap = maps.find(m => m.id === currentMapId)
+      const mapOwnerId = currentMap?.userId || user.uid
+
       // Delete from Firestore
-      await deleteMapMarker(user.uid, currentMapId, id)
+      await deleteMapMarker(mapOwnerId, currentMapId, id)
       
       // Update local state
       setMarkers(markers.filter(marker => marker.id !== id))
@@ -257,8 +273,16 @@ const AppContent: React.FC = () => {
 
     console.log('🔄 Setting up real-time listeners for map:', currentMapId)
 
+    // Determine the correct user ID for marker loading
+    // For owned maps: use current user's ID
+    // For shared maps: use map owner's ID
+    const currentMap = maps.find(m => m.id === currentMapId)
+    const mapOwnerId = currentMap?.userId || user.uid
+    
+    console.log('📍 Loading markers for map:', currentMapId, 'owner:', mapOwnerId, 'current user:', user.uid)
+    
     // Listen to map markers in real-time
-    const unsubscribeMarkers = subscribeToMapMarkers(user.uid, currentMapId, (mapMarkers) => {
+    const unsubscribeMarkers = subscribeToMapMarkers(mapOwnerId, currentMapId, (mapMarkers) => {
       console.log('📍 Markers updated from Firestore:', mapMarkers.length)
       
       // Convert Firestore markers to local Marker format
@@ -289,7 +313,7 @@ const AppContent: React.FC = () => {
     })
 
     // Listen to map document changes for settings updates
-    const unsubscribeMapSettings = subscribeToMapDocument(user.uid, currentMapId, async (mapData) => {
+    const unsubscribeMapSettings = subscribeToMapDocument(mapOwnerId, currentMapId, async (mapData) => {
       if (mapData && mapData.settings) {
         console.log('⚙️ Map settings updated from Firestore')
         
@@ -335,7 +359,14 @@ const AppContent: React.FC = () => {
     const loadFolderIcons = async () => {
       try {
         const { getUserMarkerGroups } = await import('./firebase/firestore')
-        const groups = await getUserMarkerGroups(user.uid, currentMapId)
+        
+        // For shared maps, use the map owner's ID to load folder icons
+        // For owned maps, use the current user's ID
+        const currentMap = maps.find(m => m.id === currentMapId)
+        const iconOwnerId = currentMap?.userId || user.uid
+        
+        console.log('📁 Loading folder icons for map:', currentMapId, 'owner:', iconOwnerId, 'current user:', user.uid)
+        const groups = await getUserMarkerGroups(iconOwnerId, currentMapId)
         
         const iconStates: Record<string, string> = {}
         groups.forEach(group => {
@@ -357,7 +388,7 @@ const AppContent: React.FC = () => {
       unsubscribeMarkers()
       unsubscribeMapSettings()
     }
-  }, [currentMapId, user])
+  }, [currentMapId, user, maps])
 
   // Set up real-time listeners for maps and markers
   useEffect(() => {
@@ -434,6 +465,12 @@ const AppContent: React.FC = () => {
   // Geocoding function using OpenStreetMap Nominatim (free, no API key required)
   const geocodeAddress = async (address: string, currentIndex: number, totalCount: number): Promise<{lat: number, lng: number} | null> => {
     try {
+      // Check if user has geocoding access
+      if (!hasGeocoding) {
+        console.log('❌ Geocoding not available in current plan')
+        return null
+      }
+
       setCurrentProcessingAddress(address)
       setProcessingProgress({ current: currentIndex + 1, total: totalCount })
       console.log('🌐 Starting dual geocoding for:', address)
@@ -562,6 +599,12 @@ const AppContent: React.FC = () => {
       return
     }
 
+    // Check marker limits before processing
+    if (!canAddMarkers(markers.length)) {
+      setUploadError(`Cannot add more markers. You've reached your limit of ${markers.length} markers. Upgrade your plan to add more.`)
+      return
+    }
+
     setIsUploading(true)
     setUploadError('')
     setUploadProgress({ processed: 0, total: 0, currentAddress: '' })
@@ -575,6 +618,19 @@ const AppContent: React.FC = () => {
           const newMarkers: Marker[] = []
           
           console.log('CSV Data:', csvData) // Debug log
+          
+          // Validate CSV data before processing
+          const hasCoordinates = csvData.some(row => 
+            (columnMapping.lat && row[columnMapping.lat] && row[columnMapping.lat].trim()) ||
+            (columnMapping.lng && row[columnMapping.lng] && row[columnMapping.lng].trim())
+          )
+          
+          // If no coordinates and no geocoding access, stop processing
+          if (!hasCoordinates && !hasGeocoding) {
+            setUploadError('❌ Cannot process CSV: No latitude/longitude columns found and geocoding is not available in your current plan. Please add coordinate columns to your CSV or upgrade your plan to use geocoding.')
+            setIsUploading(false)
+            return
+          }
           
           // Set total count early for progress bar
           setUploadProgress({
@@ -754,10 +810,19 @@ const AppContent: React.FC = () => {
                       // Use provided coordinates
                       coordinates = { lat: addressData.lat, lng: addressData.lng }
                       console.log(`✅ Using provided coordinates: ${coordinates.lat}, ${coordinates.lng}`)
-                    } else {
-                      // Geocode the address
+                    } else if (hasGeocoding) {
+                      // Geocode the address (only if user has geocoding access)
                       console.log(`🌐 Geocoding address: ${addressData.address}`)
                       coordinates = await geocodeAddress(addressData.address, i, uniqueAddresses.length)
+                    } else {
+                      // No coordinates and no geocoding access - skip this marker
+                      console.log(`❌ Skipping ${addressData.name}: No coordinates provided and geocoding not available in current plan`)
+                      setUploadProgress({
+                        processed: i + 1,
+                        total: uniqueAddresses.length,
+                        currentAddress: `❌ Skipped: ${addressData.name} (No coordinates, geocoding unavailable)`
+                      })
+                      continue
                     }
                     
                     if (coordinates) {
@@ -780,7 +845,7 @@ const AppContent: React.FC = () => {
                           lng: coordinates.lng,
                           type: 'other',
                           visible: true
-                        })
+                        }, hasSmartGrouping)
                         
                         console.log(`💾 Added marker to Firestore with ID: ${markerId}`)
                         
@@ -945,6 +1010,8 @@ const AppContent: React.FC = () => {
           iframeDimensions={iframeDimensions}
           onIframeDimensionsChange={setIframeDimensions}
           folderIcons={folderIcons}
+          onOpenSubscription={() => setShowSubscriptionModal(true)}
+          currentMap={maps.find(m => m.id === currentMapId)}
         />
       </div>
 
@@ -967,7 +1034,13 @@ const AppContent: React.FC = () => {
          currentProcessingAddress={currentProcessingAddress}
          processingProgress={processingProgress}
          currentMapId={currentMapId}
-         userId={user?.uid || null}
+         userId={(() => {
+           // Determine the correct user ID for marker operations
+           // For owned maps: use current user's ID
+           // For shared maps: use map owner's ID
+           const currentMap = maps.find(m => m.id === currentMapId)
+           return currentMap?.userId || user?.uid || null
+         })()}
          onShowDuplicateNotification={handleShowDuplicateNotification}
        />
 
@@ -1045,6 +1118,11 @@ const AppContent: React.FC = () => {
          message={toastMessage}
          duration={5000}
        />
+
+       {/* Subscription Management Modal */}
+       {showSubscriptionModal && (
+         <SubscriptionManagementModal onClose={() => setShowSubscriptionModal(false)} />
+       )}
     </div>
    )
  }

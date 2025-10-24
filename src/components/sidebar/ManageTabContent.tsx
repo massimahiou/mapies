@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, Folder, GripVertical, Edit2, Check, Upload, AlertTriangle, Unlink, Maximize2 } from 'lucide-react'
+import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, Folder, GripVertical, Edit2, Check, Upload, AlertTriangle, Unlink, Maximize2, Lock } from 'lucide-react'
 import { applyNameRules } from '../../utils/markerUtils'
 import { createMarkerGroup, updateMarkerGroup, deleteMarkerGroup, getMarkerGroupByName, uploadFolderIconBase64, updateMarkerGroupIcon, removeMarkerGroupIcon } from '../../firebase/firestore'
 import { useToast } from '../../contexts/ToastContext'
-import { getUserDocument, UserDocument } from '../../firebase/users'
 import { getUserMaps } from '../../firebase/maps'
+import { useUsageWarning } from '../../hooks/useFeatureAccess'
+import { useSharedMapFeatureAccess } from '../../hooks/useSharedMapFeatureAccess'
 
 interface Marker {
   id: string
@@ -33,6 +34,7 @@ interface ManageTabContentProps {
   userId: string
   mapId: string | undefined
   onOpenModal?: () => void
+  currentMap?: any // Add current map data to determine ownership
 }
 
 const ManageTabContent: React.FC<ManageTabContentProps> = ({
@@ -45,15 +47,17 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   onMapSettingsChange,
   userId,
   mapId,
-  onOpenModal
+  onOpenModal,
+  currentMap
 }) => {
   const { showToast } = useToast()
+  const { showWarning, showError, limit, currentCount } = useUsageWarning('markers', markers.length)
+  const { hasSmartGrouping, customizationLevel } = useSharedMapFeatureAccess(currentMap)
   const [showRules, setShowRules] = useState(false)
   const [newRule, setNewRule] = useState({ contains: '', renameTo: '' })
   const [groupFolders, setGroupFolders] = useState<Record<string, boolean>>({})
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
-  const [userDoc, setUserDoc] = useState<UserDocument | null>(null)
-  const [showUsageWarning, setShowUsageWarning] = useState(false)
+  // const [userDoc] = useState<UserDocument | null>(null)
   const [draggedMarker, setDraggedMarker] = useState<Marker | null>(null)
   const [dragOverMarker, setDragOverMarker] = useState<Marker | null>(null)
   const [customGroups, setCustomGroups] = useState<Record<string, string[]>>({})
@@ -71,29 +75,29 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const [selectedSourceMap, setSelectedSourceMap] = useState('')
 
   // Load user document for usage limits
-  useEffect(() => {
-    const loadUserDoc = async () => {
-      if (userId) {
-        try {
-          const user = await getUserDocument(userId)
-          setUserDoc(user)
-          
-          // Show warning if approaching limits
-          if (user && markers.length >= (user.limits?.maxMarkersPerMap || 50) * 0.9) {
-            setShowUsageWarning(true)
-          }
-        } catch (error) {
-          console.error('Error loading user document:', error)
-        }
-      }
-    }
-    
-    loadUserDoc()
-  }, [userId, markers.length])
+  // useEffect(() => {
+  //   const loadUserDoc = async () => {
+  //     if (userId) {
+  //       try {
+  //         const user = await getUserDocument(userId)
+  //         setUserDoc(user)
+  //         
+  //         // Show warning if approaching limits
+  //         if (user && markers.length >= (user.limits?.maxMarkersPerMap || 50) * 0.9) {
+  //           setShowUsageWarning(true)
+  //         }
+  //       } catch (error) {
+  //         console.error('Error loading user document:', error)
+  //       }
+  //     }
+  //   }
+  //   
+  //   loadUserDoc()
+  // }, [userId, markers.length])
 
   const getDisplayName = (originalName: string): string => {
-    if (mapSettings.nameRules && mapSettings.nameRules.length > 0) {
-      return applyNameRules(originalName, mapSettings.nameRules)
+    if (hasSmartGrouping && mapSettings.nameRules && mapSettings.nameRules.length > 0) {
+      return applyNameRules(originalName, mapSettings.nameRules, hasSmartGrouping)
     }
     return originalName
   }
@@ -224,13 +228,15 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
       if (newState) {
         // Create folder - find all markers that match this group
         const matchingMarkers = markers.filter(marker => {
-          const renamedName = applyNameRules(marker.name, mapSettings.nameRules || [])
+          const renamedName = applyNameRules(marker.name, mapSettings.nameRules || [], hasSmartGrouping)
           return renamedName === groupName
         })
         
         if (matchingMarkers.length > 0) {
           // Check if group already exists
-          const existingGroup = await getMarkerGroupByName(userId, groupName, mapId || undefined)
+          // For shared maps, use the map owner's ID
+        const markerOwnerId = currentMap?.userId || userId
+        const existingGroup = await getMarkerGroupByName(markerOwnerId, groupName, mapId || undefined)
           
           if (existingGroup) {
             // Update existing group with current marker IDs
@@ -257,7 +263,9 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
         }
       } else {
         // Remove folder - delete the group from Firestore
-        const existingGroup = await getMarkerGroupByName(userId, groupName, mapId || undefined)
+        // For shared maps, use the map owner's ID
+        const markerOwnerId = currentMap?.userId || userId
+        const existingGroup = await getMarkerGroupByName(markerOwnerId, groupName, mapId || undefined)
         if (existingGroup) {
           await deleteMarkerGroup(existingGroup.id)
         }
@@ -279,7 +287,13 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     const loadMarkerGroups = async () => {
       try {
         const { getUserMarkerGroups } = await import('../../firebase/firestore')
-        const groups = await getUserMarkerGroups(userId, mapId || undefined)
+        
+        // For shared maps, use the map owner's ID to load marker groups
+        // For owned maps, use the current user's ID
+        const markerOwnerId = currentMap?.userId || userId
+        
+        console.log('Loading marker groups for map:', mapId, 'owner:', markerOwnerId, 'current user:', userId)
+        const groups = await getUserMarkerGroups(markerOwnerId, mapId || undefined)
         
         // Set folder states based on existing groups
         const folderStates: Record<string, boolean> = {}
@@ -312,7 +326,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     if (userId && markers.length > 0) {
       loadMarkerGroups()
     }
-  }, [userId, mapId, markers, mapSettings.nameRules])
+  }, [userId, mapId, markers, mapSettings.nameRules, currentMap])
 
   // Load available maps when showRules becomes true
   useEffect(() => {
@@ -323,7 +337,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
 
   // Group markers by their renamed names and custom groups
   const groupedMarkers = filteredMarkers.reduce((acc, marker) => {
-    const renamedName = applyNameRules(marker.name, mapSettings.nameRules || [])
+    const renamedName = applyNameRules(marker.name, mapSettings.nameRules || [], hasSmartGrouping)
     
     // Check if this marker is part of a custom group
     const customGroupName = Object.keys(customGroups).find(groupName => {
@@ -515,10 +529,12 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
       // Dragging onto another marker - create or update group
       console.log('🔄 Starting group operation for markers:', draggedMarker.id, '->', targetMarker.id)
       
-      const targetGroupName = applyNameRules(targetMarker.name, mapSettings.nameRules || [])
+      const targetGroupName = applyNameRules(targetMarker.name, mapSettings.nameRules || [], hasSmartGrouping)
       
       try {
-        const existingGroup = await getMarkerGroupByName(userId, targetGroupName, mapId)
+        // For shared maps, use the map owner's ID
+        const markerOwnerId = currentMap?.userId || userId
+        const existingGroup = await getMarkerGroupByName(markerOwnerId, targetGroupName, mapId)
         
         if (existingGroup) {
           // Add to existing group if not already there
@@ -592,6 +608,16 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     const file = e.target.files?.[0]
     if (!file || !userId || !mapId) return
 
+    // Check if user has premium customization access
+    if (customizationLevel !== 'premium') {
+      showToast({ 
+        type: 'error', 
+        title: 'Premium Feature', 
+        message: 'Custom logos are only available with premium customization. Upgrade your plan to use this feature.' 
+      })
+      return
+    }
+
     try {
       const base64 = await uploadFolderIconBase64(file)
       const existingGroup = await getMarkerGroupByName(userId, groupName, mapId || undefined)
@@ -645,7 +671,9 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     if (!editingGroup || !editingGroupName.trim() || !userId || !mapId) return
 
     try {
-      const existingGroup = await getMarkerGroupByName(userId, editingGroup, mapId)
+        // For shared maps, use the map owner's ID
+        const markerOwnerId = currentMap?.userId || userId
+        const existingGroup = await getMarkerGroupByName(markerOwnerId, editingGroup, mapId)
       if (existingGroup) {
         // Update the group name in Firestore
         await updateMarkerGroup(existingGroup.id, {
@@ -713,7 +741,9 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     if (!userId || !mapId) return
 
     try {
-      const existingGroup = await getMarkerGroupByName(userId, groupName, mapId)
+        // For shared maps, use the map owner's ID
+        const markerOwnerId = currentMap?.userId || userId
+        const existingGroup = await getMarkerGroupByName(markerOwnerId, groupName, mapId)
       if (existingGroup) {
         await deleteMarkerGroup(existingGroup.id)
       }
@@ -761,7 +791,11 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     try {
       // Update marker name in Firestore
       const { updateMapMarker } = await import('../../firebase/maps')
-      await updateMapMarker(userId, mapId || '', markerId, {
+      
+      // For shared maps, use the map owner's ID
+      const markerOwnerId = currentMap?.userId || userId
+      
+      await updateMapMarker(markerOwnerId, mapId || '', markerId, {
         name: editingMarkerName.trim()
       })
       
@@ -792,15 +826,35 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   return (
     <div className="p-4">
       {/* Usage Warning */}
-      {showUsageWarning && userDoc && (
-        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+      {(showWarning || showError) && (
+        <div className={`mb-4 p-3 border rounded-lg ${
+          showError 
+            ? 'bg-red-50 border-red-200' 
+            : 'bg-yellow-50 border-yellow-200'
+        }`}>
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-yellow-600" />
-            <p className="text-sm text-yellow-800">
-              You're approaching your marker limit ({markers.length}/{userDoc.limits?.maxMarkersPerMap || 50}).
-              Consider upgrading your plan for more capacity.
+            <AlertTriangle className={`w-4 h-4 ${
+              showError ? 'text-red-600' : 'text-yellow-600'
+            }`} />
+            <p className={`text-sm ${
+              showError ? 'text-red-800' : 'text-yellow-800'
+            }`}>
+              {showError 
+                ? `You've reached your marker limit (${currentCount}/${limit}). Upgrade your plan to add more markers.`
+                : `You're approaching your marker limit (${currentCount}/${limit}). Consider upgrading your plan for more capacity.`
+              }
             </p>
           </div>
+          {showError && (
+            <div className="mt-2">
+              <button 
+                onClick={() => {/* TODO: Open upgrade modal */}}
+                className="text-sm text-red-600 hover:text-red-700 underline"
+              >
+                Upgrade Now
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -824,15 +878,44 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-800">Name Rules</h3>
           <button
-            onClick={() => setShowRules(!showRules)}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-pinz-600 text-white rounded-lg hover:bg-pinz-700 transition-colors"
+            onClick={() => hasSmartGrouping ? setShowRules(!showRules) : null}
+            disabled={!hasSmartGrouping}
+            className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              hasSmartGrouping 
+                ? 'bg-pinz-600 text-white hover:bg-pinz-700' 
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+            title={!hasSmartGrouping ? 'Name rules require Professional plan or higher' : 'Manage name rules'}
           >
             <Settings className="w-4 h-4" />
             Manage
           </button>
         </div>
 
-        {showRules && (
+        {/* Smart Grouping Limitation Warning */}
+        {!hasSmartGrouping && (
+          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-yellow-600" />
+              <div className="flex-1">
+                <p className="text-sm text-yellow-800 font-medium">
+                  Name Rules Not Available
+                </p>
+                <p className="text-xs text-yellow-700 mt-1">
+                  Name rules (smart grouping) require Professional plan or higher. Upgrade to automatically rename and group markers.
+                </p>
+              </div>
+              <button 
+                onClick={() => {/* TODO: Open upgrade modal */}}
+                className="text-xs text-yellow-600 hover:text-yellow-700 underline font-medium"
+              >
+                Upgrade Now
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showRules && hasSmartGrouping && (
           <div className="space-y-4">
             {/* Main Rules Management */}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -1196,8 +1279,12 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                               />
                               <label
                                 htmlFor={`icon-upload-${groupName}`}
-                                className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-100 rounded transition-colors flex-shrink-0 cursor-pointer"
-                                title="Upload folder icon"
+                                className={`p-1 rounded transition-colors flex-shrink-0 ${
+                                  customizationLevel === 'premium'
+                                    ? 'text-gray-400 hover:text-green-600 hover:bg-green-100 cursor-pointer'
+                                    : 'text-gray-300 cursor-not-allowed'
+                                }`}
+                                title={customizationLevel === 'premium' ? 'Upload folder icon' : 'Premium customization required'}
                               >
                                 <Upload className="w-3 h-3" />
                               </label>

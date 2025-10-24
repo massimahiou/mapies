@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { X, Download, FileText, ArrowRight } from 'lucide-react'
+import { X, Download, FileText, ArrowRight, AlertTriangle } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 import Papa from 'papaparse'
+import { useFeatureAccess } from '../hooks/useFeatureAccess'
 
 interface CsvUploadModalProps {
   isOpen: boolean
@@ -33,6 +34,7 @@ const CsvUploadModal: React.FC<CsvUploadModalProps> = ({
   uploadError,
   uploadProgress
 }) => {
+  const { hasBulkImport, getRecommendedUpgrade } = useFeatureAccess()
   const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [csvPreview, setCsvPreview] = useState<CsvPreview | null>(null)
@@ -62,7 +64,8 @@ const CsvUploadModal: React.FC<CsvUploadModalProps> = ({
       'text/csv': ['.csv'],
       'application/vnd.ms-excel': ['.csv']
     },
-    multiple: false
+    multiple: false,
+    disabled: !hasBulkImport
   })
 
   // Parse CSV to preview headers and sample data
@@ -230,6 +233,29 @@ const CsvUploadModal: React.FC<CsvUploadModalProps> = ({
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
+
+        {/* Bulk Import Limitation Warning */}
+        {!hasBulkImport && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-600" />
+              <div className="flex-1">
+                <p className="text-sm text-red-800 font-medium">
+                  Bulk Import Not Available
+                </p>
+                <p className="text-xs text-red-700 mt-1">
+                  CSV import is not included in your current plan. Upgrade to {getRecommendedUpgrade('bulkImport')} to import spreadsheets.
+                </p>
+              </div>
+              <button 
+                onClick={() => {/* TODO: Open upgrade modal */}}
+                className="text-xs text-red-600 hover:text-red-700 underline font-medium"
+              >
+                Upgrade Now
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Step 1: File Upload */}
         {step === 'upload' && (

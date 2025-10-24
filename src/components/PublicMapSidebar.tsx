@@ -1,6 +1,7 @@
 import React from 'react'
 import { Search, X, Navigation, MapPin } from 'lucide-react'
 import { applyNameRules } from '../utils/markerUtils'
+import { usePublicFeatureAccess } from '../hooks/useFeatureAccess'
 
 interface Marker {
   id: string
@@ -48,9 +49,10 @@ const RenamedMarkerName: React.FC<{
   renamedMarkers: Record<string, string>;
   mapSettings: { nameRules: Array<{ id: string; contains: string; renameTo: string }> }
 }> = ({ marker, renamedMarkers, mapSettings }) => {
+  const { hasSmartGrouping } = usePublicFeatureAccess()
   return (
     <span>
-      {renamedMarkers[marker.id] || applyNameRules(marker.name, mapSettings.nameRules)}
+      {renamedMarkers[marker.id] || applyNameRules(marker.name, mapSettings.nameRules, hasSmartGrouping)}
     </span>
   )
 }

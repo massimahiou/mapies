@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.retryCsvJob = exports.processCsvUpload = exports.createCustomerPortalSession = exports.createCheckoutSession = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
+exports.createCustomerPortalSession = exports.createCheckoutSession = exports.leaveSharedMap = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const validation_1 = require("./utils/validation");
@@ -10,9 +10,6 @@ const customerManager_1 = require("./stripe/customerManager");
 const checkout_1 = require("./checkout");
 Object.defineProperty(exports, "createCheckoutSession", { enumerable: true, get: function () { return checkout_1.createCheckoutSession; } });
 Object.defineProperty(exports, "createCustomerPortalSession", { enumerable: true, get: function () { return checkout_1.createCustomerPortalSession; } });
-const csvProcessor_1 = require("./csvProcessor");
-Object.defineProperty(exports, "processCsvUpload", { enumerable: true, get: function () { return csvProcessor_1.processCsvUpload; } });
-Object.defineProperty(exports, "retryCsvJob", { enumerable: true, get: function () { return csvProcessor_1.retryCsvJob; } });
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
     admin.initializeApp();
@@ -204,6 +201,59 @@ exports.webhookStatus = functions.https.onRequest(async (req, res) => {
     catch (error) {
         logger.error('Health check error:', error);
         res.status(500).json({ status: 'unhealthy', error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+});
+exports.leaveSharedMap = functions.https.onCall(async (data, context) => {
+    var _a;
+    try {
+        // Verify authentication
+        if (!context.auth) {
+            throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+        }
+        const { mapId, ownerId, userEmail } = data;
+        // Validate input
+        if (!mapId || !ownerId || !userEmail) {
+            throw new functions.https.HttpsError('invalid-argument', 'Missing required parameters');
+        }
+        // Verify the requesting user matches the email
+        if (context.auth.token.email !== userEmail) {
+            throw new functions.https.HttpsError('permission-denied', 'User email does not match');
+        }
+        logger.info('Processing leave shared map request', { mapId, ownerId, userEmail });
+        const db = admin.firestore();
+        const mapRef = db.collection('users').doc(ownerId).collection('maps').doc(mapId);
+        // Get the current map data
+        const mapDoc = await mapRef.get();
+        if (!mapDoc.exists) {
+            throw new functions.https.HttpsError('not-found', 'Map not found');
+        }
+        const mapData = mapDoc.data();
+        const currentSharing = mapData === null || mapData === void 0 ? void 0 : mapData.sharing;
+        if (!currentSharing) {
+            throw new functions.https.HttpsError('failed-precondition', 'Map is not shared');
+        }
+        // Check if user is in the shared list
+        const userInSharedList = (_a = currentSharing.sharedWith) === null || _a === void 0 ? void 0 : _a.some((user) => user.email === userEmail);
+        if (!userInSharedList) {
+            throw new functions.https.HttpsError('permission-denied', 'User is not in the shared list');
+        }
+        // Remove user from shared list
+        const updatedSharedWith = currentSharing.sharedWith.filter((user) => user.email !== userEmail);
+        const updatedSharing = Object.assign(Object.assign({}, currentSharing), { sharedWith: updatedSharedWith, isShared: updatedSharedWith.length > 0 });
+        // Update the map document
+        await mapRef.update({
+            sharing: updatedSharing,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        logger.info('User successfully removed from shared map', { mapId, ownerId, userEmail });
+        return { success: true, message: 'Successfully left the shared map' };
+    }
+    catch (error) {
+        logger.error('Error in leaveSharedMap function', error);
+        if (error instanceof functions.https.HttpsError) {
+            throw error;
+        }
+        throw new functions.https.HttpsError('internal', 'Internal server error');
     }
 });
 //# sourceMappingURL=index.js.map

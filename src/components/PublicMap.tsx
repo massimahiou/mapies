@@ -9,6 +9,12 @@ import { detectBusinessType } from '../utils/businessDetection'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
 import PublicMapSidebar from './PublicMapSidebar'
 import { MAPBOX_CONFIG } from '../config/mapbox'
+import { usePublicFeatureAccess } from '../hooks/useFeatureAccess'
+import { useMapFeatureInheritance } from '../hooks/useMapFeatureInheritance'
+import MapFeatureLevelHeader from './MapFeatureLevelHeader'
+import InteractiveWatermark from './InteractiveWatermark'
+import { validateMapAgainstPlan } from '../utils/mapValidation'
+import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -67,6 +73,8 @@ interface MapDocument {
 
 const PublicMap: React.FC = () => {
   const { mapId } = useParams<{ mapId: string }>()
+  const { showWatermark: defaultShowWatermark, hasGeocoding, planLimits } = usePublicFeatureAccess()
+  const [showWatermark, setShowWatermark] = useState(defaultShowWatermark)
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<L.Map | null>(null)
   const markersRef = useRef<L.Marker[]>([])
@@ -75,7 +83,7 @@ const PublicMap: React.FC = () => {
   const tileLayerRef = useRef<L.TileLayer | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [markers, setMarkers] = useState<Marker[]>([])
-  const [, setMapData] = useState<MapDocument | null>(null)
+  const [mapData, setMapData] = useState<MapDocument | null>(null)
   const [mapSettings, setMapSettings] = useState<MapSettings>({
     style: 'light',
     markerShape: 'circle',
@@ -104,10 +112,39 @@ const PublicMap: React.FC = () => {
   const [locationModeActive, setLocationModeActive] = useState(false)
   const [renamedMarkers] = useState<Record<string, string>>({})
   const [showMobileResults, setShowMobileResults] = useState(false)
+  const [isMapDisabled, setIsMapDisabled] = useState(false)
+  const [ownerPlanLimits, setOwnerPlanLimits] = useState(planLimits) // Store map owner's actual limits
+  const [ownerSubscriptionLoaded, setOwnerSubscriptionLoaded] = useState(false) // Track if owner subscription is loaded
+  const [ownerPlan, setOwnerPlan] = useState<keyof typeof SUBSCRIPTION_PLANS>('freemium') // Store owner's plan
+  const [hasSmartGrouping, setHasSmartGrouping] = useState(false) // Store map owner's smart grouping capability
+  
+  // Get map feature inheritance
+  const mapInheritance = useMapFeatureInheritance(mapData)
+  
+  // Re-check limits when subscription is loaded
+  useEffect(() => {
+    if (ownerSubscriptionLoaded && markers.length > 0 && mapSettings) {
+      // Use comprehensive validation against owner's plan
+      const validation = validateMapAgainstPlan(markers, mapSettings, ownerPlan, folderIcons)
+      setIsMapDisabled(!validation.isValid)
+      console.log('🔄 Re-checking map validation after subscription loaded:', {
+        ownerPlan,
+        markersCount: markers.length,
+        validation: validation,
+        disabled: !validation.isValid
+      })
+    }
+  }, [ownerSubscriptionLoaded, markers.length, mapSettings, ownerPlan, folderIcons])
 
   // Geocoding function for postal codes - Using Mapbox API
   const geocodePostalCode = async (postalCode: string): Promise<{lat: number, lng: number} | null> => {
     try {
+      // Check if user has geocoding access
+      if (!hasGeocoding) {
+        console.log('❌ Geocoding not available in current plan')
+        return null
+      }
+
       const cleanedPostalCode = postalCode.trim().replace(/\s+/g, '')
       console.log('🌐 Attempting to geocode with Mapbox:', cleanedPostalCode)
       
@@ -691,6 +728,25 @@ const PublicMap: React.FC = () => {
           settings: mapDoc.settings
         })
         
+        // Check map owner's subscription for watermark
+        try {
+          const { getUserDocument } = await import('../firebase/users')
+          const ownerDoc = await getUserDocument(foundUserId)
+          const ownerPlan = ownerDoc?.subscription?.plan || 'freemium'
+          const { SUBSCRIPTION_PLANS } = await import('../config/subscriptionPlans')
+          const ownerPlanLimits = SUBSCRIPTION_PLANS[ownerPlan] || SUBSCRIPTION_PLANS.freemium
+          setShowWatermark(ownerPlanLimits.watermark)
+          setOwnerPlanLimits(ownerPlanLimits) // Store the actual plan limits
+          setOwnerPlan(ownerPlan) // Store the owner's plan
+          setHasSmartGrouping(ownerPlanLimits.smartGrouping) // Store the owner's smart grouping capability
+          setOwnerSubscriptionLoaded(true) // Mark subscription as loaded
+          console.log('Map owner subscription:', ownerPlan, 'watermark:', ownerPlanLimits.watermark, 'maxMarkers:', ownerPlanLimits.maxMarkersPerMap, 'smartGrouping:', ownerPlanLimits.smartGrouping)
+        } catch (error) {
+          console.error('Error loading map owner subscription:', error)
+          setOwnerSubscriptionLoaded(true) // Mark as loaded even on error to prevent infinite disabled state
+          // Keep default watermark setting if error
+        }
+        
         // Load map settings
         if (mapDoc.settings) {
           console.log('🎨 Loading initial map settings:', mapDoc.settings)
@@ -737,6 +793,19 @@ const PublicMap: React.FC = () => {
               const unsubscribeMarkers = subscribeToMapMarkers(foundUserId, mapId, (markers: any[]) => {
                 console.log('Public map markers updated:', markers.length, 'markers:', markers)
                 setMarkers(markers as Marker[])
+                
+                // Check if map should be disabled due to limits (only after subscription is loaded)
+                if (ownerSubscriptionLoaded) {
+                  const isMapDisabled = markers.length > ownerPlanLimits.maxMarkersPerMap
+                  setIsMapDisabled(isMapDisabled)
+                  if (isMapDisabled) {
+                    console.log('⚠️ Map disabled due to marker limit exceeded:', markers.length, '>', ownerPlanLimits.maxMarkersPerMap)
+                  } else {
+                    console.log('✅ Map enabled - within limits:', markers.length, '<=', ownerPlanLimits.maxMarkersPerMap)
+                  }
+                } else {
+                  console.log('⏳ Waiting for owner subscription data before checking limits...')
+                }
               })
         
         const unsubscribeSettings = subscribeToMapDocument(foundUserId, mapId, (mapDoc) => {
@@ -930,12 +999,26 @@ const PublicMap: React.FC = () => {
     const visibleMarkers = markers.filter(marker => marker.visible)
     visibleMarkers.forEach(marker => {
       // Get business category for this marker
-      const businessCategory = marker.businessCategory || detectBusinessType(marker.name, marker.address)
+      const businessCategory = marker.businessCategory || detectBusinessType(marker.name, marker.address, hasSmartGrouping)
       const categoryProps = getCategoryProps(businessCategory)
       
       // Get the renamed name to check for folder icons
-      const markerRenamedName = applyNameRules(marker.name, mapSettings.nameRules)
-      const folderIconUrl = folderIcons[markerRenamedName]
+      const markerRenamedName = applyNameRules(marker.name, mapSettings.nameRules, hasSmartGrouping)
+      
+      // Try to find folder icon with case-insensitive matching
+      let folderIconUrl = folderIcons[markerRenamedName]
+      if (!folderIconUrl) {
+        // Try case-insensitive matching
+        const availableKeys = Object.keys(folderIcons)
+        const matchingKey = availableKeys.find(key => 
+          key.toLowerCase() === markerRenamedName.toLowerCase() ||
+          markerRenamedName.toLowerCase().includes(key.toLowerCase()) ||
+          key.toLowerCase().includes(markerRenamedName.toLowerCase())
+        )
+        if (matchingKey) {
+          folderIconUrl = folderIcons[matchingKey]
+        }
+      }
       
       console.log('🔍 PublicMap marker icon check:', {
         markerName: marker.name,
@@ -962,7 +1045,7 @@ const PublicMap: React.FC = () => {
         .bindPopup(`
           <div style="padding: 12px; font-family: system-ui, sans-serif; min-width: 200px; position: relative;">
             <div style="font-weight: 600; color: #000; font-size: 14px; margin: 0 0 6px 0; padding-right: 20px; position: relative;">
-              ${renamedMarkers[marker.id] || applyNameRules(marker.name, mapSettings.nameRules)}
+              ${renamedMarkers[marker.id] || applyNameRules(marker.name, mapSettings.nameRules, hasSmartGrouping)}
               <button 
                 onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'flex' : 'none'"
                 style="
@@ -1007,7 +1090,7 @@ const PublicMap: React.FC = () => {
     if (visibleMarkers.length > 0 && markerClusterRef.current) {
       mapInstance.current.fitBounds(markerClusterRef.current.getBounds().pad(0.1))
     }
-  }, [markers, mapLoaded, mapSettings.markerShape, mapSettings.markerColor, mapSettings.markerSize, mapSettings.markerBorder, mapSettings.markerBorderWidth, mapSettings.clusteringEnabled, mapSettings.clusterRadius, folderIcons, loading])
+  }, [markers, mapLoaded, mapSettings.markerShape, mapSettings.markerColor, mapSettings.markerSize, mapSettings.markerBorder, mapSettings.markerBorderWidth, mapSettings.clusteringEnabled, mapSettings.clusterRadius, folderIcons, loading, hasSmartGrouping])
 
   if (loading) {
     return (
@@ -1039,69 +1122,100 @@ const PublicMap: React.FC = () => {
       <meta httpEquiv="Pragma" content="no-cache" />
       <meta httpEquiv="Expires" content="0" />
       
-      {/* Mobile Search Bar - Float on map */}
-      <div className="md:hidden absolute top-4 left-4 right-4 z-[1000]">
-        <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-gray-400" />
+      {/* Map Feature Level Header - Only show for shared maps */}
+      {mapInheritance && (
+        <div className="absolute top-0 left-0 right-0 z-50">
+          <MapFeatureLevelHeader mapInheritance={mapInheritance} />
+        </div>
+      )}
+      
+      {isMapDisabled ? (
+        // Disabled Map - Show only the deactivation message
+        <div className="flex-1 flex items-center justify-center bg-gray-50">
+          <div className="text-center p-6">
+            <div className="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+              <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">This map is currently unavailable</h3>
+            <p className="text-gray-600 mb-4">
+              This map is temporarily disabled. Please check back later or contact the map owner for more information.
+            </p>
           </div>
-          <input
-            type="text"
-            placeholder="Search locations or postal code..."
-            value={searchTerm}
-            onChange={(e) => handleSearch(e.target.value)}
-            className="block w-full pl-10 pr-20 py-3 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-lg text-base"
-            style={{ fontSize: '16px' }} // Prevents zoom on iOS
-          />
-          <div className="absolute inset-y-0 right-0 flex items-center">
-            {searchTerm ? (
-              <button
-                onClick={() => handleSearch('')}
-                className="absolute inset-y-0 right-12 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            ) : null}
-            <button
-              onClick={toggleLocationMode}
-              className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors ${
-                locationModeActive
-                  ? 'text-blue-600 hover:text-blue-700'
-                  : 'text-gray-400 hover:text-gray-600'
-              }`}
-              title={locationModeActive ? "Turn off location mode" : "Find my location"}
-            >
-              <Navigation className="h-4 w-4" />
-            </button>
+        </div>
+      ) : (
+        // Active Map - Show full interface
+        <>
+          {/* Mobile Search Bar - Float on map */}
+          <div className="md:hidden absolute top-4 left-4 right-4 z-[1000]">
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="Search locations or postal code..."
+                value={searchTerm}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="block w-full pl-10 pr-20 py-3 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-lg text-base"
+                style={{ fontSize: '16px' }} // Prevents zoom on iOS
+              />
+              <div className="absolute inset-y-0 right-0 flex items-center">
+                {searchTerm ? (
+                  <button
+                    onClick={() => handleSearch('')}
+                    className="absolute inset-y-0 right-12 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                ) : null}
+                <button
+                  onClick={toggleLocationMode}
+                  className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors ${
+                    locationModeActive
+                      ? 'text-blue-600 hover:text-blue-700'
+                      : 'text-gray-400 hover:text-gray-600'
+                  }`}
+                  title={locationModeActive ? "Turn off location mode" : "Find my location"}
+                >
+                  <Navigation className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
           </div>
           
-        </div>
-      </div>
-      
-      {/* Sidebar */}
-        <PublicMapSidebar
-          searchTerm={searchTerm}
-          onSearchChange={handleSearch}
-          searchResults={searchResults}
-          nearbyMarkers={nearbyMarkers}
-          showNearbyPlaces={showNearbyPlaces}
-          onNavigateToMarker={navigateToMarker}
-          userLocation={userLocation}
-          calculateDistance={calculateDistance}
-          renamedMarkers={renamedMarkers}
-          allMarkers={markers}
-          onToggleLocation={toggleLocationMode}
-          locationModeActive={locationModeActive}
-          mapSettings={mapSettings}
-        />
+          {/* Sidebar */}
+          <PublicMapSidebar
+            searchTerm={searchTerm}
+            onSearchChange={handleSearch}
+            searchResults={searchResults}
+            nearbyMarkers={nearbyMarkers}
+            showNearbyPlaces={showNearbyPlaces}
+            onNavigateToMarker={navigateToMarker}
+            userLocation={userLocation}
+            calculateDistance={calculateDistance}
+            renamedMarkers={renamedMarkers}
+            allMarkers={markers}
+            onToggleLocation={toggleLocationMode}
+            locationModeActive={locationModeActive}
+            mapSettings={mapSettings}
+          />
 
-      {/* Map Container */}
-      <div className="flex-1 relative h-full">
-        <div 
-          ref={mapRef} 
-          className="w-full h-full bg-gray-100"
-        />
-        
+          {/* Map Container */}
+          <div className="flex-1 relative h-full">
+            <div 
+              ref={mapRef} 
+              className="w-full h-full bg-gray-100"
+            />
+            
+            {/* Interactive Watermark - Only show if required by subscription */}
+            {showWatermark && (
+              <InteractiveWatermark 
+                mode="static"
+              />
+            )}
+            
             {/* Location Button */}
             <button
               onClick={toggleLocationMode}
@@ -1128,37 +1242,36 @@ const PublicMap: React.FC = () => {
               </button>
             )}
 
-        {/* Zoom Controls - Desktop only */}
-        <div className="hidden md:flex absolute bottom-4 right-4 z-[1000] flex-col gap-1">
-          <button
-            onClick={zoomIn}
-            className="bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
-            title="Zoom in"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
-          <button
-            onClick={zoomOut}
-            className="bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
-            title="Zoom out"
-          >
-            <Minus className="w-5 h-5" />
-          </button>
-        </div>
-        
-
-        {!mapLoaded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-              <p className="text-sm text-gray-600">Loading map...</p>
+            {/* Zoom Controls - Desktop only */}
+            <div className="hidden md:flex absolute bottom-4 right-4 z-[1000] flex-col gap-1">
+              <button
+                onClick={zoomIn}
+                className="bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
+                title="Zoom in"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+              <button
+                onClick={zoomOut}
+                className="bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
+                title="Zoom out"
+              >
+                <Minus className="w-5 h-5" />
+              </button>
             </div>
+
+            {!mapLoaded && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                  <p className="text-sm text-gray-600">Loading map...</p>
+                </div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      
-      {/* Mobile Results Horizontal Bar - Ultra-thin and efficient */}
-      {showMobileResults && (
+          
+          {/* Mobile Results Horizontal Bar - Ultra-thin and efficient */}
+          {showMobileResults && (
         <div className="md:hidden absolute bottom-3 left-3 right-3 z-[1000]">
           {/* Close button */}
           <div className="flex justify-end mb-1">
@@ -1210,6 +1323,8 @@ const PublicMap: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   )

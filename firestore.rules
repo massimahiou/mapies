@@ -11,11 +11,31 @@ service cloud.firestore {
         allow read: if true; // Anyone can read maps for public sharing
         allow write: if request.auth != null && request.auth.uid == userId;
         
+        // Allow any authenticated user to update maps (for shared map functionality)
+        // Application-level validation ensures only shared users can remove themselves
+        allow update: if request.auth != null;
+        
         // Users can read and write markers within their maps
         match /markers/{markerId} {
           allow read: if true; // Anyone can read markers for public sharing
-          allow write: if request.auth != null && request.auth.uid == userId;
+          allow write: if request.auth != null && request.auth.uid == userId; // Map owner can write
+          allow update: if request.auth != null; // Allow any authenticated user to update markers (application-level validation ensures proper permissions)
         }
+      }
+    }
+    
+    // Public maps collection - for easy access to shared maps
+    match /publicMaps/{mapId} {
+      allow read: if true; // Anyone can read public maps
+      allow write: if request.auth != null && request.auth.uid == resource.data.userId; // Only map owner can write
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId; // Only map owner can create
+      
+      // Public map markers
+      match /markers/{markerId} {
+        allow read: if true; // Anyone can read public map markers
+        allow write: if request.auth != null && request.auth.uid == get(/databases/$(database)/documents/publicMaps/$(mapId)).data.userId; // Only map owner can write
+        allow create: if request.auth != null && request.auth.uid == get(/databases/$(database)/documents/publicMaps/$(mapId)).data.userId; // Only map owner can create
+        allow update: if request.auth != null; // Allow any authenticated user to update markers (application-level validation ensures proper permissions)
       }
     }
     

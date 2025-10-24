@@ -649,7 +649,17 @@ function levenshteinDistance(str1: string, str2: string): number {
 }
 
 // Main detection function
-export function detectBusinessType(name: string, address?: string): BusinessMatch {
+export function detectBusinessType(name: string, address?: string, hasSmartGrouping: boolean = true): BusinessMatch {
+  // Check if user has smart grouping access
+  if (!hasSmartGrouping) {
+    const otherCategory = BUSINESS_CATEGORIES.find(cat => cat.id === 'other')!
+    return {
+      category: otherCategory,
+      confidence: 0,
+      matchedTerm: 'smart_grouping_disabled'
+    }
+  }
+
   const normalizedName = normalizeText(name)
   const normalizedAddress = address ? normalizeText(address) : ''
   const fullText = `${normalizedName} ${normalizedAddress}`.trim()

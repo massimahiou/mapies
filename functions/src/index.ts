@@ -233,5 +233,78 @@ export const webhookStatus = functions.https.onRequest(async (req, res) => {
   }
 });
 
+export const leaveSharedMap = functions.https.onCall(async (data, context) => {
+  try {
+    // Verify authentication
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+    }
+
+    const { mapId, ownerId, userEmail } = data;
+
+    // Validate input
+    if (!mapId || !ownerId || !userEmail) {
+      throw new functions.https.HttpsError('invalid-argument', 'Missing required parameters');
+    }
+
+    // Verify the requesting user matches the email
+    if (context.auth.token.email !== userEmail) {
+      throw new functions.https.HttpsError('permission-denied', 'User email does not match');
+    }
+
+    logger.info('Processing leave shared map request', { mapId, ownerId, userEmail });
+
+    const db = admin.firestore();
+    const mapRef = db.collection('users').doc(ownerId).collection('maps').doc(mapId);
+    
+    // Get the current map data
+    const mapDoc = await mapRef.get();
+    if (!mapDoc.exists) {
+      throw new functions.https.HttpsError('not-found', 'Map not found');
+    }
+
+    const mapData = mapDoc.data();
+    const currentSharing = mapData?.sharing;
+
+    if (!currentSharing) {
+      throw new functions.https.HttpsError('failed-precondition', 'Map is not shared');
+    }
+
+    // Check if user is in the shared list
+    const userInSharedList = currentSharing.sharedWith?.some((user: any) => user.email === userEmail);
+    if (!userInSharedList) {
+      throw new functions.https.HttpsError('permission-denied', 'User is not in the shared list');
+    }
+
+    // Remove user from shared list
+    const updatedSharedWith = currentSharing.sharedWith.filter((user: any) => user.email !== userEmail);
+    
+    const updatedSharing = {
+      ...currentSharing,
+      sharedWith: updatedSharedWith,
+      isShared: updatedSharedWith.length > 0
+    };
+
+    // Update the map document
+    await mapRef.update({
+      sharing: updatedSharing,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    logger.info('User successfully removed from shared map', { mapId, ownerId, userEmail });
+
+    return { success: true, message: 'Successfully left the shared map' };
+
+  } catch (error) {
+    logger.error('Error in leaveSharedMap function', error);
+    
+    if (error instanceof functions.https.HttpsError) {
+      throw error;
+    }
+    
+    throw new functions.https.HttpsError('internal', 'Internal server error');
+  }
+});
+
 // Export checkout functions
 export { createCheckoutSession, createCustomerPortalSession };

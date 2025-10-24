@@ -1,5 +1,6 @@
 import React from 'react'
-import { Maximize2 } from 'lucide-react'
+import { Maximize2, Lock } from 'lucide-react'
+import { useFeatureAccess } from '../../hooks/useFeatureAccess'
 
 interface MapSettings {
   style: string
@@ -30,6 +31,26 @@ const EditTabContent: React.FC<EditTabContentProps> = ({
   onMapSettingsChange,
   onOpenModal
 }) => {
+  const { customizationLevel } = useFeatureAccess()
+  
+  // Helper component for premium feature locks
+  const PremiumFeatureLock = ({ children }: { children: React.ReactNode }) => {
+    if (customizationLevel === 'premium') {
+      return <>{children}</>
+    }
+    
+    return (
+      <div className="relative">
+        {children}
+        <div className="absolute inset-0 bg-gray-100/80 rounded flex items-center justify-center">
+          <div className="text-center">
+            <Lock className="w-4 h-4 text-gray-500 mx-auto mb-1" />
+            <p className="text-xs text-gray-600 font-medium">Premium Feature</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="p-4">
       {/* Header with Modal Button */}
@@ -186,49 +207,123 @@ const EditTabContent: React.FC<EditTabContentProps> = ({
 
         {/* Marker Color */}
         <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-600 mb-2">Color</label>
-          <div className="grid grid-cols-4 gap-2">
-            <button
-              onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#000000'})}
-              className={`p-2 border rounded text-xs ${
-                mapSettings.markerColor === '#000000' 
-                  ? 'border-pinz-600 bg-pinz-50' 
-                  : 'border-gray-300 bg-black text-white hover:bg-gray-800'
-              }`}
-            >
-              Black
-            </button>
-            <button
-              onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#3B82F6'})}
-              className={`p-2 border rounded text-xs ${
-                mapSettings.markerColor === '#3B82F6' 
-                  ? 'border-pinz-600 bg-pinz-50' 
-                  : 'border-gray-300 bg-blue-600 text-white hover:bg-blue-700'
-              }`}
-            >
-              Blue
-            </button>
-            <button
-              onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#EF4444'})}
-              className={`p-2 border rounded text-xs ${
-                mapSettings.markerColor === '#EF4444' 
-                  ? 'border-pinz-600 bg-pinz-50' 
-                  : 'border-gray-300 bg-red-600 text-white hover:bg-red-700'
-              }`}
-            >
-              Red
-            </button>
-            <button
-              onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#10B981'})}
-              className={`p-2 border rounded text-xs ${
-                mapSettings.markerColor === '#10B981' 
-                  ? 'border-pinz-600 bg-pinz-50' 
-                  : 'border-gray-300 bg-green-600 text-white hover:bg-green-700'
-              }`}
-            >
-              Green
-            </button>
-          </div>
+          <label className="block text-xs font-medium text-gray-600 mb-2">
+            Color
+            {customizationLevel === 'basic' && (
+              <span className="text-xs text-gray-500 ml-1">(Basic Colors)</span>
+            )}
+            {customizationLevel === 'premium' && (
+              <span className="text-xs text-gray-500 ml-1">(Precise Color Control)</span>
+            )}
+          </label>
+          {customizationLevel === 'basic' ? (
+            // Basic: Preset colors only
+            <div className="grid grid-cols-4 gap-2">
+              <button
+                onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#000000'})}
+                className={`p-2 border rounded text-xs ${
+                  mapSettings.markerColor === '#000000' 
+                    ? 'border-pinz-600 bg-pinz-50' 
+                    : 'border-gray-300 bg-black text-white hover:bg-gray-800'
+                }`}
+              >
+                Black
+              </button>
+              <button
+                onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#3B82F6'})}
+                className={`p-2 border rounded text-xs ${
+                  mapSettings.markerColor === '#3B82F6' 
+                    ? 'border-pinz-600 bg-pinz-50' 
+                    : 'border-gray-300 bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                Blue
+              </button>
+              <button
+                onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#EF4444'})}
+                className={`p-2 border rounded text-xs ${
+                  mapSettings.markerColor === '#EF4444' 
+                    ? 'border-pinz-600 bg-pinz-50' 
+                    : 'border-gray-300 bg-red-600 text-white hover:bg-red-700'
+                }`}
+              >
+                Red
+              </button>
+              <button
+                onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#10B981'})}
+                className={`p-2 border rounded text-xs ${
+                  mapSettings.markerColor === '#10B981' 
+                    ? 'border-pinz-600 bg-pinz-50' 
+                    : 'border-gray-300 bg-green-600 text-white hover:bg-green-700'
+                }`}
+              >
+                Green
+              </button>
+            </div>
+          ) : (
+            // Premium: Precise color wheel + presets
+            <div className="space-y-3">
+              {/* Color Wheel */}
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={mapSettings.markerColor}
+                  onChange={(e) => onMapSettingsChange({...mapSettings, markerColor: e.target.value})}
+                  className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+                />
+                <input
+                  type="text"
+                  value={mapSettings.markerColor}
+                  onChange={(e) => onMapSettingsChange({...mapSettings, markerColor: e.target.value})}
+                  placeholder="#000000"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-pinz-500 focus:border-pinz-500"
+                />
+              </div>
+              {/* Quick Presets */}
+              <div className="grid grid-cols-4 gap-2">
+                <button
+                  onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#000000'})}
+                  className={`p-2 border rounded text-xs ${
+                    mapSettings.markerColor === '#000000' 
+                      ? 'border-pinz-600 bg-pinz-50' 
+                      : 'border-gray-300 bg-black text-white hover:bg-gray-800'
+                  }`}
+                >
+                  Black
+                </button>
+                <button
+                  onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#3B82F6'})}
+                  className={`p-2 border rounded text-xs ${
+                    mapSettings.markerColor === '#3B82F6' 
+                      ? 'border-pinz-600 bg-pinz-50' 
+                      : 'border-gray-300 bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  Blue
+                </button>
+                <button
+                  onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#EF4444'})}
+                  className={`p-2 border rounded text-xs ${
+                    mapSettings.markerColor === '#EF4444' 
+                      ? 'border-pinz-600 bg-pinz-50' 
+                      : 'border-gray-300 bg-red-600 text-white hover:bg-red-700'
+                  }`}
+                >
+                  Red
+                </button>
+                <button
+                  onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#10B981'})}
+                  className={`p-2 border rounded text-xs ${
+                    mapSettings.markerColor === '#10B981' 
+                      ? 'border-pinz-600 bg-pinz-50' 
+                      : 'border-gray-300 bg-green-600 text-white hover:bg-green-700'
+                  }`}
+                >
+                  Green
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Marker Size */}
@@ -271,65 +366,74 @@ const EditTabContent: React.FC<EditTabContentProps> = ({
         {/* Marker Border */}
         <div className="mb-4">
           <label className="block text-xs font-medium text-gray-600 mb-2">Border</label>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => onMapSettingsChange({...mapSettings, markerBorder: 'white'})}
-              className={`p-2 border rounded text-xs ${
-                mapSettings.markerBorder === 'white' 
-                  ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
-                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              White
-            </button>
-            <button
-              onClick={() => onMapSettingsChange({...mapSettings, markerBorder: 'black'})}
-              className={`p-2 border rounded text-xs ${
-                mapSettings.markerBorder === 'black' 
-                  ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
-                  : 'border-gray-300 bg-black text-white hover:bg-gray-800'
-              }`}
-            >
-              Black
-            </button>
-          </div>
+          <PremiumFeatureLock>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => customizationLevel === 'premium' && onMapSettingsChange({...mapSettings, markerBorder: 'white'})}
+                disabled={customizationLevel !== 'premium'}
+                className={`p-2 border rounded text-xs ${
+                  mapSettings.markerBorder === 'white' 
+                    ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                } ${customizationLevel !== 'premium' ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                White
+              </button>
+              <button
+                onClick={() => customizationLevel === 'premium' && onMapSettingsChange({...mapSettings, markerBorder: 'black'})}
+                disabled={customizationLevel !== 'premium'}
+                className={`p-2 border rounded text-xs ${
+                  mapSettings.markerBorder === 'black' 
+                    ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
+                    : 'border-gray-300 bg-black text-white hover:bg-gray-800'
+                } ${customizationLevel !== 'premium' ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                Black
+              </button>
+            </div>
+          </PremiumFeatureLock>
         </div>
 
         {/* Border Width */}
         <div className="mb-4">
           <label className="block text-xs font-medium text-gray-600 mb-2">Border Width</label>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              onClick={() => onMapSettingsChange({...mapSettings, markerBorderWidth: 1})}
-              className={`p-2 border rounded text-xs ${
-                mapSettings.markerBorderWidth === 1 
-                  ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
-                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              1px
-            </button>
-            <button
-              onClick={() => onMapSettingsChange({...mapSettings, markerBorderWidth: 2})}
-              className={`p-2 border rounded text-xs ${
-                mapSettings.markerBorderWidth === 2 
-                  ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
-                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              2px
-            </button>
-            <button
-              onClick={() => onMapSettingsChange({...mapSettings, markerBorderWidth: 3})}
-              className={`p-2 border rounded text-xs ${
-                mapSettings.markerBorderWidth === 3 
-                  ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
-                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              3px
-            </button>
-          </div>
+          <PremiumFeatureLock>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => customizationLevel === 'premium' && onMapSettingsChange({...mapSettings, markerBorderWidth: 1})}
+                disabled={customizationLevel !== 'premium'}
+                className={`p-2 border rounded text-xs ${
+                  mapSettings.markerBorderWidth === 1 
+                    ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                } ${customizationLevel !== 'premium' ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                1px
+              </button>
+              <button
+                onClick={() => customizationLevel === 'premium' && onMapSettingsChange({...mapSettings, markerBorderWidth: 2})}
+                disabled={customizationLevel !== 'premium'}
+                className={`p-2 border rounded text-xs ${
+                  mapSettings.markerBorderWidth === 2 
+                    ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                } ${customizationLevel !== 'premium' ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                2px
+              </button>
+              <button
+                onClick={() => customizationLevel === 'premium' && onMapSettingsChange({...mapSettings, markerBorderWidth: 3})}
+                disabled={customizationLevel !== 'premium'}
+                className={`p-2 border rounded text-xs ${
+                  mapSettings.markerBorderWidth === 3 
+                    ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                } ${customizationLevel !== 'premium' ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                3px
+              </button>
+            </div>
+          </PremiumFeatureLock>
         </div>
       </div>
 
@@ -415,83 +519,135 @@ const EditTabContent: React.FC<EditTabContentProps> = ({
       <div className="mb-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Search Bar</h3>
         
-        {/* Background Color */}
-        <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-600 mb-2">Search Panel Background</label>
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={mapSettings.searchBarBackgroundColor}
-              onChange={(e) => onMapSettingsChange({...mapSettings, searchBarBackgroundColor: e.target.value})}
-              className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
-            />
-            <input
-              type="text"
-              value={mapSettings.searchBarBackgroundColor}
-              onChange={(e) => onMapSettingsChange({...mapSettings, searchBarBackgroundColor: e.target.value})}
-              placeholder="#ffffff"
-              className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-pinz-500 focus:border-pinz-500"
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">Match your website's color scheme</p>
-        </div>
+        {customizationLevel === 'premium' ? (
+          <>
+            {/* Background Color */}
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-600 mb-2">Search Panel Background</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={mapSettings.searchBarBackgroundColor}
+                  onChange={(e) => onMapSettingsChange({...mapSettings, searchBarBackgroundColor: e.target.value})}
+                  className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+                />
+                <input
+                  type="text"
+                  value={mapSettings.searchBarBackgroundColor}
+                  onChange={(e) => onMapSettingsChange({...mapSettings, searchBarBackgroundColor: e.target.value})}
+                  placeholder="#ffffff"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-pinz-500 focus:border-pinz-500"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Match your website's color scheme</p>
+            </div>
 
-        {/* Text Color */}
-        <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-600 mb-2">Marker List Text Color</label>
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={mapSettings.searchBarTextColor}
-              onChange={(e) => onMapSettingsChange({...mapSettings, searchBarTextColor: e.target.value})}
-              className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
-            />
-            <input
-              type="text"
-              value={mapSettings.searchBarTextColor}
-              onChange={(e) => onMapSettingsChange({...mapSettings, searchBarTextColor: e.target.value})}
-              placeholder="#000000"
-              className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-pinz-500 focus:border-pinz-500"
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">Color for marker names and addresses in the list</p>
-        </div>
+            {/* Text Color */}
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-600 mb-2">Marker List Text Color</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={mapSettings.searchBarTextColor}
+                  onChange={(e) => onMapSettingsChange({...mapSettings, searchBarTextColor: e.target.value})}
+                  className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+                />
+                <input
+                  type="text"
+                  value={mapSettings.searchBarTextColor}
+                  onChange={(e) => onMapSettingsChange({...mapSettings, searchBarTextColor: e.target.value})}
+                  placeholder="#000000"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-pinz-500 focus:border-pinz-500"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Color for marker names and addresses in the list</p>
+            </div>
 
-        {/* Hover Color */}
-        <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-600 mb-2">Hover Color</label>
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={mapSettings.searchBarHoverColor}
-              onChange={(e) => onMapSettingsChange({...mapSettings, searchBarHoverColor: e.target.value})}
-              className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
-            />
-            <input
-              type="text"
-              value={mapSettings.searchBarHoverColor}
-              onChange={(e) => onMapSettingsChange({...mapSettings, searchBarHoverColor: e.target.value})}
-              placeholder="#f3f4f6"
-              className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-pinz-500 focus:border-pinz-500"
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">Color for hover effects on marker list items</p>
-        </div>
+            {/* Hover Color */}
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-600 mb-2">Hover Color</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={mapSettings.searchBarHoverColor}
+                  onChange={(e) => onMapSettingsChange({...mapSettings, searchBarHoverColor: e.target.value})}
+                  className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+                />
+                <input
+                  type="text"
+                  value={mapSettings.searchBarHoverColor}
+                  onChange={(e) => onMapSettingsChange({...mapSettings, searchBarHoverColor: e.target.value})}
+                  placeholder="#f3f4f6"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-pinz-500 focus:border-pinz-500"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Color for hover effects on marker list items</p>
+            </div>
 
-        {/* Reset Button */}
-        <div className="mb-4">
-          <button
-            onClick={() => onMapSettingsChange({
-              ...mapSettings,
-              searchBarBackgroundColor: '#ffffff',
-              searchBarTextColor: '#000000',
-              searchBarHoverColor: '#f3f4f6'
-            })}
-            className="w-full px-4 py-2 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-          >
-            Reset to Defaults
-          </button>
-        </div>
+            {/* Reset Button */}
+            <div className="mb-4">
+              <button
+                onClick={() => onMapSettingsChange({
+                  ...mapSettings,
+                  searchBarBackgroundColor: '#ffffff',
+                  searchBarTextColor: '#000000',
+                  searchBarHoverColor: '#f3f4f6'
+                })}
+                className="w-full px-4 py-2 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+              >
+                Reset to Defaults
+              </button>
+            </div>
+          </>
+        ) : (
+          // Basic: Show locked search bar customization
+          <div className="relative">
+            <div className="space-y-4 opacity-50">
+              {/* Background Color */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-600 mb-2">Search Panel Background</label>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-8 border border-gray-300 rounded bg-gray-100"></div>
+                  <div className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm bg-gray-100 text-gray-500">
+                    #ffffff
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Match your website's color scheme</p>
+              </div>
+
+              {/* Text Color */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-600 mb-2">Marker List Text Color</label>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-8 border border-gray-300 rounded bg-gray-100"></div>
+                  <div className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm bg-gray-100 text-gray-500">
+                    #000000
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Color for marker names and addresses in the list</p>
+              </div>
+
+              {/* Hover Color */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-600 mb-2">Hover Color</label>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-8 border border-gray-300 rounded bg-gray-100"></div>
+                  <div className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm bg-gray-100 text-gray-500">
+                    #f3f4f6
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Color for hover effects on marker list items</p>
+              </div>
+            </div>
+            <div className="absolute inset-0 bg-gray-100/80 rounded flex items-center justify-center">
+              <div className="text-center">
+                <Lock className="w-6 h-6 text-gray-500 mx-auto mb-2" />
+                <p className="text-sm text-gray-600 font-medium">Premium Feature</p>
+                <p className="text-xs text-gray-500 mt-1">Upgrade to customize search bar colors</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

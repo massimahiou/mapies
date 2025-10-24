@@ -80,7 +80,6 @@ const EmbedMap: React.FC = () => {
 
   // Get map ID from URL parameters
   const mapId = searchParams.get('mapId')
-  const userId = searchParams.get('userId')
 
   // Mobile detection and responsive behavior - Force mobile detection
   useEffect(() => {
@@ -263,21 +262,31 @@ const EmbedMap: React.FC = () => {
   // Load map data from Firestore
   useEffect(() => {
     const loadMapData = async () => {
-      if (!mapId || !userId) {
-        setError('Missing map ID or user ID')
+      if (!mapId) {
+        setError('Missing map ID')
         setLoading(false)
         return
       }
 
       try {
-        console.log('Loading map data for embed:', { mapId, userId })
+        console.log('Loading map data for embed:', { mapId })
         
         // Import Firebase functions dynamically to avoid issues in embed context
-        const { getMap, getMapMarkers } = await import('../firebase/maps')
+        const { getMapById, getMapMarkers } = await import('../firebase/maps')
         
-        // Load map settings
-        const mapData = await getMap(userId, mapId)
-        if (mapData && mapData.settings) {
+        // Load map settings using getMapById to find the map regardless of user
+        const mapData = await getMapById(mapId)
+        if (!mapData) {
+          setError('Map not found')
+          setLoading(false)
+          return
+        }
+
+        // Get the map owner's ID for loading folder icons
+        const mapOwnerId = mapData.userId
+        console.log('📁 Map owner ID for folder icons:', mapOwnerId)
+
+        if (mapData.settings) {
           console.log('🔍 EmbedMap: Loading map settings from Firestore:', mapData.settings)
           setMapSettings({
             ...mapData.settings,
@@ -296,11 +305,11 @@ const EmbedMap: React.FC = () => {
           })
         }
 
-        // Load folder icons for this map
+        // Load folder icons for this map using the map owner's ID
         const loadFolderIcons = async () => {
           try {
             const { getUserMarkerGroups } = await import('../firebase/firestore')
-            const groups = await getUserMarkerGroups(userId, mapId)
+            const groups = await getUserMarkerGroups(mapOwnerId, mapId)
             
             const iconStates: Record<string, string> = {}
             groups.forEach(group => {
@@ -309,15 +318,15 @@ const EmbedMap: React.FC = () => {
               }
             })
             setFolderIcons(iconStates)
-            console.log('📁 Folder icons loaded for embed map:', Object.keys(iconStates).length)
+            console.log('📁 Folder icons loaded for embed map:', Object.keys(iconStates).length, 'icons:', iconStates)
           } catch (error) {
             console.error('Error loading folder icons for embed map:', error)
           }
         }
         loadFolderIcons()
 
-        // Load markers
-        const mapMarkers = await getMapMarkers(userId, mapId)
+        // Load markers using the map owner's ID
+        const mapMarkers = await getMapMarkers(mapOwnerId, mapId)
         const localMarkers: Marker[] = mapMarkers.map(marker => ({
           id: marker.id || `marker-${Date.now()}-${Math.random()}`,
           name: marker.name,
@@ -340,7 +349,7 @@ const EmbedMap: React.FC = () => {
     }
 
     loadMapData()
-  }, [mapId, userId])
+  }, [mapId])
 
   // Update cluster group when mapSettings change
   useEffect(() => {
@@ -479,8 +488,22 @@ const EmbedMap: React.FC = () => {
     const visibleMarkers = markers.filter(marker => marker.visible)
     visibleMarkers.forEach(marker => {
       // Get the renamed name to check for folder icons
-      const markerRenamedName = applyNameRules(marker.name, mapSettings.nameRules)
-      const folderIconUrl = folderIcons[markerRenamedName]
+      const markerRenamedName = applyNameRules(marker.name, mapSettings.nameRules, true)
+      
+      // Try to find folder icon with case-insensitive matching
+      let folderIconUrl = folderIcons[markerRenamedName]
+      if (!folderIconUrl) {
+        // Try case-insensitive matching
+        const availableKeys = Object.keys(folderIcons)
+        const matchingKey = availableKeys.find(key => 
+          key.toLowerCase() === markerRenamedName.toLowerCase() ||
+          markerRenamedName.toLowerCase().includes(key.toLowerCase()) ||
+          key.toLowerCase().includes(markerRenamedName.toLowerCase())
+        )
+        if (matchingKey) {
+          folderIconUrl = folderIcons[matchingKey]
+        }
+      }
       
       // Create marker using unified utility that respects ALL user settings
       const markerData = createMarkerHTML({ mapSettings, folderIconUrl })
@@ -498,7 +521,7 @@ const EmbedMap: React.FC = () => {
       const markerInstance = L.marker([marker.lat, marker.lng], { icon: customIcon })
         .bindPopup(`
           <div style="padding: 8px; font-family: system-ui, sans-serif;">
-            <div style="font-weight: 600; color: #000; font-size: 14px; margin: 0 0 4px 0;">${applyNameRules(marker.name, mapSettings.nameRules)}</div>
+            <div style="font-weight: 600; color: #000; font-size: 14px; margin: 0 0 4px 0;">${applyNameRules(marker.name, mapSettings.nameRules, true)}</div>
             <div style="color: #666; font-size: 12px; margin: 0;">${marker.address}</div>
           </div>
         `)
@@ -795,7 +818,7 @@ const EmbedMap: React.FC = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate" style={{ color: mapSettings.searchBarTextColor }}>
-                      {applyNameRules(marker.name, mapSettings.nameRules)}
+                      {applyNameRules(marker.name, mapSettings.nameRules, true)}
                     </p>
                     <p className="text-xs truncate" style={{ color: mapSettings.searchBarTextColor, opacity: 0.7 }}>
                       {marker.address}

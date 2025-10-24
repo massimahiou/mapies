@@ -32,8 +32,8 @@ export interface MarkerCreationOptions {
 }
 
 // Apply name rules to marker name for display
-export const applyNameRules = (originalName: string, nameRules: NameRule[]): string => {
-  if (!nameRules || !Array.isArray(nameRules)) {
+export const applyNameRules = (originalName: string, nameRules: NameRule[], hasSmartGrouping: boolean = true): string => {
+  if (!hasSmartGrouping || !nameRules || !Array.isArray(nameRules)) {
     return originalName
   }
   
