@@ -25,6 +25,17 @@ export const useSharedMapFeatureAccess = (currentMap?: any) => {
   
   // For shared maps, inherit the map owner's features
   // This ensures shared users can use the map as it was designed
+  
+  // Create a function to check if user can add markers based on inherited limits
+  const canAddMarkersWithInheritance = (currentCount: number): boolean => {
+    // Check if user has permission to add markers
+    if (!mapInheritance.permissions.canAddMarkers) {
+      return false
+    }
+    // Check against inherited plan limits
+    return currentCount < mapInheritance.inheritedFeatures.maxMarkersPerMap
+  }
+  
   return {
     ...currentUserFeatures,
     // Override with inherited features from map owner
@@ -41,8 +52,8 @@ export const useSharedMapFeatureAccess = (currentMap?: any) => {
       maxMaps: mapInheritance.inheritedFeatures.maxMaps,
       maxStorageMB: mapInheritance.inheritedFeatures.maxStorageMB,
     },
-    // Use permissions-based access for editing capabilities
-    canAddMarkers: mapInheritance.permissions.canAddMarkers,
+    // Use permission-based function for editing capabilities
+    canAddMarkers: canAddMarkersWithInheritance,
     canCreateMap: currentUserFeatures.canCreateMap, // Keep user's own limits for new maps
     currentPlan: currentUserFeatures.currentPlan, // User's own plan
     usage: currentUserFeatures.usage,

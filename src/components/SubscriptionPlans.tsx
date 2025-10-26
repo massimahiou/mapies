@@ -71,15 +71,18 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
       // Initialize Stripe
       await stripeService.initializeStripe(STRIPE_CONFIG.PUBLISHABLE_KEY)
       
+      // Create dynamic success and cancel URLs
+      const baseUrl = window.location.origin
+      const successUrl = `${baseUrl}/auth?subscription=success`
+      const cancelUrl = `${baseUrl}/auth?subscription=cancelled`
+      
       // Create checkout session for the next plan
       const checkoutData = await stripeService.createCheckoutSessionForPlan(
         nextPlan,
         user.uid,
         user.email || '',
-        {
-          successUrl: `${window.location.origin}`,
-          cancelUrl: `${window.location.origin}/dashboard?subscription=cancelled`
-        }
+        successUrl,
+        cancelUrl
       )
       
       // Redirect to Stripe checkout

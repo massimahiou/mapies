@@ -504,7 +504,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <img 
                       src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
                       alt="Pinz Logo"
-                      className="h-16 w-auto"
+                      className="h-24 w-auto"
                     />
                   </div>
                 </div>

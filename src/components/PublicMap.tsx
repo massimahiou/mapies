@@ -11,8 +11,6 @@ import { formatAddressForPopup } from '../utils/addressUtils'
 import PublicMapSidebar from './PublicMapSidebar'
 import { MAPBOX_CONFIG } from '../config/mapbox'
 import { usePublicFeatureAccess } from '../hooks/useFeatureAccess'
-import { useMapFeatureInheritance } from '../hooks/useMapFeatureInheritance'
-import MapFeatureLevelHeader from './MapFeatureLevelHeader'
 import InteractiveWatermark from './InteractiveWatermark'
 import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from '../utils/freemiumDefaults'
 import { validateMapAgainstPlan } from '../utils/mapValidation'
@@ -123,9 +121,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   const [locationModeActive, setLocationModeActive] = useState(false)
   const [renamedMarkers] = useState<Record<string, string>>({})
   const [showMobileResults, setShowMobileResults] = useState(false)
-  
-  // Get map feature inheritance
-  const mapInheritance = useMapFeatureInheritance(mapData)
   
   // Validate map against owner's plan for public viewing
   const mapValidation = mapData ? validateMapAgainstPlan(markers, mapSettings, mapData.ownerPlan || 'freemium', folderIcons) : { isValid: true, premiumFeaturesUsed: [] }
@@ -1431,13 +1426,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       <meta httpEquiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
       <meta httpEquiv="Pragma" content="no-cache" />
       <meta httpEquiv="Expires" content="0" />
-      
-      {/* Map Feature Level Header - Only show for shared maps, not demo maps */}
-      {mapInheritance && mapId !== 'demo-map-1000-markers' && (
-        <div className="absolute top-0 left-0 right-0 z-50">
-          <MapFeatureLevelHeader mapInheritance={mapInheritance} />
-        </div>
-      )}
       
       {/* Active Map - Show full interface */}
       <>

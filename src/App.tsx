@@ -27,7 +27,7 @@ import { addMarkerToMap, MapDocument, getMapMarkers, deleteMapMarker, updateMapM
 import { checkForDuplicates, checkForInternalDuplicates, AddressData } from './utils/duplicateDetection'
 import DuplicateNotification from './components/DuplicateNotification'
 import SubscriptionManagementModal from './components/SubscriptionManagementModal'
-import { useFeatureAccess } from './hooks/useFeatureAccess'
+import { useSharedMapFeatureAccess } from './hooks/useSharedMapFeatureAccess'
 
 // Types
 interface Marker {
@@ -45,7 +45,6 @@ const mockMarkers: Marker[] = []
 
 const AppContent: React.FC = () => {
   const { user, loading, signOut, userDocument } = useAuth()
-  const { canAddMarkers } = useFeatureAccess()
 
   // Handle sign out
   const handleSignOut = async () => {
@@ -99,6 +98,14 @@ const AppContent: React.FC = () => {
   const [currentMapId, setCurrentMapId] = useState<string | null>(null)
   const [maps, setMaps] = useState<MapDocument[]>([])
   const [folderIcons, setFolderIcons] = useState<Record<string, string>>({})
+  
+  // Get the current map object
+  const currentMap = maps.find(m => m.id === currentMapId)
+  
+  // Use shared map feature access to properly handle inheritance for shared maps
+  // This ensures that marker limits account for map ownership
+  const sharedMapFeatureAccess = useSharedMapFeatureAccess(currentMap)
+  const { canAddMarkers: canAddMarkersShared } = sharedMapFeatureAccess
   
   // Duplicate notification state
   const [showDuplicateNotification, setShowDuplicateNotification] = useState(false)
@@ -636,8 +643,9 @@ const AppContent: React.FC = () => {
       return
     }
 
-    // Check marker limits before processing
-    if (!canAddMarkers(markers.length)) {
+    // Check marker limits before processing using shared map feature access
+    // This properly accounts for map inheritance (shared maps)
+    if (!canAddMarkersShared(markers.length)) {
       setUploadError(`Cannot add more markers. You've reached your limit of ${markers.length} markers. Upgrade your plan to add more.`)
       return
     }

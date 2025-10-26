@@ -58,6 +58,18 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
   const handlePlanSelect = async (planId: 'freemium' | 'starter' | 'professional' | 'enterprise') => {
     if (!user) return
     
+    // Don't process if this is the current plan
+    if (planId === currentPlan) {
+      console.log('Already on this plan')
+      return
+    }
+    
+    // Don't process payment for freemium (it's free and already active by default)
+    if (planId === 'freemium') {
+      alert('You are already on the Freemium plan. To upgrade, please select a paid plan.')
+      return
+    }
+    
     console.log('Starting plan selection for:', planId)
     
     try {
@@ -67,16 +79,19 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
       console.log('Initializing Stripe...')
       await stripeService.initializeStripe(STRIPE_CONFIG.PUBLISHABLE_KEY)
       
+      // Create dynamic success and cancel URLs
+      const baseUrl = window.location.origin
+      const successUrl = `${baseUrl}/auth?subscription=success`
+      const cancelUrl = `${baseUrl}/auth?subscription=cancelled`
+      
       // Create checkout session for the selected plan
       console.log('Creating checkout session for plan:', planId)
       const checkoutData = await stripeService.createCheckoutSessionForPlan(
         planId,
         user.uid,
         user.email || '',
-        {
-          successUrl: `${window.location.origin}`,
-          cancelUrl: `${window.location.origin}/dashboard?subscription=cancelled`
-        }
+        successUrl,
+        cancelUrl
       )
       
       console.log('Checkout session created:', checkoutData)
@@ -311,9 +326,11 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
                 {/* Action Button */}
                 <button
                   onClick={() => handlePlanSelect(plan.id as 'freemium' | 'starter' | 'professional' | 'enterprise')}
-                  disabled={upgrading}
+                  disabled={upgrading || currentPlan === plan.id}
                   className={`w-full py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
-                    upgrading
+                    currentPlan === plan.id
+                      ? 'bg-gray-100 text-gray-400 cursor-default'
+                      : upgrading
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                       : plan.popular
                       ? 'bg-pinz-600 text-white hover:bg-pinz-700 shadow-lg hover:shadow-xl'
@@ -325,8 +342,10 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                       Processing...
                     </div>
+                  ) : currentPlan === plan.id ? (
+                    'Current Plan'
                   ) : plan.price === 0 ? (
-                    'Choose Plan'
+                    'Downgrade'
                   ) : (
                     'Choose Plan'
                   )}
