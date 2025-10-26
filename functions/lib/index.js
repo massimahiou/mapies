@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listPrices = exports.fixUserLimits = exports.testCustomerPortal = exports.createCustomerPortalSession = exports.createCheckoutSession = exports.leaveSharedMap = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
+exports.cancelSubscription = exports.listPrices = exports.fixUserLimits = exports.testCustomerPortal = exports.createCustomerPortalSession = exports.createCheckoutSession = exports.leaveSharedMap = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const stripe_1 = require("stripe");
@@ -297,4 +297,6 @@ exports.leaveSharedMap = functions.https.onCall(async (data, context) => {
 });
 var listPrices_1 = require("./listPrices");
 Object.defineProperty(exports, "listPrices", { enumerable: true, get: function () { return listPrices_1.listPrices; } });
+var cancelSubscription_1 = require("./cancelSubscription");
+Object.defineProperty(exports, "cancelSubscription", { enumerable: true, get: function () { return cancelSubscription_1.cancelSubscription; } });
 //# sourceMappingURL=index.js.map

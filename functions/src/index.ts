@@ -331,3 +331,4 @@ export { createCheckoutSession, createCustomerPortalSession, testCustomerPortal 
 // Export temporary fix function
 export { fixUserLimits };
 export { listPrices } from './listPrices';
+export { cancelSubscription } from './cancelSubscription';

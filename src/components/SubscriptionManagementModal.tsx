@@ -5,6 +5,7 @@ import { getUserDocument, UserDocument } from '../firebase/users'
 import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 import { stripeService } from '../services/stripe'
 import { STRIPE_CONFIG } from '../config/stripe'
+import { getFunctions, httpsCallable } from 'firebase/functions'
 
 interface SubscriptionManagementModalProps {
   onClose: () => void
@@ -30,10 +31,15 @@ const PRICING_PLANS = Object.entries(SUBSCRIPTION_PLANS).map(([id, plan]) => ({
 }))
 
 const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = ({ onClose }) => {
-  const { user } = useAuth()
+  const { user, refreshUserDocument } = useAuth()
   const [userDoc, setUserDoc] = useState<UserDocument | null>(null)
   const [loading, setLoading] = useState(true)
-  const [upgrading, setUpgrading] = useState(false)
+  const [processingPlanId, setProcessingPlanId] = useState<string | null>(null)
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [showErrorModal, setShowErrorModal] = useState(false)
+  const [modalMessage, setModalMessage] = useState('')
+  const [pendingDowngrade, setPendingDowngrade] = useState<boolean>(false)
 
   useEffect(() => {
     if (user) {
@@ -60,32 +66,27 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
     
     // Don't process if this is the current plan
     if (planId === currentPlan) {
-      console.log('Already on this plan')
       return
     }
     
-    // Don't process payment for freemium (it's free and already active by default)
-    if (planId === 'freemium') {
-      alert('You are already on the Freemium plan. To upgrade, please select a paid plan.')
-      return
+    // Handle Freemium downgrade - MUST show confirmation first
+    if (planId === 'freemium' && currentPlan !== 'freemium') {
+      console.log('⚠️ DOWNGRADE: User clicked downgrade, showing confirmation modal')
+      setShowConfirmModal(true)
+      setPendingDowngrade(true)
+      return // Stop here - wait for user to confirm
     }
     
-    console.log('Starting plan selection for:', planId)
-    
+    // For upgrades, proceed with Stripe checkout
     try {
-      setUpgrading(true)
+      setProcessingPlanId(planId)
       
-      // Initialize Stripe
-      console.log('Initializing Stripe...')
       await stripeService.initializeStripe(STRIPE_CONFIG.PUBLISHABLE_KEY)
       
-      // Create dynamic success and cancel URLs
       const baseUrl = window.location.origin
       const successUrl = `${baseUrl}/auth?subscription=success`
       const cancelUrl = `${baseUrl}/auth?subscription=cancelled`
       
-      // Create checkout session for the selected plan
-      console.log('Creating checkout session for plan:', planId)
       const checkoutData = await stripeService.createCheckoutSessionForPlan(
         planId,
         user.uid,
@@ -94,28 +95,98 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
         cancelUrl
       )
       
-      console.log('Checkout session created:', checkoutData)
-      
-      // Redirect to Stripe checkout
-      console.log('Redirecting to checkout...')
       await stripeService.redirectToCheckout(checkoutData.url)
       
     } catch (error) {
       console.error('Error upgrading plan:', error)
-      alert('Payment processing failed. Please try again or contact support.')
+      setModalMessage('Payment processing failed. Please try again or contact support.')
+      setShowErrorModal(true)
     } finally {
-      setUpgrading(false)
+      setProcessingPlanId(null)
     }
+  }
+  
+  const handleConfirmYes = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    console.log('✅ USER CONFIRMED: Cancelling subscription now')
+    
+    // Close confirmation modal
+    setShowConfirmModal(false)
+    setPendingDowngrade(false)
+    
+    // Wait a moment for modal to close
+    await new Promise(resolve => setTimeout(resolve, 200))
+    
+    // Now perform the actual cancellation
+    try {
+      setProcessingPlanId('freemium')
+      
+      // Call the cancel subscription function
+      const functions = getFunctions()
+      const cancelSubscription = httpsCallable(functions, 'cancelSubscription')
+      const result = await cancelSubscription()
+      
+      // Reload user data
+      await loadUserData()
+      await refreshUserDocument()
+      
+      // Get the period end date
+      const data = result.data as any
+      const periodEnd = data?.periodEnd || userDoc?.subscription?.subscriptionEndDate
+      
+      let message = 'Your subscription will remain active until the end of your billing period. '
+      if (periodEnd) {
+        const endDate = new Date(periodEnd)
+        message += `You will lose access on ${endDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}.`
+      } else {
+        message += 'You will lose access at the end of your billing period.'
+      }
+      
+      // Show success modal
+      setModalMessage(message)
+      setShowSuccessModal(true)
+      
+    } catch (error) {
+      console.error('Error cancelling subscription:', error)
+      setModalMessage('Failed to cancel subscription. Please try again or contact support.')
+      setShowErrorModal(true)
+    } finally {
+      setProcessingPlanId(null)
+    }
+  }
+  
+  const handleConfirmNo = (e?: React.MouseEvent) => {
+    e?.preventDefault()
+    e?.stopPropagation()
+    console.log('❌ USER CANCELLED: Keeping current subscription')
+    setShowConfirmModal(false)
+    setPendingDowngrade(false)
+    setModalMessage('')
+  }
+  
+  const handleCloseSuccessModal = () => {
+    setShowSuccessModal(false)
+    setModalMessage('')
+    setShowConfirmModal(false) // Ensure confirmation modal is also closed
+  }
+  
+  const handleCloseErrorModal = () => {
+    setShowErrorModal(false)
+    setModalMessage('')
+    setShowConfirmModal(false) // Ensure confirmation modal is also closed
   }
 
   const handleManageSubscription = async () => {
     if (!user || !userDoc?.stripeCustomerId) {
-      alert('No subscription found. Please upgrade to a paid plan first.')
+      setModalMessage('No subscription found. Please upgrade to a paid plan first.')
+      setShowErrorModal(true)
       return
     }
     
     try {
-      setUpgrading(true)
+      setProcessingPlanId('manage')
       
       // Initialize Stripe
       await stripeService.initializeStripe(STRIPE_CONFIG.PUBLISHABLE_KEY)
@@ -131,9 +202,10 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
       
     } catch (error) {
       console.error('Error opening customer portal:', error)
-      alert('Unable to open subscription management. Please try again or contact support.')
+      setModalMessage('Unable to open subscription management. Please try again or contact support.')
+      setShowErrorModal(true)
     } finally {
-      setUpgrading(false)
+      setProcessingPlanId(null)
     }
   }
 
@@ -182,7 +254,10 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
     )
   }
 
+  console.log('📊 RENDER STATE - showConfirmModal:', showConfirmModal, 'pendingDowngrade:', pendingDowngrade, 'showSuccessModal:', showSuccessModal)
+
   return (
+    <>
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
@@ -325,19 +400,23 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
 
                 {/* Action Button */}
                 <button
-                  onClick={() => handlePlanSelect(plan.id as 'freemium' | 'starter' | 'professional' | 'enterprise')}
-                  disabled={upgrading || currentPlan === plan.id}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    handlePlanSelect(plan.id as 'freemium' | 'starter' | 'professional' | 'enterprise')
+                  }}
+                  disabled={processingPlanId === plan.id || currentPlan === plan.id}
                   className={`w-full py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
                     currentPlan === plan.id
                       ? 'bg-gray-100 text-gray-400 cursor-default'
-                      : upgrading
+                      : processingPlanId === plan.id
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                       : plan.popular
                       ? 'bg-pinz-600 text-white hover:bg-pinz-700 shadow-lg hover:shadow-xl'
                       : 'bg-pinz-500 text-white hover:bg-pinz-600'
                   }`}
                 >
-                  {upgrading ? (
+                  {processingPlanId === plan.id ? (
                     <div className="flex items-center justify-center gap-2">
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                       Processing...
@@ -476,11 +555,11 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
                 </div>
                 <button
                   onClick={handleManageSubscription}
-                  disabled={upgrading}
+                  disabled={processingPlanId === 'manage'}
                   className="px-4 py-2 bg-pinz-600 text-white rounded-lg hover:bg-pinz-700 transition-colors disabled:opacity-50 flex items-center gap-2"
                 >
                   <CreditCard className="w-4 h-4" />
-                  {upgrading ? 'Loading...' : 'Manage Subscription'}
+                  {processingPlanId === 'manage' ? 'Loading...' : 'Manage Subscription'}
                 </button>
               </div>
             </div>
@@ -488,6 +567,117 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
         </div>
       </div>
     </div>
+
+    {/* Confirmation Modal - Only shows when downgrading */}
+      {showConfirmModal && pendingDowngrade && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100]" 
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              // Prevent closing on backdrop click - user MUST click a button
+              console.log('⚠️ Backdrop clicked but ignored - user must click a button')
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl" 
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-center mb-6">
+              <div className="w-16 h-16 bg-pinz-100 rounded-full flex items-center justify-center">
+                <X className="w-8 h-8 text-pinz-600" />
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-gray-900 text-center mb-4">
+              Cancel Subscription?
+            </h3>
+            <div className="bg-pinz-50 border border-pinz-200 rounded-lg p-4 mb-6">
+              <p className="text-gray-800 text-center text-sm">
+                Your subscription will remain active until the end of your current billing period. 
+                You will keep all your paid features until then.
+              </p>
+            </div>
+            <p className="text-gray-600 text-center mb-6 text-sm">
+              Are you sure you want to cancel your subscription?
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleConfirmNo(e)
+                }}
+                className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-semibold transition-colors"
+              >
+                Keep Subscription
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleConfirmYes(e)
+                }}
+                className="flex-1 px-4 py-3 bg-pinz-600 text-white rounded-lg hover:bg-pinz-700 font-semibold transition-colors"
+              >
+                Yes, Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Modal */}
+      {showSuccessModal && !showConfirmModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex items-center justify-center mb-4">
+              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                <CheckIcon className="w-6 h-6 text-green-600" />
+              </div>
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 text-center mb-3">
+              Success!
+            </h3>
+            <p className="text-gray-600 text-center mb-6">
+              {modalMessage}
+            </p>
+            <button
+              onClick={handleCloseSuccessModal}
+              className="w-full px-4 py-2 bg-pinz-600 text-white rounded-lg hover:bg-pinz-700 font-medium transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Error Modal */}
+      {showErrorModal && !showConfirmModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex items-center justify-center mb-4">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <X className="w-6 h-6 text-red-600" />
+              </div>
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 text-center mb-3">
+              Error
+            </h3>
+            <p className="text-gray-600 text-center mb-6">
+              {modalMessage}
+            </p>
+            <button
+              onClick={handleCloseErrorModal}
+              className="w-full px-4 py-2 bg-pinz-600 text-white rounded-lg hover:bg-pinz-700 font-medium transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
