@@ -736,3 +736,44 @@ export const isMapOwnedByUser = (map: MapDocument, userId: string): boolean => {
   return map.userId === userId
 }
 
+// Leave a shared map
+export const leaveSharedMap = async (
+  mapId: string,
+  ownerId: string,
+  userEmail: string
+): Promise<void> => {
+  try {
+    const mapRef = doc(db, 'users', ownerId, 'maps', mapId)
+    const mapDoc = await getDoc(mapRef)
+    
+    if (!mapDoc.exists()) {
+      throw new Error('Map not found')
+    }
+    
+    const mapData = mapDoc.data() as MapDocument
+    const currentSharing = mapData.sharing
+    
+    if (!currentSharing) {
+      throw new Error('Map is not shared')
+    }
+    
+    const updatedSharedWith = currentSharing.sharedWith.filter(user => user.email !== userEmail)
+    
+    const updatedSharing = {
+      ...currentSharing,
+      sharedWith: updatedSharedWith,
+      isShared: updatedSharedWith.length > 0
+    }
+    
+    await updateDoc(mapRef, {
+      sharing: updatedSharing,
+      updatedAt: serverTimestamp()
+    })
+    
+    console.log('User left map:', userEmail)
+  } catch (error) {
+    console.error('Error leaving shared map:', error)
+    throw error
+  }
+}
+

@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Eye, Share2, Plus, Trash2, MapPin, Settings, ChevronDown, Map, Check, GripVertical, Edit2, X } from 'lucide-react'
+import { Eye, Share2, Plus, Trash2, Settings, ChevronDown, Map, Check, GripVertical, Edit2, X, AlertTriangle } from 'lucide-react'
 import UserProfile from './UserProfile'
 import { useAuth } from '../contexts/AuthContext'
-import { getUserMaps, createMap, deleteMap, updateMap, MapDocument, shareMapWithUser, removeUserFromMap, updateUserRole, SharedUser } from '../firebase/maps'
+import { useToast } from '../contexts/ToastContext'
+import { getUserMaps, createMap, deleteMap, updateMap, MapDocument, shareMapWithUser, removeUserFromMap, updateUserRole, SharedUser, isMapOwnedByUser, leaveSharedMap } from '../firebase/maps'
 import DeleteMapDialog from './DeleteMapDialog'
 import ManageTabContent from './sidebar/ManageTabContent'
 import DataTabContent from './sidebar/DataTabContent'
 import EditTabContent from './sidebar/EditTabContent'
 import PublishTabContent from './sidebar/PublishTabContent'
+import { useFeatureAccess, useUsageWarning } from '../hooks/useFeatureAccess'
+import { ensureFreemiumCompliance } from '../utils/freemiumDefaults'
 
 interface Marker {
   id: string
@@ -43,6 +46,7 @@ interface SidebarProps {
   isUploading?: boolean
   uploadProgress?: { processed: number; total: number; currentAddress: string }
   userId: string
+  onOpenSubscription?: () => void
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -68,9 +72,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   onMapsChange,
   isUploading = false,
   uploadProgress = { processed: 0, total: 0, currentAddress: '' },
-  userId
+  userId,
+  onOpenSubscription
 }) => {
   const { signOut, user } = useAuth()
+  const { showToast } = useToast()
+  const { canCreateMap, currentPlan } = useFeatureAccess()
+  const { limit } = useUsageWarning('maps', maps.length)
+
+  // Generate public share URL
+
   const [showMapSelector, setShowMapSelector] = useState(false)
   const [isCreatingMap, setIsCreatingMap] = useState(false)
   const [newMapName, setNewMapName] = useState('')
@@ -82,6 +93,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [editingMapId, setEditingMapId] = useState<string | null>(null)
   const [editingMapName, setEditingMapName] = useState('')
   const [isRenamingMap, setIsRenamingMap] = useState(false)
+  const editingInputRef = useRef<HTMLInputElement>(null)
   
   // Map sharing state
   const [showSharingModal, setShowSharingModal] = useState(false)
@@ -167,18 +179,21 @@ const Sidebar: React.FC<SidebarProps> = ({
   const handleCreateMap = async () => {
     if (!user || !newMapName.trim()) return
     
+    // Check if user can create more maps
+    if (!canCreateMap(maps.length)) {
+      // Message is now shown inline in the UI, no need for toast
+      return
+    }
+    
     setIsCreatingMap(true)
     try {
-      // Create map with default settings, ensuring nameRules is empty
-      const defaultMapSettings = {
-        ...mapSettings,
-        nameRules: [] // Always start with empty name rules
-      }
+      // Create map with freemium-compliant default settings
+      const freemiumCompliantSettings = ensureFreemiumCompliance(mapSettings, currentPlan)
       
       const mapId = await createMap(user.uid, {
         name: newMapName.trim(),
         description: 'New map',
-        settings: defaultMapSettings
+        settings: freemiumCompliantSettings
       })
       
       // Refresh maps list
@@ -192,17 +207,41 @@ const Sidebar: React.FC<SidebarProps> = ({
       setNewMapName('')
       setShowMapSelector(false)
       
+      showToast({
+        type: 'success',
+        title: 'Success',
+        message: 'Map created successfully!'
+      })
       console.log('Created new map with empty name rules:', mapId)
     } catch (error) {
       console.error('Error creating map:', error)
+      if (error instanceof Error && error.message.includes('Map limit reached')) {
+        showToast({
+          type: 'error',
+          title: 'Map Limit Reached',
+          message: error.message
+        })
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Error',
+          message: 'Failed to create map. Please try again.'
+        })
+      }
     } finally {
       setIsCreatingMap(false)
     }
   }
 
+  // Debug maps changes
+  useEffect(() => {
+    console.log('Maps array changed:', maps.length, 'maps:', maps.map(m => ({ id: m.id, name: m.name })))
+  }, [maps])
+
   // Get current map name
   const getCurrentMapName = () => {
     const currentMap = maps.find(map => map.id === currentMapId)
+    console.log('getCurrentMapName called:', { currentMapId, maps: maps.length, currentMap: currentMap?.name })
     return currentMap ? currentMap.name : 'No map selected'
   }
 
@@ -215,7 +254,10 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   // Handle map rename
   const handleRenameMap = async (mapId: string, newName: string) => {
-    if (!newName.trim() || newName === editingMapName) {
+    console.log('handleRenameMap called:', { mapId, newName, editingMapName })
+    
+    if (!newName.trim()) {
+      console.log('Skipping rename - empty name')
       setEditingMapId(null)
       setEditingMapName('')
       return
@@ -223,12 +265,35 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     setIsRenamingMap(true)
     try {
+      console.log('Calling updateMap with:', { userId: user!.uid, mapId, name: newName.trim() })
       await updateMap(user!.uid, mapId, { name: newName.trim() })
       console.log('Map renamed successfully')
+      
+      // Wait a moment for Firestore to propagate the changes
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      // Manually refresh the maps list to ensure UI updates
+      console.log('Manually refreshing maps list...')
+      const userMaps = await getUserMaps(user!.uid)
+      console.log('Refreshed maps:', userMaps)
+      onMapsChange(userMaps)
+      
+      // Show success toast
+      showToast({
+        type: 'success',
+        title: 'Success',
+        message: 'Map renamed successfully!'
+      })
+      
       setEditingMapId(null)
       setEditingMapName('')
     } catch (error) {
       console.error('Error renaming map:', error)
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to rename map. Please try again.'
+      })
     } finally {
       setIsRenamingMap(false)
     }
@@ -289,30 +354,121 @@ const Sidebar: React.FC<SidebarProps> = ({
   }
 
   const confirmDeleteMap = async () => {
-    if (!user || !mapToDelete) return
+    if (!user || !mapToDelete) {
+      console.log('Cannot delete map - missing user or mapToDelete:', { user: !!user, mapToDelete: !!mapToDelete })
+      return
+    }
 
+    console.log('Starting map deletion:', { userId: user.uid, mapId: mapToDelete.id, mapName: mapToDelete.name })
     setIsDeletingMap(true)
+    
     try {
       await deleteMap(user.uid, mapToDelete.id!)
+      console.log('Map deletion completed successfully')
       
       // Refresh maps list
+      console.log('Refreshing maps list...')
       const userMaps = await getUserMaps(user.uid)
+      console.log('Refreshed maps:', userMaps.length, 'maps')
       onMapsChange(userMaps)
       
       // If we deleted the current map, select the first available map or clear selection
       if (mapToDelete.id === currentMapId) {
+        console.log('Deleted current map, selecting new map...')
         if (userMaps.length > 0) {
           onMapChange(userMaps[0].id!)
+          console.log('Selected new map:', userMaps[0].name)
         } else {
           onMapChange('')
+          console.log('No maps left, cleared selection')
         }
       }
       
       setShowDeleteDialog(false)
       setMapToDelete(null)
+      
+      showToast({
+        type: 'success',
+        title: 'Success',
+        message: 'Map deleted successfully!'
+      })
     } catch (error) {
       console.error('Error deleting map:', error)
-      alert('Failed to delete map. Please try again.')
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to delete map. Please try again.'
+      })
+    } finally {
+      setIsDeletingMap(false)
+    }
+  }
+
+  // Handle leaving a shared map
+  const handleLeaveMap = (map: MapDocument, e: React.MouseEvent) => {
+    e.stopPropagation() // Prevent map selection
+    setMapToDelete(map)
+    setShowDeleteDialog(true)
+  }
+
+  const confirmLeaveMap = async () => {
+    if (!user || !mapToDelete) {
+      console.log('Cannot leave map - missing user or mapToDelete:', { user: !!user, mapToDelete: !!mapToDelete })
+      return
+    }
+
+    console.log('Starting leave map:', { userId: user.uid, mapId: mapToDelete.id, mapName: mapToDelete.name, ownerId: mapToDelete.userId })
+    setIsDeletingMap(true)
+    
+    try {
+      await leaveSharedMap(mapToDelete.id!, mapToDelete.userId, user.email || '')
+      console.log('Leave map completed successfully')
+      
+      // Refresh maps list - need to refresh both user maps and shared maps
+      console.log('Refreshing maps list...')
+      
+      // Get user's own maps
+      const userMaps = await getUserMaps(user.uid)
+      console.log('User maps:', userMaps.length, 'maps')
+      
+      // Get shared maps
+      const { getSharedMaps } = await import('../firebase/maps')
+      const sharedMaps = await getSharedMaps(user.email || '')
+      console.log('Shared maps:', sharedMaps.length, 'maps')
+      
+      // Combine both lists
+      const allMaps = [...userMaps, ...sharedMaps]
+      console.log('Total maps after refresh:', allMaps.length, 'maps')
+      
+      onMapsChange(allMaps)
+      
+      // If we left the current map, select the first available map or clear selection
+      if (mapToDelete.id === currentMapId) {
+        console.log('Left current map, selecting new map...')
+        if (allMaps.length > 0) {
+          onMapChange(allMaps[0].id!)
+          console.log('Selected new map:', allMaps[0].name)
+        } else {
+          onMapChange('')
+          console.log('No maps left, cleared selection')
+        }
+      }
+      
+      setShowDeleteDialog(false)
+      setMapToDelete(null)
+      
+      showToast({
+        type: 'success',
+        title: 'Success',
+        message: 'Left map successfully!'
+      })
+    } catch (error) {
+      console.error('Error leaving map:', error)
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to leave map. Please try again.'
+      })
     } finally {
       setIsDeletingMap(false)
     }
@@ -334,7 +490,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div
         ref={dragRef}
         onMouseDown={handleDragStart}
-        className="absolute top-0 right-0 w-1 h-full bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors z-10"
+        className="absolute top-0 right-0 w-1 h-full bg-gray-300 hover:bg-pinz-500 cursor-col-resize transition-colors z-10"
         title="Drag to resize sidebar"
       >
         <div className="absolute top-1/2 right-0 transform -translate-y-1/2 translate-x-1/2">
@@ -344,12 +500,17 @@ const Sidebar: React.FC<SidebarProps> = ({
               {/* Header */}
               <div className="p-6 border-b border-gray-200">
                 <div className="text-center mb-4">
-                  <div className="flex items-center justify-center gap-3 mb-2">
-                    <MapPin className="w-8 h-8 text-blue-600" />
-                    <h1 className="text-4xl font-bold text-gray-900">MAPIES</h1>
+                  <div className="flex items-center justify-center mb-2">
+                    <img 
+                      src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
+                      alt="Pinz Logo"
+                      className="h-16 w-auto"
+                    />
                   </div>
                 </div>
                 
+                {/* Map Usage Warning - REMOVED - Now only shown in create map functionality */}
+
                 {/* Map Selector */}
                 <div className="mb-4">
                   <div className="relative">
@@ -367,10 +528,32 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                     
                     {showMapSelector && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[60]">
                         <div className="p-2">
                           {/* Create New Map */}
                           <div className="p-2 border-b border-gray-100">
+                            {/* Map Limit Message - Only show if user can't create more maps */}
+                            {!canCreateMap(maps.length) && (
+                              <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div className="flex items-center gap-2">
+                                  <AlertTriangle className="w-4 h-4 text-blue-600" />
+                                  <p className="text-sm text-blue-800">
+                                    You've used all {limit} maps in your current plan. Consider upgrading for more maps.
+                                  </p>
+                                </div>
+                                {onOpenSubscription && (
+                                  <div className="mt-2">
+                                    <button 
+                                      onClick={onOpenSubscription}
+                                      className="text-sm text-blue-600 hover:text-blue-700 underline"
+                                    >
+                                      Learn More
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            
                             <div className="flex gap-2">
                               <input
                                 type="text"
@@ -379,11 +562,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 onChange={(e) => setNewMapName(e.target.value)}
                                 className="flex-1 text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                 onKeyPress={(e) => e.key === 'Enter' && handleCreateMap()}
+                                disabled={!canCreateMap(maps.length)}
                               />
                               <button
                                 onClick={handleCreateMap}
-                                disabled={!newMapName.trim() || isCreatingMap}
-                                className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={!newMapName.trim() || isCreatingMap || !canCreateMap(maps.length)}
+                                className="px-3 py-1 bg-pinz-600 text-white text-sm rounded hover:bg-pinz-700 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {isCreatingMap ? '...' : 'Create'}
                               </button>
@@ -401,7 +585,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <div
                                   key={map.id}
                                   className={`w-full text-left p-2 rounded hover:bg-gray-50 transition-colors ${
-                                    map.id === currentMapId ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                                    map.id === currentMapId ? 'bg-pinz-50 text-pinz-700' : 'text-gray-700'
                                   }`}
                                 >
                                   <div className="flex items-center justify-between">
@@ -409,22 +593,26 @@ const Sidebar: React.FC<SidebarProps> = ({
                                       // Edit mode
                                       <div className="flex-1 flex items-center gap-2">
                                         <input
+                                          ref={editingInputRef}
                                           type="text"
                                           value={editingMapName}
                                           onChange={(e) => setEditingMapName(e.target.value)}
                                           onKeyDown={(e) => {
                                             if (e.key === 'Enter') {
-                                              handleRenameMap(map.id!, editingMapName)
+                                              handleRenameMap(map.id!, (e.target as HTMLInputElement).value)
                                             } else if (e.key === 'Escape') {
                                               cancelEditingMap()
                                             }
                                           }}
-                                          className="flex-1 text-sm font-medium bg-white border border-blue-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                          className="flex-1 text-sm font-medium bg-white border border-pinz-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-pinz-500"
                                           autoFocus
                                           disabled={isRenamingMap}
                                         />
                                         <button
-                                          onClick={() => handleRenameMap(map.id!, editingMapName)}
+                                          onClick={() => {
+                                            const currentValue = editingInputRef.current?.value || editingMapName
+                                            handleRenameMap(map.id!, currentValue)
+                                          }}
                                           disabled={isRenamingMap}
                                           className="p-1 text-green-600 hover:text-green-700 transition-colors"
                                           title="Save"
@@ -458,27 +646,38 @@ const Sidebar: React.FC<SidebarProps> = ({
                                           </div>
                                         </button>
                                         <div className="flex items-center gap-1 ml-2">
+                                          {isMapOwnedByUser(map, user!.uid) && (
+                                            <>
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  setShowSharingModal(true)
+                                                }}
+                                                className="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                                                title="Share map"
+                                              >
+                                                <Share2 className="w-3 h-3" />
+                                              </button>
+                                              <button
+                                                onClick={(e) => startEditingMap(map, e)}
+                                                className="p-1 text-gray-400 hover:text-pinz-600 transition-colors"
+                                                title="Rename map"
+                                              >
+                                                <Edit2 className="w-3 h-3" />
+                                              </button>
+                                            </>
+                                          )}
                                           <button
                                             onClick={(e) => {
-                                              e.stopPropagation()
-                                              setShowSharingModal(true)
+                                              const isOwned = isMapOwnedByUser(map, user!.uid)
+                                              if (isOwned) {
+                                                handleDeleteMap(map, e)
+                                              } else {
+                                                handleLeaveMap(map, e)
+                                              }
                                             }}
-                                            className="p-1 text-gray-400 hover:text-green-600 transition-colors"
-                                            title="Share map"
-                                          >
-                                            <Share2 className="w-3 h-3" />
-                                          </button>
-                                          <button
-                                            onClick={(e) => startEditingMap(map, e)}
-                                            className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
-                                            title="Rename map"
-                                          >
-                                            <Edit2 className="w-3 h-3" />
-                                          </button>
-                                          <button
-                                            onClick={(e) => handleDeleteMap(map, e)}
                                             className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                            title="Delete map"
+                                            title={isMapOwnedByUser(map, user!.uid) ? "Delete map" : "Leave map"}
                                           >
                                             <Trash2 className="w-3 h-3" />
                                           </button>
@@ -508,7 +707,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               {isUploading && (
                 <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
               )}
-              <span className="text-sm font-medium text-blue-600 drop-shadow-sm">
+              <span className="text-sm font-medium text-pinz-600 drop-shadow-sm">
                 {uploadProgress.total > 0 ? Math.round((uploadProgress.processed / uploadProgress.total) * 100) : 0}%
               </span>
             </div>
@@ -533,7 +732,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
             {/* Glow effect overlay */}
             <div 
-              className="absolute top-0 left-0 h-2 bg-blue-400 rounded-full blur-sm opacity-70 transition-all duration-500 ease-out"
+              className="absolute top-0 left-0 h-2 bg-pinz-400 rounded-full blur-sm opacity-70 transition-all duration-500 ease-out"
               style={{ 
                 width: uploadProgress.total > 0 
                   ? `${(uploadProgress.processed / uploadProgress.total) * 100}%` 
@@ -604,7 +803,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => onTabChange(item.id)}
                 className={`sidebar-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
                   activeTab === item.id 
-                    ? 'bg-blue-50 text-blue-700 border border-blue-200' 
+                    ? 'bg-pinz-50 text-pinz-700 border border-pinz-200' 
                     : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
@@ -625,6 +824,19 @@ const Sidebar: React.FC<SidebarProps> = ({
             isUploading={isUploading}
             uploadProgress={uploadProgress}
             onOpenModal={onOpenDataManagementModal}
+            currentMarkerCount={(() => {
+              // Calculate marker count based on map ownership
+              const currentMap = maps.find(m => m.id === currentMapId)
+              const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid) : true
+              
+              if (isOwnedMap) {
+                // For owned maps: count all markers (current behavior)
+                return markers.length
+              } else {
+                // For shared maps: count 0 markers since all markers belong to the map owner
+                return 0
+              }
+            })()}
           />
         )}
 
@@ -640,6 +852,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             userId={userId}
             mapId={currentMapId || undefined}
             onOpenModal={onOpenMarkerManagementModal}
+            currentMap={maps.find(m => m.id === currentMapId)}
           />
         )}
 
@@ -664,7 +877,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                    onClick={() => onMapSettingsChange({...mapSettings, style: 'light'})}
                    className={`p-3 border rounded-lg text-sm font-medium transition-colors ${
                      mapSettings.style === 'light' 
-                       ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                       ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                    }`}
                  >
@@ -675,7 +888,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                        <div className="absolute top-2 left-4 w-1 h-1 bg-gray-400 rounded-full"></div>
                        <div className="absolute top-3 left-6 w-1 h-1 bg-gray-400 rounded-full"></div>
                        <div className="absolute top-4 left-2 w-1 h-1 bg-gray-400 rounded-full"></div>
-                       <div className="absolute bottom-1 right-1 w-3 h-3 bg-blue-200 rounded-sm"></div>
+                       <div className="absolute bottom-1 right-1 w-3 h-3 bg-pinz-200 rounded-sm"></div>
                      </div>
                    </div>
                    Light
@@ -684,7 +897,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                    onClick={() => onMapSettingsChange({...mapSettings, style: 'dark'})}
                    className={`p-3 border rounded-lg text-sm font-medium transition-colors ${
                      mapSettings.style === 'dark' 
-                       ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                       ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                    }`}
                  >
@@ -703,7 +916,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                    onClick={() => onMapSettingsChange({...mapSettings, style: 'toner'})}
                    className={`p-3 border rounded-lg text-sm font-medium transition-colors ${
                      mapSettings.style === 'toner' 
-                       ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                       ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                    }`}
                  >
@@ -728,7 +941,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                    onClick={() => onMapSettingsChange({...mapSettings, style: 'satellite'})}
                    className={`p-3 border rounded-lg text-sm font-medium transition-colors ${
                      mapSettings.style === 'satellite' 
-                       ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                       ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                    }`}
                  >
@@ -764,7 +977,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerShape: 'circle'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerShape === 'circle' 
-                        ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                        ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
                   >
@@ -774,7 +987,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerShape: 'square'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerShape === 'square' 
-                        ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                        ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
                   >
@@ -784,7 +997,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerShape: 'diamond'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerShape === 'diamond' 
-                        ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                        ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
                   >
@@ -801,7 +1014,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#000000'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerColor === '#000000' 
-                        ? 'border-blue-600 bg-blue-50' 
+                        ? 'border-pinz-600 bg-pinz-50' 
                         : 'border-gray-300 bg-black text-white hover:bg-gray-800'
                     }`}
                   >
@@ -811,7 +1024,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#3B82F6'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerColor === '#3B82F6' 
-                        ? 'border-blue-600 bg-blue-50' 
+                        ? 'border-pinz-600 bg-pinz-50' 
                         : 'border-gray-300 bg-blue-600 text-white hover:bg-blue-700'
                     }`}
                   >
@@ -821,7 +1034,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#EF4444'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerColor === '#EF4444' 
-                        ? 'border-blue-600 bg-blue-50' 
+                        ? 'border-pinz-600 bg-pinz-50' 
                         : 'border-gray-300 bg-red-600 text-white hover:bg-red-700'
                     }`}
                   >
@@ -831,7 +1044,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerColor: '#10B981'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerColor === '#10B981' 
-                        ? 'border-blue-600 bg-blue-50' 
+                        ? 'border-pinz-600 bg-pinz-50' 
                         : 'border-gray-300 bg-green-600 text-white hover:bg-green-700'
                     }`}
                   >
@@ -848,7 +1061,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerSize: 'small'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerSize === 'small' 
-                        ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                        ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
                   >
@@ -858,7 +1071,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerSize: 'medium'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerSize === 'medium' 
-                        ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                        ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
                   >
@@ -868,7 +1081,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerSize: 'large'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerSize === 'large' 
-                        ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                        ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
                   >
@@ -885,7 +1098,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerBorder: 'white'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerBorder === 'white' 
-                        ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                        ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
                   >
@@ -895,7 +1108,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => onMapSettingsChange({...mapSettings, markerBorder: 'none'})}
                     className={`p-2 border rounded text-xs ${
                       mapSettings.markerBorder === 'none' 
-                        ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                        ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-gray-100 text-gray-700 hover:bg-gray-50'
                     }`}
                   >
@@ -913,7 +1126,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onMapSettingsChange({...mapSettings, markerBorderWidth: 1})}
                       className={`p-2 border rounded text-xs ${
                         mapSettings.markerBorderWidth === 1 
-                          ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                          ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                       }`}
                     >
@@ -923,7 +1136,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onMapSettingsChange({...mapSettings, markerBorderWidth: 2})}
                       className={`p-2 border rounded text-xs ${
                         mapSettings.markerBorderWidth === 2 
-                          ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                          ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                       }`}
                     >
@@ -933,7 +1146,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onMapSettingsChange({...mapSettings, markerBorderWidth: 3})}
                       className={`p-2 border rounded text-xs ${
                         mapSettings.markerBorderWidth === 3 
-                          ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                          ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                       }`}
                     >
@@ -989,7 +1202,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onMapSettingsChange({...mapSettings, clusterRadius: 30})}
                       className={`p-2 border rounded text-xs ${
                         mapSettings.clusterRadius === 30 
-                          ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                          ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                       }`}
                     >
@@ -999,7 +1212,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onMapSettingsChange({...mapSettings, clusterRadius: 50})}
                       className={`p-2 border rounded text-xs ${
                         mapSettings.clusterRadius === 50 
-                          ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                          ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                       }`}
                     >
@@ -1009,7 +1222,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onMapSettingsChange({...mapSettings, clusterRadius: 80})}
                       className={`p-2 border rounded text-xs ${
                         mapSettings.clusterRadius === 80 
-                          ? 'border-blue-600 bg-blue-50 text-blue-700' 
+                          ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                       }`}
                     >
@@ -1124,10 +1337,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       <DeleteMapDialog
         isOpen={showDeleteDialog}
         onClose={() => setShowDeleteDialog(false)}
-        onConfirm={confirmDeleteMap}
+        onConfirm={mapToDelete && user ? (isMapOwnedByUser(mapToDelete, user.uid) ? confirmDeleteMap : confirmLeaveMap) : confirmDeleteMap}
         mapName={mapToDelete?.name || ''}
         markerCount={mapToDelete?.stats?.markerCount || 0}
         isDeleting={isDeletingMap}
+        isOwnedMap={mapToDelete && user ? isMapOwnedByUser(mapToDelete, user.uid) : true}
       />
 
       {/* Sharing Modal */}
@@ -1216,7 +1430,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <button
                   onClick={handleShareMap}
                   disabled={!sharingEmail.trim() || isSharing}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  className="flex-1 px-4 py-2 bg-pinz-600 text-white text-sm font-medium rounded-lg hover:bg-pinz-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                 >
                   {isSharing ? 'Sharing...' : 'Share Map'}
                 </button>
