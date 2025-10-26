@@ -72,11 +72,7 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
       const checkoutData = await stripeService.createCheckoutSessionForPlan(
         planId,
         user.uid,
-        user.email || '',
-        {
-          successUrl: `${window.location.origin}`,
-          cancelUrl: `${window.location.origin}/dashboard?subscription=cancelled`
-        }
+        user.email || ''
       )
       
       console.log('Checkout session created:', checkoutData)

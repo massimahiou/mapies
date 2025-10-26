@@ -47,7 +47,7 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
   onShowDuplicateNotification
 }) => {
   console.log('AddMarkerModal rendering, isOpen:', isOpen)
-  const { hasGeocoding, hasSmartGrouping, canAddMarkers } = useFeatureAccess()
+  const { hasGeocoding, canAddMarkers } = useFeatureAccess()
   const [markerRows, setMarkerRows] = useState<MarkerRow[]>([
     { id: '1', name: '', address: '' }
   ])
@@ -271,7 +271,7 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
               lng: coordinates.lng,
               type: 'other',
               visible: true
-            }, hasSmartGrouping)
+            })
             
             // Also add to local state for immediate UI update
             const marker: Marker = {

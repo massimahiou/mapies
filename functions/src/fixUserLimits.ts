@@ -174,4 +174,3 @@ function checkIfUserNeedsFixing(currentLimits: any, correctLimits: any): boolean
   
   return false;
 }
-

@@ -70,4 +70,3 @@ async function updateStripePrices() {
 
 // Run the update
 updateStripePrices();
-

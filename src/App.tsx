@@ -1028,7 +1028,7 @@ const AppContent: React.FC = () => {
                           lng: coordinates.lng,
                           type: 'other',
                           visible: true
-                        }, userDocument?.limits?.smartGrouping === true)
+                        })
                         
                         console.log(`💾 Added marker to Firestore with ID: ${markerId}`)
                         
