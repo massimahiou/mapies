@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { StarIcon, SparklesIcon, CreditCard } from 'lucide-react'
+import { StarIcon, SparklesIcon, CreditCard, Calendar } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { updateSubscriptionPlan } from '../firebase/users'
 import { stripeService } from '../services/stripe'
@@ -19,9 +19,41 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
   const currentPlan: 'freemium' | 'starter' | 'professional' | 'enterprise' = userDocument.subscription?.plan || 'freemium'
   const usage = userDocument.usage
   const planInfo = SUBSCRIPTION_PLANS[currentPlan] || SUBSCRIPTION_PLANS.freemium
+  const subscription = userDocument.subscription
   
   // Use plan limits for display, not user document limits
   const limits = planInfo
+  
+  // Format subscription end date
+  const formatSubscriptionEndDate = (date: Date | undefined) => {
+    if (!date) return null
+    
+    // Handle Firestore Timestamp objects
+    let dateToFormat: Date
+    if (date && typeof date === 'object' && 'toDate' in date) {
+      dateToFormat = (date as any).toDate()
+    } else if (date instanceof Date) {
+      dateToFormat = date
+    } else if (typeof date === 'string' || typeof date === 'number') {
+      dateToFormat = new Date(date)
+    } else {
+      return null
+    }
+    
+    // Check if the date is valid
+    if (isNaN(dateToFormat.getTime())) {
+      console.warn('Invalid date provided to formatSubscriptionEndDate:', date)
+      return null
+    }
+    
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    }).format(dateToFormat)
+  }
+  
+  const subscriptionEndDate = subscription?.subscriptionEndDate || subscription?.nextBillingDate
   
   // Determine if user can upgrade
   const canUpgrade = currentPlan !== 'enterprise'
@@ -89,6 +121,16 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
           {currentPlan === 'freemium' ? 'Free' : planInfo.name}
         </div>
       </div>
+
+      {/* Subscription End Date */}
+      {currentPlan !== 'freemium' && subscriptionEndDate && (
+        <div className="mb-3 flex items-center gap-2 text-sm text-gray-600">
+          <Calendar className="h-4 w-4" />
+          <span>
+            {subscription?.cancelAtPeriodEnd ? 'Expires' : 'Renews'} on {formatSubscriptionEndDate(subscriptionEndDate)}
+          </span>
+        </div>
+      )}
 
       {/* Usage Stats */}
       {usage && limits && (

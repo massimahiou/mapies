@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listPrices = exports.testCustomerPortal = exports.createCustomerPortalSession = exports.createCheckoutSession = exports.leaveSharedMap = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
+exports.listPrices = exports.fixUserLimits = exports.testCustomerPortal = exports.createCustomerPortalSession = exports.createCheckoutSession = exports.leaveSharedMap = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const stripe_1 = require("stripe");
@@ -11,6 +11,8 @@ const checkout_1 = require("./checkout");
 Object.defineProperty(exports, "createCheckoutSession", { enumerable: true, get: function () { return checkout_1.createCheckoutSession; } });
 Object.defineProperty(exports, "createCustomerPortalSession", { enumerable: true, get: function () { return checkout_1.createCustomerPortalSession; } });
 Object.defineProperty(exports, "testCustomerPortal", { enumerable: true, get: function () { return checkout_1.testCustomerPortal; } });
+const fixUserLimits_1 = require("./fixUserLimits");
+Object.defineProperty(exports, "fixUserLimits", { enumerable: true, get: function () { return fixUserLimits_1.fixUserLimits; } });
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
     admin.initializeApp();

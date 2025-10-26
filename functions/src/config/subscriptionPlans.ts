@@ -136,8 +136,6 @@ export const canPerformAction = (
   action: keyof SubscriptionPlan, 
   currentUsage?: number
 ): boolean => {
-  const plan = getPlanLimits(planId)
-  
   switch (action) {
     case 'limits':
       return true // Always allowed, but UI will show different options

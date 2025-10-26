@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserOperations = void 0;
 const admin = require("firebase-admin");
 const logger_1 = require("../utils/logger");
+const subscriptionPlans_1 = require("../config/subscriptionPlans");
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
     admin.initializeApp();
@@ -48,8 +49,31 @@ class UserOperations {
     static async createUserWithSubscription(userId, stripeCustomerId, email, subscriptionData) {
         try {
             const userRef = this.db.collection('users').doc(userId);
+            const plan = subscriptionData.subscriptionTier || 'freemium';
+            const planConfig = subscriptionPlans_1.SUBSCRIPTION_PLANS[plan];
             await userRef.set(Object.assign({ stripeCustomerId,
-                email, subscriptionStatus: 'free', subscriptionTier: 'freemium', createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, subscriptionData));
+                email, subscriptionStatus: 'free', subscriptionTier: 'freemium', 
+                // NEW STRUCTURE: Separate limits and features
+                limits: {
+                    maxMarkersPerMap: planConfig.limits.maxMarkersPerMap,
+                    maxTotalMarkers: planConfig.limits.maxTotalMarkers,
+                    maxMaps: planConfig.limits.maxMaps,
+                    maxStorageMB: planConfig.limits.maxStorageMB
+                }, features: {
+                    watermark: planConfig.features.watermark,
+                    bulkImport: planConfig.features.bulkImport,
+                    geocoding: planConfig.features.geocoding,
+                    smartGrouping: planConfig.features.smartGrouping,
+                    customIcons: planConfig.features.customIcons,
+                    advancedAnalytics: planConfig.features.advancedAnalytics,
+                    prioritySupport: planConfig.features.prioritySupport
+                }, customizationLevel: planConfig.customizationLevel, usage: {
+                    maps: 0,
+                    markers: 0,
+                    storage: 0,
+                    mapsCount: 0,
+                    markersCount: 0
+                }, createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, subscriptionData));
             this.logger.logUserUpdate(userId, 'user_created', { stripeCustomerId, email });
         }
         catch (error) {

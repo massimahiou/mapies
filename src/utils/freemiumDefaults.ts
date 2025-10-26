@@ -104,3 +104,4 @@ export const isSettingFreemiumCompliant = (
       return true
   }
 }
+

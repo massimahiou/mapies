@@ -37,6 +37,12 @@ export interface UserDocument {
     status: 'active' | 'inactive' | 'cancelled'
     expiresAt?: Date
     stripeCustomerId?: string
+    subscriptionId?: string
+    subscriptionStartDate?: Date
+    subscriptionEndDate?: Date
+    nextBillingDate?: Date
+    cancelAtPeriodEnd?: boolean
+    canceledAt?: Date
   }
   limits?: {
     // All limits and features in one object

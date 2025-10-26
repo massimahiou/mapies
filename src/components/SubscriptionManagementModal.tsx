@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { X, CheckIcon, StarIcon, CreditCard } from 'lucide-react'
+import { X, CheckIcon, StarIcon, CreditCard, Calendar } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { getUserDocument, UserDocument } from '../firebase/users'
 import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
@@ -123,6 +123,38 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
   }
 
   const currentPlan = userDoc?.subscription?.plan || 'freemium'
+  const subscription = userDoc?.subscription
+  
+  // Format subscription end date
+  const formatSubscriptionEndDate = (date: Date | undefined) => {
+    if (!date) return null
+    
+    // Handle Firestore Timestamp objects
+    let dateToFormat: Date
+    if (date && typeof date === 'object' && 'toDate' in date) {
+      dateToFormat = (date as any).toDate()
+    } else if (date instanceof Date) {
+      dateToFormat = date
+    } else if (typeof date === 'string' || typeof date === 'number') {
+      dateToFormat = new Date(date)
+    } else {
+      return null
+    }
+    
+    // Check if the date is valid
+    if (isNaN(dateToFormat.getTime())) {
+      console.warn('Invalid date provided to formatSubscriptionEndDate:', date)
+      return null
+    }
+    
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    }).format(dateToFormat)
+  }
+  
+  const subscriptionEndDate = subscription?.subscriptionEndDate || subscription?.nextBillingDate
 
   if (loading) {
     return (
@@ -143,13 +175,25 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h2 className="text-3xl font-bold text-gray-900">Choose Your Plan</h2>
+              {currentPlan !== 'freemium' && (
+                <div className="px-3 py-1 bg-pinz-100 text-pinz-800 rounded-full text-sm font-medium">
+                  Current: {SUBSCRIPTION_PLANS[currentPlan]?.name}
+                </div>
+              )}
               <div className="flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
                 <CreditCard className="w-3 h-3" />
-                Live Payment
+                Secure Payment
               </div>
             </div>
+            {currentPlan !== 'freemium' && subscriptionEndDate && (
+              <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                <Calendar className="h-4 w-4" />
+                <span>
+                  {subscription?.cancelAtPeriodEnd ? 'Expires' : 'Renews'} on {formatSubscriptionEndDate(subscriptionEndDate)}
+                </span>
+              </div>
+            )}
             <p className="text-gray-600 mt-1">Select the perfect plan for your mapping needs</p>
-            <p className="text-sm text-green-600 mt-1">💳 Secure payment processing with Stripe</p>
           </div>
           <button
             onClick={onClose}

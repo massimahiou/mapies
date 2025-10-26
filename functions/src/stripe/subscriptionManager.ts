@@ -38,30 +38,54 @@ export class SubscriptionManager {
       freemium: {
         maxMaps: 1,
         maxMarkersPerMap: 50,
+        maxTotalMarkers: 50,
         customIcons: false,
         advancedAnalytics: false,
-        prioritySupport: false
+        prioritySupport: false,
+        geocoding: false,
+        bulkImport: true,
+        smartGrouping: false,
+        watermark: true,
+        customizationLevel: 'basic'
       },
       starter: {
-        maxMaps: 10,
-        maxMarkersPerMap: 200,
+        maxMaps: 3,        // From UI: "Maps: 3"
+        maxMarkersPerMap: 500,  // From UI: "0-500 positions"
+        maxTotalMarkers: 500,
         customIcons: true,
         advancedAnalytics: false,
-        prioritySupport: false
+        prioritySupport: false,
+        geocoding: true,
+        bulkImport: true,
+        smartGrouping: false,
+        watermark: true,   // From UI: Watermark included
+        customizationLevel: 'premium'
       },
       professional: {
-        maxMaps: 50,
-        maxMarkersPerMap: 1000,
+        maxMaps: 5,        // From UI: "Maps: 5"
+        maxMarkersPerMap: 1500, // From UI: "0-1500 positions"
+        maxTotalMarkers: 1500,
         customIcons: true,
         advancedAnalytics: true,
-        prioritySupport: true
+        prioritySupport: true,
+        geocoding: true,
+        bulkImport: true,
+        smartGrouping: true,
+        watermark: true,   // From UI: Watermark included
+        customizationLevel: 'premium'
       },
       enterprise: {
-        maxMaps: -1, // unlimited
-        maxMarkersPerMap: -1, // unlimited
+        maxMaps: 10,       // From UI: "Maps: 10" (NOT unlimited!)
+        maxMarkersPerMap: 3000, // From UI: "0-3000 positions" (NOT unlimited!)
+        maxTotalMarkers: 3000,
         customIcons: true,
         advancedAnalytics: true,
-        prioritySupport: true
+        prioritySupport: true,
+        geocoding: true,
+        bulkImport: true,
+        smartGrouping: true,
+        watermark: true,    // From UI: Watermark included
+        customizationLevel: 'premium'
       }
     };
     
@@ -131,9 +155,15 @@ export class SubscriptionManager {
         'subscription.nextBillingDate': admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
         'limits.maxMaps': limits.maxMaps,
         'limits.maxMarkersPerMap': limits.maxMarkersPerMap,
+        'limits.maxTotalMarkers': limits.maxTotalMarkers,
         'limits.customIcons': limits.customIcons,
         'limits.advancedAnalytics': limits.advancedAnalytics,
         'limits.prioritySupport': limits.prioritySupport,
+        'limits.geocoding': limits.geocoding,
+        'limits.bulkImport': limits.bulkImport,
+        'limits.smartGrouping': limits.smartGrouping,
+        'limits.watermark': limits.watermark,
+        'limits.customizationLevel': limits.customizationLevel,
         'stripeCustomerId': customerId,
         'email': await this.getCustomerEmail(customerId),
         'updatedAt': admin.firestore.FieldValue.serverTimestamp()
@@ -186,17 +216,30 @@ export class SubscriptionManager {
       const priceItem = subscription.items.data[0];
       const subscriptionTier = this.getSubscriptionTier(priceItem.price.id);
 
-      // Update user subscription data
-      const userSubscriptionData: Partial<UserSubscriptionData> = {
-        subscriptionStatus: subscription.status as any,
-        subscriptionTier,
-        subscriptionEndDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
-        cancelAtPeriodEnd: subscription.cancel_at_period_end,
-        canceledAt: subscription.canceled_at ? admin.firestore.Timestamp.fromMillis(subscription.canceled_at * 1000) : undefined,
-        nextBillingDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000)
-      };
-
-      await UserOperations.updateUserSubscription(userId, userSubscriptionData);
+      // Update user subscription data and limits
+      const limits = this.getLimitsForPlan(subscriptionTier);
+      const userRef = admin.firestore().collection('users').doc(userId);
+      
+      await userRef.update({
+        'subscription.plan': subscriptionTier,
+        'subscription.status': subscription.status,
+        'subscription.subscriptionEndDate': admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
+        'subscription.cancelAtPeriodEnd': subscription.cancel_at_period_end,
+        'subscription.canceledAt': subscription.canceled_at ? admin.firestore.Timestamp.fromMillis(subscription.canceled_at * 1000) : admin.firestore.FieldValue.delete(),
+        'subscription.nextBillingDate': admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
+        'limits.maxMaps': limits.maxMaps,
+        'limits.maxMarkersPerMap': limits.maxMarkersPerMap,
+        'limits.maxTotalMarkers': limits.maxTotalMarkers,
+        'limits.customIcons': limits.customIcons,
+        'limits.advancedAnalytics': limits.advancedAnalytics,
+        'limits.prioritySupport': limits.prioritySupport,
+        'limits.geocoding': limits.geocoding,
+        'limits.bulkImport': limits.bulkImport,
+        'limits.smartGrouping': limits.smartGrouping,
+        'limits.watermark': limits.watermark,
+        'limits.customizationLevel': limits.customizationLevel,
+        'updatedAt': admin.firestore.FieldValue.serverTimestamp()
+      });
 
       // Update subscription document
       const subscriptionUpdateData: Partial<SubscriptionDocument> = {
@@ -237,18 +280,31 @@ export class SubscriptionManager {
         return;
       }
 
-      // Update user subscription data
-      const userSubscriptionData: Partial<UserSubscriptionData> = {
-        subscriptionStatus: 'canceled',
-        subscriptionTier: 'freemium',
-        subscriptionId: undefined,
-        subscriptionEndDate: undefined,
-        cancelAtPeriodEnd: false,
-        canceledAt: admin.firestore.Timestamp.fromMillis(subscription.ended_at! * 1000),
-        nextBillingDate: undefined
-      };
-
-      await UserOperations.updateUserSubscription(userId, userSubscriptionData);
+      // Update user subscription data and reset limits to freemium
+      const freemiumLimits = this.getLimitsForPlan('freemium');
+      const userRef = admin.firestore().collection('users').doc(userId);
+      
+      await userRef.update({
+        'subscription.plan': 'freemium',
+        'subscription.status': 'canceled',
+        'subscription.subscriptionId': admin.firestore.FieldValue.delete(),
+        'subscription.subscriptionEndDate': admin.firestore.FieldValue.delete(),
+        'subscription.cancelAtPeriodEnd': false,
+        'subscription.canceledAt': admin.firestore.Timestamp.fromMillis(subscription.ended_at! * 1000),
+        'subscription.nextBillingDate': admin.firestore.FieldValue.delete(),
+        'limits.maxMaps': freemiumLimits.maxMaps,
+        'limits.maxMarkersPerMap': freemiumLimits.maxMarkersPerMap,
+        'limits.maxTotalMarkers': freemiumLimits.maxTotalMarkers,
+        'limits.customIcons': freemiumLimits.customIcons,
+        'limits.advancedAnalytics': freemiumLimits.advancedAnalytics,
+        'limits.prioritySupport': freemiumLimits.prioritySupport,
+        'limits.geocoding': freemiumLimits.geocoding,
+        'limits.bulkImport': freemiumLimits.bulkImport,
+        'limits.smartGrouping': freemiumLimits.smartGrouping,
+        'limits.watermark': freemiumLimits.watermark,
+        'limits.customizationLevel': freemiumLimits.customizationLevel,
+        'updatedAt': admin.firestore.FieldValue.serverTimestamp()
+      });
 
       // End subscription document
       await SubscriptionOperations.endSubscription(subscription.id);

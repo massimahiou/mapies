@@ -94,9 +94,8 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     ? validateMapAgainstPlan(markers, mapSettings, currentPlan, folderIcons)
     : { isValid: true, premiumFeaturesUsed: [] } // Always allow shared maps
   
-  // TEMPORARY FIX: Always allow freemium users to use their maps
-  // TODO: Debug why validation is failing for basic settings
-  const isMapDisabled = !mapValidation.isValid && currentPlan !== 'freemium'
+  // Proper validation: Disable maps that use premium features without proper subscription
+  const isMapDisabled = !mapValidation.isValid
   
   console.log('📍 Map component - visibleMarkers:', {
     isPublishMode,

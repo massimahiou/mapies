@@ -132,3 +132,4 @@ export function formatAddressForList(address: string): string {
   // For lists, show: street + city + province
   return parts.slice(0, 3).join(', ')
 }
+

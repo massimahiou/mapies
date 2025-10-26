@@ -6,6 +6,7 @@ import { Logger } from './utils/logger';
 import { SubscriptionManager } from './stripe/subscriptionManager';
 import { CustomerManager } from './stripe/customerManager';
 import { createCheckoutSession, createCustomerPortalSession, testCustomerPortal } from './checkout';
+import { fixUserLimits } from './fixUserLimits';
 
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
@@ -326,4 +327,7 @@ export const leaveSharedMap = functions.https.onCall(async (data, context) => {
 
 // Export checkout functions
 export { createCheckoutSession, createCustomerPortalSession, testCustomerPortal };
+
+// Export temporary fix function
+export { fixUserLimits };
 export { listPrices } from './listPrices';

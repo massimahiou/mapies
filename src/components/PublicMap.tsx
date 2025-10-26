@@ -15,6 +15,7 @@ import { useMapFeatureInheritance } from '../hooks/useMapFeatureInheritance'
 import MapFeatureLevelHeader from './MapFeatureLevelHeader'
 import InteractiveWatermark from './InteractiveWatermark'
 import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from '../utils/freemiumDefaults'
+import { validateMapAgainstPlan } from '../utils/mapValidation'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -70,6 +71,7 @@ interface MapDocument {
   createdAt: Date
   updatedAt: Date
   settings?: MapSettings
+  ownerPlan?: string
 }
 
 interface PublicMapProps {
@@ -124,6 +126,12 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   
   // Get map feature inheritance
   const mapInheritance = useMapFeatureInheritance(mapData)
+  
+  // Validate map against owner's plan for public viewing
+  const mapValidation = mapData ? validateMapAgainstPlan(markers, mapSettings, mapData.ownerPlan || 'freemium', folderIcons) : { isValid: true, premiumFeaturesUsed: [] }
+  
+  // Check if map should be disabled for public viewing
+  const isMapDisabled = !mapValidation.isValid
 
   // Geocoding function for postal codes - Using Mapbox API
   const geocodePostalCode = async (postalCode: string): Promise<{lat: number, lng: number} | null> => {
@@ -748,17 +756,18 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         console.log('Found map data:', mapDoc)
         
         // Set map data
-        setMapData({
+        const mapDataWithPlan = {
           id: mapId,
           name: mapDoc.name,
           description: mapDoc.description,
           userId: foundUserId,
           createdAt: mapDoc.createdAt?.toDate() || new Date(),
           updatedAt: mapDoc.updatedAt?.toDate() || new Date(),
-          settings: mapDoc.settings
-        })
+          settings: mapDoc.settings,
+          ownerPlan: 'freemium' // Default, will be updated below
+        }
         
-        // Check map owner's subscription for watermark only
+        // Check map owner's subscription for watermark and validation
         try {
           const { getUserDocument } = await import('../firebase/users')
           const ownerDoc = await getUserDocument(foundUserId)
@@ -767,10 +776,15 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           const ownerPlanLimits = SUBSCRIPTION_PLANS[ownerPlan] || SUBSCRIPTION_PLANS.freemium
           setShowWatermark(ownerPlanLimits.watermark)
           console.log('Map owner subscription:', ownerPlan, 'watermark:', ownerPlanLimits.watermark)
+          
+          // Update owner plan in mapData
+          mapDataWithPlan.ownerPlan = ownerPlan
         } catch (error) {
           console.error('Error loading map owner subscription:', error)
           // Keep default watermark setting if error
         }
+        
+        setMapData(mapDataWithPlan)
         
         // Load map settings
         if (mapDoc.settings) {
@@ -1384,6 +1398,28 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Map Not Found</h2>
           <p className="text-gray-600">{error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show disabled map message if map uses premium features
+  if (isMapDisabled) {
+    return (
+      <div className="w-full h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center max-w-md mx-auto p-6">
+          <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Map Temporarily Unavailable</h3>
+          <p className="text-gray-600 mb-4">
+            This map is currently being updated and will be available shortly.
+          </p>
+          <p className="text-sm text-gray-500">
+            Please check back later or contact the map owner for more information.
+          </p>
         </div>
       </div>
     )
