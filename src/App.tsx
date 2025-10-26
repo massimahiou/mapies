@@ -15,18 +15,19 @@ import PublishManagementModal from './components/PublishManagementModal'
 import { ToastProvider } from './contexts/ToastContext'
 import EmbedMap from './components/EmbedMap'
 import PublicMap from './components/PublicMap'
+import LandingPage from './components/LandingPage'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { debugFirebase, testFirebaseConnection } from './firebase/debug'
+import { validateCoordinates, logSecurityViolation } from './utils/coordinateValidation'
+import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from './utils/freemiumDefaults'
 import { useBeforeUnload } from './hooks/useBeforeUnload'
 import Toast from './components/Toast'
 import { testFirebaseAuth } from './firebase/test-auth'
-import { createMap, addMarkerToMap, MapDocument, getMapMarkers, deleteMapMarker, updateMapMarker, updateMap, subscribeToMapMarkers, subscribeToUserMaps, subscribeToMapDocument, NameRule, getSharedMaps } from './firebase/maps'
-import { migrateSpecificMap } from './firebase/migration'
+import { addMarkerToMap, MapDocument, getMapMarkers, deleteMapMarker, updateMapMarker, updateMap, subscribeToMapMarkers, subscribeToUserMaps, subscribeToMapDocument, getSharedMaps } from './firebase/maps'
 import { checkForDuplicates, checkForInternalDuplicates, AddressData } from './utils/duplicateDetection'
 import DuplicateNotification from './components/DuplicateNotification'
 import SubscriptionManagementModal from './components/SubscriptionManagementModal'
 import { useFeatureAccess } from './hooks/useFeatureAccess'
-
 
 // Types
 interface Marker {
@@ -43,8 +44,8 @@ interface Marker {
 const mockMarkers: Marker[] = []
 
 const AppContent: React.FC = () => {
-  const { user, loading, signOut } = useAuth()
-  const { hasGeocoding, hasSmartGrouping, canAddMarkers } = useFeatureAccess()
+  const { user, loading, signOut, userDocument } = useAuth()
+  const { canAddMarkers } = useFeatureAccess()
 
   // Handle sign out
   const handleSignOut = async () => {
@@ -105,24 +106,8 @@ const AppContent: React.FC = () => {
   const [totalProcessed, setTotalProcessed] = useState(0)
   const [notificationType, setNotificationType] = useState<'csv' | 'manual'>('csv')
   
-  // Map design settings
-  const [mapSettings, setMapSettings] = useState({
-    style: 'light',
-    markerShape: 'circle',
-    markerColor: '#000000',
-    markerSize: 'medium',
-    markerBorder: 'white',
-    markerBorderWidth: 2,
-    // Clustering settings
-    clusteringEnabled: true,
-    clusterRadius: 50,
-    // Search bar settings
-    searchBarBackgroundColor: '#ffffff',
-    searchBarTextColor: '#000000',
-    searchBarHoverColor: '#f3f4f6',
-    // Name rules settings
-    nameRules: [] as NameRule[]
-  })
+  // Map design settings - use freemium-compliant defaults
+  const [mapSettings, setMapSettings] = useState(getFreemiumCompliantDefaults())
 
   const toggleMarkerVisibility = async (id: string) => {
     if (!user || !currentMapId) {
@@ -186,7 +171,34 @@ const AppContent: React.FC = () => {
   }
 
   const handleMarkersAdded = (newMarkers: Marker[]) => {
-    setMarkers(prev => [...prev, ...newMarkers])
+    setMarkers(prev => {
+      // Filter out any markers that already exist (by ID or by coordinates)
+      const existingIds = new Set(prev.map(m => m.id))
+      const existingCoordinates = new Set(prev.map(m => `${m.lat},${m.lng}`))
+      
+      const uniqueNewMarkers = newMarkers.filter(marker => {
+        // Check if marker ID already exists
+        if (existingIds.has(marker.id)) {
+          console.log('🚫 Duplicate marker ID detected:', marker.id)
+          return false
+        }
+        
+        // Check if marker coordinates already exist
+        const coordinateKey = `${marker.lat},${marker.lng}`
+        if (existingCoordinates.has(coordinateKey)) {
+          console.log('🚫 Duplicate marker coordinates detected:', coordinateKey)
+          return false
+        }
+        
+        return true
+      })
+      
+      if (uniqueNewMarkers.length !== newMarkers.length) {
+        console.log(`🚫 Filtered out ${newMarkers.length - uniqueNewMarkers.length} duplicate markers`)
+      }
+      
+      return [...prev, ...uniqueNewMarkers]
+    })
   }
 
   const handleShowDuplicateNotification = (duplicateCount: number, totalProcessed: number) => {
@@ -296,18 +308,33 @@ const AppContent: React.FC = () => {
         type: marker.type as 'pharmacy' | 'grocery' | 'retail' | 'other'
       }))
       
-      // Only update if markers actually changed
+      // Only update if markers actually changed (optimized comparison)
       setMarkers(prevMarkers => {
-        const hasChanged = prevMarkers.length !== localMarkers.length || 
-          prevMarkers.some((prev, index) => {
-            const current = localMarkers[index]
-            return !current || prev.id !== current.id || prev.visible !== current.visible || prev.name !== current.name
-          })
-        
-        if (hasChanged) {
-          console.log('📍 Markers changed, updating local state')
+        // Quick length check first
+        if (prevMarkers.length !== localMarkers.length) {
+          console.log('📍 Markers count changed, updating local state')
           return localMarkers
         }
+        
+        // Create a map for O(1) lookups instead of O(n²) comparison
+        const prevMarkersMap = new Map(prevMarkers.map(m => [m.id, m]))
+        
+        const hasChanged = localMarkers.some(current => {
+          const prev = prevMarkersMap.get(current.id)
+          return !prev || 
+                 prev.visible !== current.visible || 
+                 prev.name !== current.name ||
+                 prev.lat !== current.lat ||
+                 prev.lng !== current.lng ||
+                 prev.address !== current.address
+        })
+        
+        if (hasChanged) {
+          console.log('📍 Markers content changed, updating local state')
+          return localMarkers
+        }
+        
+        console.log('📍 No marker changes detected, keeping existing state')
         return prevMarkers
       })
     })
@@ -320,19 +347,12 @@ const AppContent: React.FC = () => {
         // Check if clustering settings are missing and migrate if needed
         if (mapData.settings.clusteringEnabled === undefined || 
             mapData.settings.clusterRadius === undefined) {
-          console.log('🔄 Clustering settings missing, migrating map:', currentMapId)
-          try {
-            await migrateSpecificMap(user.uid, currentMapId)
-            console.log('✅ Map migrated successfully')
-            return // The listener will be called again with updated data
-          } catch (error) {
-            console.error('❌ Migration failed:', error)
-          }
+          console.log('🔄 Clustering settings missing, skipping migration for now')
         }
         
         // Only update if settings actually changed
-        setMapSettings(prevSettings => {
-          const newSettings = {
+        setMapSettings((prevSettings: any) => {
+          const rawSettings = {
             ...mapData.settings!,
             // Ensure clustering settings have defaults
             clusteringEnabled: mapData.settings!.clusteringEnabled !== undefined ? mapData.settings!.clusteringEnabled : true,
@@ -345,10 +365,17 @@ const AppContent: React.FC = () => {
             nameRules: mapData.settings!.nameRules || []
           }
           
-          const hasChanged = JSON.stringify(prevSettings) !== JSON.stringify(newSettings)
+          // Automatically fix any premium settings to be freemium-compliant
+          const userPlan = userDocument?.subscription?.plan || 'freemium'
+          const compliantSettings = ensureFreemiumCompliance(rawSettings, userPlan)
+          
+          // DON'T save settings back to database from listener - this causes infinite loops!
+          // Settings compliance should be handled when user makes changes, not on every read
+          
+          const hasChanged = JSON.stringify(prevSettings) !== JSON.stringify(compliantSettings)
           if (hasChanged) {
-            console.log('✅ Map settings changed, updating local state')
-            return newSettings
+            console.log('✅ Map settings changed, updating local state with freemium compliance:', compliantSettings)
+            return compliantSettings
           }
           return prevSettings
         })
@@ -465,9 +492,19 @@ const AppContent: React.FC = () => {
   // Geocoding function using OpenStreetMap Nominatim (free, no API key required)
   const geocodeAddress = async (address: string, currentIndex: number, totalCount: number): Promise<{lat: number, lng: number} | null> => {
     try {
-      // Check if user has geocoding access
-      if (!hasGeocoding) {
-        console.log('❌ Geocoding not available in current plan')
+      // Check if user has geocoding access using limits field
+      if (!userDocument?.limits?.geocoding) {
+        console.log('❌ Geocoding not available in current settings')
+        
+        // Log security violation for direct geocoding attempt
+        if (user) {
+          logSecurityViolation(user.uid, 'Direct geocoding attempt without permission', {
+            address,
+            currentIndex,
+            totalCount
+          })
+        }
+        
         return null
       }
 
@@ -605,6 +642,27 @@ const AppContent: React.FC = () => {
       return
     }
 
+    // SECURITY CHECK: Validate geocoding permissions using limits field
+    const hasCoordinates = !!(columnMapping.lat && columnMapping.lng)
+    const canUseGeocoding = userDocument?.limits?.geocoding === true
+    
+    // 🔍 DEBUG: Log user document and limits for geocoding access
+    console.log('🔍 CSV Upload Debug - Geocoding Access Check:')
+    console.log('  - userDocument:', userDocument)
+    console.log('  - userDocument.limits:', userDocument?.limits)
+    console.log('  - userDocument.limits.geocoding:', userDocument?.limits?.geocoding)
+    console.log('  - canUseGeocoding:', canUseGeocoding)
+    console.log('  - hasCoordinates:', hasCoordinates)
+    console.log('  - columnMapping:', columnMapping)
+    console.log('  - userDocument.subscription:', userDocument?.subscription)
+    console.log('  - userDocument.subscription.plan:', userDocument?.subscription?.plan)
+    
+    if (!canUseGeocoding && !hasCoordinates) {
+      console.log('❌ BLOCKING CSV UPLOAD: No geocoding access and no coordinates provided')
+      setUploadError('❌ Security Error: You must provide latitude and longitude columns. Address geocoding is not available in your current settings.')
+      return
+    }
+
     setIsUploading(true)
     setUploadError('')
     setUploadProgress({ processed: 0, total: 0, currentAddress: '' })
@@ -620,14 +678,31 @@ const AppContent: React.FC = () => {
           console.log('CSV Data:', csvData) // Debug log
           
           // Validate CSV data before processing
-          const hasCoordinates = csvData.some(row => 
-            (columnMapping.lat && row[columnMapping.lat] && row[columnMapping.lat].trim()) ||
-            (columnMapping.lng && row[columnMapping.lng] && row[columnMapping.lng].trim())
-          )
+          const hasValidCoordinates = csvData.some(row => {
+            if (!columnMapping.lat || !columnMapping.lng) return false
+            const lat = row[columnMapping.lat]
+            const lng = row[columnMapping.lng]
+            if (!lat || !lng) return false
+            
+            // Validate that coordinates are numeric and within valid ranges
+            const latNum = parseFloat(lat.toString().trim())
+            const lngNum = parseFloat(lng.toString().trim())
+            return !isNaN(latNum) && !isNaN(lngNum) && 
+                   latNum >= -90 && latNum <= 90 && 
+                   lngNum >= -180 && lngNum <= 180
+          })
           
-          // If no coordinates and no geocoding access, stop processing
-          if (!hasCoordinates && !hasGeocoding) {
-            setUploadError('❌ Cannot process CSV: No latitude/longitude columns found and geocoding is not available in your current plan. Please add coordinate columns to your CSV or upgrade your plan to use geocoding.')
+          // SECURITY CHECK: If no valid coordinates and no geocoding access, stop processing
+          console.log('🔍 CSV Processing Debug - Second Security Check:')
+          console.log('  - hasValidCoordinates:', hasValidCoordinates)
+          console.log('  - canUseGeocoding:', canUseGeocoding)
+          console.log('  - csvData.length:', csvData.length)
+          console.log('  - columnMapping.lat:', columnMapping.lat)
+          console.log('  - columnMapping.lng:', columnMapping.lng)
+          
+          if (!hasValidCoordinates && !canUseGeocoding) {
+            console.log('❌ BLOCKING CSV PROCESSING: No valid coordinates found and no geocoding access')
+            setUploadError('❌ Security Error: No valid latitude/longitude coordinates found and geocoding is not available in your current settings. Please provide valid coordinate columns or upgrade your plan.')
             setIsUploading(false)
             return
           }
@@ -639,24 +714,23 @@ const AppContent: React.FC = () => {
             currentAddress: '📊 Parsing CSV data...'
           })
 
-          // Use current map or create a new one if none exists
+          // ALWAYS use the current map - CSV import should never create new maps
           let mapId = currentMapId
+          
           if (!mapId) {
-            const mapName = file.name.replace('.csv', '') || `Map ${new Date().toLocaleDateString()}`
-            // Create map with default settings, ensuring nameRules is empty
-            const defaultMapSettings = {
-              ...mapSettings,
-              nameRules: [] // Always start with empty name rules
+            // Only if NO map is selected, use the first available map
+            if (maps.length > 0) {
+              mapId = maps[0].id!
+              setCurrentMapId(mapId)
+              console.log('No map selected, using first available map for CSV import:', mapId)
+            } else {
+              // User has no maps at all - they need to create one first
+              setUploadError('❌ No maps available. Please create a map first before importing CSV data.')
+              setIsUploading(false)
+              return
             }
-            mapId = await createMap(user.uid, {
-              name: mapName,
-              description: `Imported from ${file.name}`,
-              settings: defaultMapSettings
-            })
-            setCurrentMapId(mapId)
-            console.log('Created new map with empty name rules:', mapId)
           } else {
-            console.log('Adding to existing map:', mapId)
+            console.log('Adding markers to current map:', mapId)
           }
 
           // Prepare address data for duplicate checking using column mapping
@@ -688,13 +762,68 @@ const AppContent: React.FC = () => {
           for (let rowIndex = 0; rowIndex < csvData.length; rowIndex++) {
             const row = csvData[rowIndex]
             
+            // Update progress to show current row being processed
+            setUploadProgress(prev => ({
+              ...prev,
+              processed: rowIndex,
+              currentAddress: `🔍 Processing row ${rowIndex + 1} of ${csvData.length}...`
+            }))
+            
             // Log the raw row data first
             console.log(`\n📋 Raw Row ${rowIndex + 1}:`, row)
             
             const name = columnMapping.name ? (row[columnMapping.name] || '').toString().trim() : ''
             const address = columnMapping.address ? (row[columnMapping.address] || '').toString().trim() : ''
-            const lat = columnMapping.lat ? parseFloat(row[columnMapping.lat]) : null
-            const lng = columnMapping.lng ? parseFloat(row[columnMapping.lng]) : null
+            
+            // Parse and validate coordinates using utility function
+            let lat: number | null = null
+            let lng: number | null = null
+            
+            if (columnMapping.lat && columnMapping.lng) {
+              const latStr = row[columnMapping.lat]?.toString().trim()
+              const lngStr = row[columnMapping.lng]?.toString().trim()
+              
+              if (latStr && lngStr) {
+                const coordResult = validateCoordinates(latStr, lngStr)
+                
+                if (coordResult.isValid) {
+                  lat = coordResult.lat!
+                  lng = coordResult.lng!
+                  console.log(`✅ Row ${rowIndex + 1}: Valid coordinates (${lat}, ${lng})`)
+                } else {
+                  console.log(`❌ Row ${rowIndex + 1}: Invalid coordinates - ${coordResult.error}`)
+                  console.log(`   - Provided: lat="${latStr}", lng="${lngStr}"`)
+                  
+                  // Update progress to show coordinate validation failure
+                  const errorMessage = coordResult.error?.includes('Address detected') 
+                    ? `❌ Row ${rowIndex + 1}: Address detected in coordinate column (${latStr}, ${lngStr})`
+                    : `❌ Row ${rowIndex + 1}: Invalid coordinates (${latStr}, ${lngStr})`
+                  
+                  setUploadProgress(prev => ({
+                    ...prev,
+                    currentAddress: errorMessage
+                  }))
+                  
+                  // Log security violation for invalid coordinates
+                  if (user) {
+                    logSecurityViolation(user.uid, 'Invalid coordinates provided', {
+                      row: rowIndex + 1,
+                      lat: latStr,
+                      lng: lngStr,
+                      error: coordResult.error
+                    })
+                  }
+                  
+                  // Skip this row due to invalid coordinates
+                  skippedRows++
+                  const skipReason = coordResult.error?.includes('Address detected') 
+                    ? 'Address detected in coordinate column'
+                    : 'Invalid coordinates'
+                  console.log(`❌ Row ${rowIndex + 1} SKIPPED: ${skipReason}`)
+                  continue
+                }
+              }
+            }
             
             console.log(`🔍 Processed Row ${rowIndex + 1}:`, {
               rawName: row[columnMapping.name || ''] || 'UNDEFINED',
@@ -723,13 +852,34 @@ const AppContent: React.FC = () => {
               console.log(`✅ Row ${rowIndex + 1} ADDED to processing queue`)
             } else {
               skippedRows++
-              console.log(`❌ Row ${rowIndex + 1} SKIPPED: Missing name or address/coordinates`)
+              const skipReason = !name ? 'Missing business name' : 
+                                !address && !(lat && lng) ? 'Missing address and coordinates' : 
+                                'Missing required data'
+              
+              console.log(`❌ Row ${rowIndex + 1} SKIPPED: ${skipReason}`)
               console.log(`   - Name: "${name}" (${!!name ? 'HAS' : 'MISSING'})`)
               console.log(`   - Address: "${address}" (${!!address ? 'HAS' : 'MISSING'})`)
               console.log(`   - Coords: lat=${lat}, lng=${lng} (${!!(lat && lng) ? 'HAS' : 'MISSING'})`)
+              
+              // Update progress to show skip reason
+              setUploadProgress(prev => ({
+                ...prev,
+                currentAddress: `❌ Row ${rowIndex + 1}: ${skipReason}`
+              }))
             }
           }
           
+
+          // Check if any valid data was found
+          if (addressData.length === 0) {
+            setUploadError(`No valid data found. All ${csvData.length} rows were skipped due to missing or invalid data. Please check your CSV format and column mapping.`)
+            setIsUploading(false)
+            setUploadProgress(prev => ({
+              ...prev,
+              currentAddress: `❌ No valid data found in ${csvData.length} rows`
+            }))
+            return
+          }
 
           // Check for internal duplicates within the CSV
           const duplicateCheck = checkForInternalDuplicates(addressData)
@@ -803,6 +953,13 @@ const AppContent: React.FC = () => {
 
                     console.log(`📍 Processing ${i + 1}/${uniqueAddresses.length}: ${addressData.name} - ${addressData.address}`)
                     
+                    // Update progress for geocoding/coordinate processing
+                    setUploadProgress(prev => ({
+                      ...prev,
+                      processed: i,
+                      currentAddress: `📍 Processing ${i + 1}/${uniqueAddresses.length}: ${addressData.name}`
+                    }))
+                    
                     // Use provided coordinates or geocode the address
                     let coordinates: { lat: number; lng: number } | null = null
                     
@@ -810,13 +967,28 @@ const AppContent: React.FC = () => {
                       // Use provided coordinates
                       coordinates = { lat: addressData.lat, lng: addressData.lng }
                       console.log(`✅ Using provided coordinates: ${coordinates.lat}, ${coordinates.lng}`)
-                    } else if (hasGeocoding) {
+                    } else if (canUseGeocoding) {
                       // Geocode the address (only if user has geocoding access)
                       console.log(`🌐 Geocoding address: ${addressData.address}`)
+                      setUploadProgress(prev => ({
+                        ...prev,
+                        currentAddress: `🌐 Geocoding ${i + 1}/${uniqueAddresses.length}: ${addressData.address}`
+                      }))
                       coordinates = await geocodeAddress(addressData.address, i, uniqueAddresses.length)
                     } else {
                       // No coordinates and no geocoding access - skip this marker
-                      console.log(`❌ Skipping ${addressData.name}: No coordinates provided and geocoding not available in current plan`)
+                      console.log(`❌ Skipping ${addressData.name}: No coordinates provided and geocoding not available in current settings`)
+                      
+                      // Log security violation for geocoding attempt without permission
+                      if (user) {
+                        logSecurityViolation(user.uid, 'Geocoding attempt without permission', {
+                          markerName: addressData.name,
+                          address: addressData.address,
+                          hasCoordinates: !!(addressData.lat && addressData.lng),
+                          hasGeocoding: canUseGeocoding
+                        })
+                      }
+                      
                       setUploadProgress({
                         processed: i + 1,
                         total: uniqueAddresses.length,
@@ -836,6 +1008,17 @@ const AppContent: React.FC = () => {
                         currentAddress: `✅ Processed: ${finalInfo}`
                       })
                       
+                      // Check marker limit before adding
+                      const currentMarkerCount = markers.length + newMarkers.length
+                      const maxMarkersPerMap = userDocument?.limits?.maxMarkersPerMap || 50
+                      
+                      if (currentMarkerCount >= maxMarkersPerMap) {
+                        console.log(`❌ Marker limit reached! Current: ${currentMarkerCount}, Max: ${maxMarkersPerMap}`)
+                        setUploadError(`❌ Marker limit reached! You can only have ${maxMarkersPerMap} markers per map. Processed ${newMarkers.length} markers before reaching the limit.`)
+                        setIsUploading(false)
+                        return
+                      }
+
                       // Add marker to Firestore
                       try {
                         const markerId = await addMarkerToMap(user.uid, mapId, {
@@ -845,7 +1028,7 @@ const AppContent: React.FC = () => {
                           lng: coordinates.lng,
                           type: 'other',
                           visible: true
-                        }, hasSmartGrouping)
+                        }, userDocument?.limits?.smartGrouping === true)
                         
                         console.log(`💾 Added marker to Firestore with ID: ${markerId}`)
                         
@@ -878,15 +1061,38 @@ const AppContent: React.FC = () => {
                     currentAddress: 'Complete'
                   })
 
+          // Comprehensive processing summary
+          console.log(`📊 CSV Processing Summary:`)
+          console.log(`- Total CSV rows: ${csvData.length}`)
+          console.log(`- Rows processed: ${processedRows}`)
+          console.log(`- Rows skipped: ${skippedRows}`)
+          console.log(`- Rows with invalid coordinates: ${skippedRows - (csvData.length - processedRows)}`)
+          console.log(`- Duplicates found: ${totalDuplicates}`)
+          console.log(`- Final markers imported: ${newMarkers.length}`)
+
           if (newMarkers.length > 0) {
             setMarkers(prev => [...prev, ...newMarkers])
             console.log(`✅ Successfully imported ${newMarkers.length} markers to map`)
+            
+            // Show detailed summary in progress
+            setUploadProgress(prev => ({
+              ...prev,
+              currentAddress: `✅ Imported ${newMarkers.length} markers. ${skippedRows} rows skipped (${skippedRows - (csvData.length - processedRows)} invalid coordinates)`
+            }))
           } else if (totalDuplicates > 0) {
             // All addresses were duplicates, just show notification
             console.log('All addresses were duplicates')
+            setUploadProgress(prev => ({
+              ...prev,
+              currentAddress: `❌ All ${csvData.length} rows were duplicates or invalid`
+            }))
           } else {
             // No valid addresses found (empty CSV or invalid format)
-            setUploadError('No valid markers found. Please check your CSV format.')
+            setUploadError(`No valid markers found. ${skippedRows} rows skipped due to invalid coordinates or missing data. Please check your CSV format.`)
+            setUploadProgress(prev => ({
+              ...prev,
+              currentAddress: `❌ No valid markers found. ${skippedRows} rows skipped`
+            }))
           }
 
           // Show duplicate notification
@@ -907,7 +1113,7 @@ const AppContent: React.FC = () => {
       setProcessingProgress({ current: 0, total: 0 })
       setUploadProgress({ processed: 0, total: 0, currentAddress: '' })
     }
-  }, [user, mapSettings])
+  }, [user, mapSettings, userDocument, currentMapId])
 
   // Show loading screen while checking authentication
   if (loading) {
@@ -921,38 +1127,16 @@ const AppContent: React.FC = () => {
     )
   }
 
-  // Show login screen if not authenticated
+  // Redirect to landing page if not authenticated
   if (!user) {
+    // Redirect to landing page instead of showing old login page
+    window.location.href = '/'
     return (
       <div className="flex h-screen bg-gray-50 items-center justify-center">
-        <div className="text-center max-w-md mx-4">
-          <div className="mb-8">
-            <div className="flex items-center justify-center mb-6">
-              <img 
-                src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
-                alt="Pinz Logo"
-                className="h-20 w-auto"
-              />
-            </div>
-            <p className="text-gray-600 mb-6">Create and manage your interactive store locator maps</p>
-          </div>
-          <div className="space-y-4">
-            <button
-              onClick={() => setShowAuthModal(true)}
-              className="bg-pinz-600 hover:bg-pinz-700 text-white font-medium py-4 px-8 rounded-lg transition-colors w-full text-lg shadow-lg hover:shadow-xl"
-            >
-              Sign In / Create Account
-            </button>
-            <div className="text-sm text-gray-500">
-              Free to get started • No credit card required
-            </div>
-          </div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pink-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Redirecting to landing page...</p>
         </div>
-        <AuthModal
-          isOpen={showAuthModal}
-          onClose={() => setShowAuthModal(false)}
-          initialMode="signup"
-        />
       </div>
     )
   }
@@ -990,6 +1174,7 @@ const AppContent: React.FC = () => {
         uploadProgress={uploadProgress}
         onSignOut={handleSignOut}
         userId={user?.uid || ''}
+        onOpenSubscription={() => setShowSubscriptionModal(true)}
       />
 
       {/* Main Content Area */}
@@ -1023,6 +1208,7 @@ const AppContent: React.FC = () => {
           isUploading={isUploading}
           uploadError={uploadError}
           uploadProgress={uploadProgress}
+          currentMarkerCount={markers.length}
         />
 
        {/* Add Marker Modal */}
@@ -1056,7 +1242,7 @@ const AppContent: React.FC = () => {
        <AuthModal
          isOpen={showAuthModal}
          onClose={() => setShowAuthModal(false)}
-         initialMode="login"
+         onAuthSuccess={() => setShowAuthModal(false)}
        />
 
        {/* Marker Management Modal */}
@@ -1127,20 +1313,41 @@ const AppContent: React.FC = () => {
    )
  }
 
+// Dashboard Redirect Component
+const DashboardRedirect: React.FC = () => {
+  useEffect(() => {
+    // Force redirect to root
+    window.location.href = '/'
+  }, [])
+  
+  return (
+    <div style={{ 
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      height: '100vh',
+      fontSize: '18px',
+      color: '#666'
+    }}>
+      Redirecting to dashboard...
+    </div>
+  )
+}
+
 const App: React.FC = () => {
   return (
     <Router>
-      <Routes>
-        <Route path="/embed" element={<EmbedMap />} />
-        <Route path="/:mapId" element={<PublicMap />} />
-        <Route path="/*" element={
-          <AuthProvider>
-            <ToastProvider>
-              <AppContent />
-            </ToastProvider>
-          </AuthProvider>
-        } />
-      </Routes>
+      <AuthProvider>
+        <ToastProvider>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/embed" element={<EmbedMap />} />
+            <Route path="/dashboard" element={<DashboardRedirect />} />
+            <Route path="/auth" element={<AppContent />} />
+            <Route path="/:mapId" element={<PublicMap />} />
+          </Routes>
+        </ToastProvider>
+      </AuthProvider>
     </Router>
   )
 }

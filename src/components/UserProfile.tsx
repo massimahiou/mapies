@@ -41,7 +41,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ onSignOut }) => {
           <button
             onClick={() => setShowSubscriptionModal(true)}
             className="p-1 text-gray-400 hover:text-pinz-600 transition-colors"
-            title="Manage subscription"
+            title="View subscription plans"
           >
             <CreditCard className="w-4 h-4" />
           </button>

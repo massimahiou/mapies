@@ -1,6 +1,7 @@
 import React from 'react'
 import { Search, X, Navigation, MapPin } from 'lucide-react'
 import { applyNameRules } from '../utils/markerUtils'
+import { formatAddressForList } from '../utils/addressUtils'
 import { usePublicFeatureAccess } from '../hooks/useFeatureAccess'
 
 interface Marker {
@@ -200,13 +201,11 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
                         <RenamedMarkerName marker={marker} renamedMarkers={renamedMarkers} mapSettings={mapSettings} />
                       </p>
                       <p className="text-xs truncate" style={{ color: mapSettings.searchBarTextColor, opacity: 0.7 }}>
-                        {marker.address}
+                        {formatAddressForList(marker.address)}
                       </p>
                       {/* Show distance when location mode is active */}
                       {showNearbyPlaces && distance > 0 && (
-                        <p className={`text-xs font-medium mt-1 ${
-                          isNearby ? 'text-pinz-600' : 'text-gray-600'
-                        }`}>
+                        <p className="text-xs font-medium mt-1 text-pinz-600">
                           {distance.toFixed(1)} km away
                         </p>
                       )}

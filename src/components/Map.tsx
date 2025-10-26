@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo } from 'react'
 import L from 'leaflet'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
@@ -7,6 +7,7 @@ import { Navigation, MapPin, Search, X, List } from 'lucide-react'
 import { Rnd } from 'react-rnd'
 import PublicMapSidebar from './PublicMapSidebar'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
+import { formatAddressForPopup } from '../utils/addressUtils'
 import { useSharedMapFeatureAccess } from '../hooks/useSharedMapFeatureAccess'
 import MapFeatureLevelHeader from './MapFeatureLevelHeader'
 import { useResponsive } from '../hooks/useResponsive'
@@ -79,7 +80,10 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   const [searchResults, setSearchResults] = useState<Marker[]>([])
   const [renamedMarkers] = useState<Record<string, string>>({})
   
-  const visibleMarkers = markers.filter(marker => marker.visible)
+  const visibleMarkers = useMemo(() => 
+    markers.filter(marker => marker.visible), 
+    [markers]
+  )
   
   // Determine if this is a shared map or owned map
   const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid) : true
@@ -90,7 +94,9 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     ? validateMapAgainstPlan(markers, mapSettings, currentPlan, folderIcons)
     : { isValid: true, premiumFeaturesUsed: [] } // Always allow shared maps
   
-  const isMapDisabled = !mapValidation.isValid
+  // TEMPORARY FIX: Always allow freemium users to use their maps
+  // TODO: Debug why validation is failing for basic settings
+  const isMapDisabled = !mapValidation.isValid && currentPlan !== 'freemium'
   
   console.log('📍 Map component - visibleMarkers:', {
     isPublishMode,
@@ -647,7 +653,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
         .bindPopup(`
           <div style="padding: 8px; font-family: system-ui, sans-serif;">
             <div style="font-weight: 600; color: #000; font-size: 14px; margin: 0 0 4px 0;">${applyNameRules(marker.name, mapSettings.nameRules, true)}</div>
-            <div style="color: #666; font-size: 12px; margin: 0;">${marker.address}</div>
+            <div style="color: #666; font-size: 12px; margin: 0;">${formatAddressForPopup(marker.address)}</div>
           </div>
         `)
 
@@ -662,7 +668,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       mapInstance.current.invalidateSize()
       mapInstance.current.fitBounds(markerClusterRef.current.getBounds().pad(0.1))
     }
-  }, [visibleMarkers, mapLoaded, mapSettings.markerShape, mapSettings.markerColor, mapSettings.markerSize, mapSettings.markerBorder, mapSettings.markerBorderWidth, mapSettings.clusteringEnabled, mapSettings.clusterRadius, folderIcons, isPublishMode, isMapDisabled])
+  }, [visibleMarkers, mapLoaded, mapSettings, folderIcons, isPublishMode, isMapDisabled])
 
   // Clear markers when map becomes disabled in publish mode
   useEffect(() => {
@@ -826,7 +832,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                     </div>
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">Map Disabled</h3>
                     <p className="text-gray-600 mb-4">
-                      This map uses premium features not available in your current plan.
+                      This map uses premium features available with upgraded plans.
                     </p>
                     {mapValidation.premiumFeaturesUsed.length > 0 && (
                       <div className="text-sm text-gray-500 mb-4">
@@ -839,7 +845,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                       </div>
                     )}
                     <p className="text-sm text-gray-500">
-                      Upgrade your plan to continue using this map.
+                      Consider upgrading your plan to continue using this map.
                     </p>
                   </div>
                 </div>

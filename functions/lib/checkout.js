@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createCustomerPortalSession = exports.createCheckoutSession = void 0;
+exports.createCustomerPortalSession = exports.testCustomerPortal = exports.createCheckoutSession = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const stripe_1 = require("stripe");
@@ -8,22 +8,25 @@ const stripe_1 = require("stripe");
 if (!admin.apps.length) {
     admin.initializeApp();
 }
-const stripe = new stripe_1.default(functions.config().stripe.secret_key, {
+const stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY || functions.config().stripe.secret_key, {
     apiVersion: '2023-10-16',
 });
 exports.createCheckoutSession = functions.https.onCall(async (data, context) => {
     try {
+        console.log('createCheckoutSession called with data:', data);
         // Verify user is authenticated
         if (!context.auth) {
             throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
         }
         const { priceId, userId, userEmail, successUrl, cancelUrl, trialPeriodDays, couponId } = data;
+        console.log('Processing checkout for:', { priceId, userId, userEmail });
         if (!priceId || !userId || !userEmail) {
             throw new functions.https.HttpsError('invalid-argument', 'Missing required parameters');
         }
         // Get or create Stripe customer
         let customerId;
         try {
+            console.log('Looking up customer by email:', userEmail);
             // Try to find existing customer by email
             const customers = await stripe.customers.list({
                 email: userEmail,
@@ -31,8 +34,10 @@ exports.createCheckoutSession = functions.https.onCall(async (data, context) => 
             });
             if (customers.data.length > 0) {
                 customerId = customers.data[0].id;
+                console.log('Found existing customer:', customerId);
             }
             else {
+                console.log('Creating new customer for:', userEmail);
                 // Create new customer
                 const customer = await stripe.customers.create({
                     email: userEmail,
@@ -41,12 +46,14 @@ exports.createCheckoutSession = functions.https.onCall(async (data, context) => 
                     }
                 });
                 customerId = customer.id;
+                console.log('Created new customer:', customerId);
             }
         }
         catch (error) {
             console.error('Error managing Stripe customer:', error);
             throw new functions.https.HttpsError('internal', 'Failed to manage customer');
         }
+        console.log('Creating checkout session with price ID:', priceId);
         // Create checkout session
         const sessionConfig = {
             customer: customerId,
@@ -80,14 +87,18 @@ exports.createCheckoutSession = functions.https.onCall(async (data, context) => 
         // Add trial period if specified
         if (trialPeriodDays && trialPeriodDays > 0) {
             sessionConfig.subscription_data.trial_period_days = trialPeriodDays;
+            console.log('Added trial period:', trialPeriodDays, 'days');
         }
         // Add coupon if specified
         if (couponId) {
             sessionConfig.discounts = [{
                     coupon: couponId
                 }];
+            console.log('Added coupon:', couponId);
         }
+        console.log('Session config:', JSON.stringify(sessionConfig, null, 2));
         const session = await stripe.checkout.sessions.create(sessionConfig);
+        console.log('Checkout session created successfully:', session.id);
         return {
             sessionId: session.id,
             url: session.url
@@ -101,21 +112,74 @@ exports.createCheckoutSession = functions.https.onCall(async (data, context) => 
         throw new functions.https.HttpsError('internal', 'Failed to create checkout session');
     }
 });
+exports.testCustomerPortal = functions.https.onCall(async (data, context) => {
+    try {
+        console.log('testCustomerPortal called with data:', data);
+        // Verify user is authenticated
+        if (!context.auth) {
+            throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+        }
+        const { customerId } = data;
+        if (!customerId) {
+            throw new functions.https.HttpsError('invalid-argument', 'Customer ID is required');
+        }
+        console.log('Testing customer portal for customer:', customerId);
+        // First, verify the customer exists
+        try {
+            const customer = await stripe.customers.retrieve(customerId);
+            console.log('Customer found:', customer.id, customer.email);
+        }
+        catch (customerError) {
+            console.error('Customer not found:', customerError);
+            return { error: 'Customer not found', details: customerError };
+        }
+        // Try to create a portal session
+        try {
+            const session = await stripe.billingPortal.sessions.create({
+                customer: customerId,
+                return_url: 'https://mapies.web.app/dashboard',
+            });
+            console.log('Portal session created successfully:', session.id);
+            return { success: true, sessionId: session.id, url: session.url };
+        }
+        catch (portalError) {
+            console.error('Portal creation failed:', portalError);
+            return { error: 'Portal creation failed', details: portalError };
+        }
+    }
+    catch (error) {
+        console.error('Test function error:', error);
+        return { error: 'Test function failed', details: error };
+    }
+});
 exports.createCustomerPortalSession = functions.https.onCall(async (data, context) => {
     try {
+        console.log('createCustomerPortalSession called with data:', data);
         // Verify user is authenticated
         if (!context.auth) {
             throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
         }
         const { customerId, returnUrl } = data;
+        console.log('Processing customer portal for:', { customerId, returnUrl });
         if (!customerId) {
             throw new functions.https.HttpsError('invalid-argument', 'Customer ID is required');
         }
         // Create customer portal session
+        console.log('Creating Stripe customer portal session...');
+        // First, verify the customer exists
+        try {
+            const customer = await stripe.customers.retrieve(customerId);
+            console.log('Customer found:', customer.id, customer.email);
+        }
+        catch (customerError) {
+            console.error('Customer not found:', customerError);
+            throw new functions.https.HttpsError('not-found', 'Customer not found in Stripe');
+        }
         const session = await stripe.billingPortal.sessions.create({
             customer: customerId,
             return_url: returnUrl || `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard`,
         });
+        console.log('Customer portal session created successfully:', session.id);
         return {
             url: session.url
         };

@@ -18,8 +18,10 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
 
   const currentPlan: 'freemium' | 'starter' | 'professional' | 'enterprise' = userDocument.subscription?.plan || 'freemium'
   const usage = userDocument.usage
-  const limits = userDocument.limits
   const planInfo = SUBSCRIPTION_PLANS[currentPlan] || SUBSCRIPTION_PLANS.freemium
+  
+  // Use plan limits for display, not user document limits
+  const limits = planInfo
   
   // Determine if user can upgrade
   const canUpgrade = currentPlan !== 'enterprise'
@@ -43,7 +45,7 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
         user.uid,
         user.email || '',
         {
-          successUrl: `${window.location.origin}/dashboard?subscription=success`,
+          successUrl: `${window.location.origin}`,
           cancelUrl: `${window.location.origin}/dashboard?subscription=cancelled`
         }
       )
@@ -62,27 +64,6 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
     }
   }
 
-  const handleManageSubscription = async () => {
-    if (!user || !userDocument?.subscription?.stripeCustomerId) return
-    
-    try {
-      setUpgrading(true)
-      
-      // Create customer portal session
-      const portalUrl = await stripeService.createCustomerPortalSession({
-        customerId: userDocument.subscription.stripeCustomerId,
-        returnUrl: `${window.location.origin}/dashboard`
-      })
-      
-      // Redirect to customer portal
-      await stripeService.redirectToCustomerPortal(portalUrl)
-      
-    } catch (error) {
-      console.error('Error opening customer portal:', error)
-    } finally {
-      setUpgrading(false)
-    }
-  }
 
   return (
     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
@@ -138,13 +119,9 @@ const SubscriptionPlans: React.FC<SubscriptionPlansProps> = ({ onOpenSubscriptio
             {upgrading ? 'Upgrading...' : `Upgrade to ${nextPlanInfo.name}`}
           </button>
         ) : (
-          <button
-            onClick={handleManageSubscription}
-            disabled={upgrading}
-            className="flex-1 px-3 py-2 bg-pinz-600 text-white rounded-lg hover:bg-pinz-700 transition-colors disabled:opacity-50 text-sm font-medium"
-          >
-            {upgrading ? 'Loading...' : 'Manage Subscription'}
-          </button>
+          <div className="flex-1 px-3 py-2 bg-gray-100 text-gray-500 rounded-lg text-sm font-medium text-center">
+            {planInfo.name} Plan
+          </div>
         )}
         
         {onOpenSubscription && (

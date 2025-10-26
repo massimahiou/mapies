@@ -133,8 +133,57 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
   }
 });
 
+export const testCustomerPortal = functions.https.onCall(async (data, context) => {
+  try {
+    console.log('testCustomerPortal called with data:', data);
+    
+    // Verify user is authenticated
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+    }
+
+    const { customerId } = data;
+
+    if (!customerId) {
+      throw new functions.https.HttpsError('invalid-argument', 'Customer ID is required');
+    }
+
+    console.log('Testing customer portal for customer:', customerId);
+
+    // First, verify the customer exists
+    try {
+      const customer = await stripe.customers.retrieve(customerId);
+      console.log('Customer found:', customer.id, (customer as any).email);
+    } catch (customerError) {
+      console.error('Customer not found:', customerError);
+      return { error: 'Customer not found', details: customerError };
+    }
+
+    // Try to create a portal session
+    try {
+      const session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: 'https://mapies.web.app/dashboard',
+      });
+      
+      console.log('Portal session created successfully:', session.id);
+      return { success: true, sessionId: session.id, url: session.url };
+      
+    } catch (portalError) {
+      console.error('Portal creation failed:', portalError);
+      return { error: 'Portal creation failed', details: portalError };
+    }
+
+  } catch (error) {
+    console.error('Test function error:', error);
+    return { error: 'Test function failed', details: error };
+  }
+});
+
 export const createCustomerPortalSession = functions.https.onCall(async (data, context) => {
   try {
+    console.log('createCustomerPortalSession called with data:', data);
+    
     // Verify user is authenticated
     if (!context.auth) {
       throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
@@ -142,15 +191,30 @@ export const createCustomerPortalSession = functions.https.onCall(async (data, c
 
     const { customerId, returnUrl } = data;
 
+    console.log('Processing customer portal for:', { customerId, returnUrl });
+
     if (!customerId) {
       throw new functions.https.HttpsError('invalid-argument', 'Customer ID is required');
     }
 
     // Create customer portal session
+    console.log('Creating Stripe customer portal session...');
+    
+    // First, verify the customer exists
+    try {
+      const customer = await stripe.customers.retrieve(customerId);
+      console.log('Customer found:', customer.id, (customer as any).email);
+    } catch (customerError) {
+      console.error('Customer not found:', customerError);
+      throw new functions.https.HttpsError('not-found', 'Customer not found in Stripe');
+    }
+    
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
       return_url: returnUrl || `${process.env.VITE_APP_URL || 'https://mapies.web.app'}/dashboard`,
     });
+
+    console.log('Customer portal session created successfully:', session.id);
 
     return {
       url: session.url

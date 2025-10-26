@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.retryCsvJob = exports.processCsvUpload = exports.CsvProcessingService = exports.GeocodingService = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
-const sync_1 = require("csv-parse/sync");
+const csv_parse_1 = require("csv-parse");
 const logger_1 = require("./utils/logger");
 const logger = logger_1.Logger.getInstance();
 // Geocoding service with dual provider support
@@ -143,19 +143,31 @@ class CsvProcessingService {
             // Parse CSV content with error handling for inconsistent columns
             let records;
             try {
-                records = (0, sync_1.parse)(csvContent, {
-                    columns: true,
-                    skip_empty_lines: true,
-                    trim: true,
-                    relax_column_count: true,
-                    relax_quotes: true,
-                    on_record: (record, context) => {
-                        // Log problematic rows for debugging
-                        if (context.error) {
-                            logger.warn(`CSV parsing warning on line ${context.lines}:`, context.error.message);
+                records = await new Promise((resolve, reject) => {
+                    const parsedRecords = [];
+                    (0, csv_parse_1.parse)(csvContent, {
+                        columns: true,
+                        skip_empty_lines: true,
+                        trim: true,
+                        relax_column_count: true,
+                        relax_quotes: true,
+                        on_record: (record, context) => {
+                            // Log problematic rows for debugging
+                            if (context.error) {
+                                logger.warn(`CSV parsing warning on line ${context.lines}:`, context.error.message);
+                            }
+                            parsedRecords.push(record);
                         }
-                        return record;
-                    }
+                    })
+                        .on('data', (record) => {
+                        parsedRecords.push(record);
+                    })
+                        .on('end', () => {
+                        resolve(parsedRecords);
+                    })
+                        .on('error', (error) => {
+                        reject(error);
+                    });
                 });
             }
             catch (parseError) {

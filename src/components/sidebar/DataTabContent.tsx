@@ -1,6 +1,8 @@
-import React from 'react'
+import React, { useState, useCallback } from 'react'
 import { Plus, Upload, Maximize2 } from 'lucide-react'
 import { useFeatureAccess } from '../../hooks/useFeatureAccess'
+import { canUserPerformAction, debugUserLimits } from '../../utils/featureAccess'
+import { useAuth } from '../../contexts/AuthContext'
 
 interface DataTabContentProps {
   onShowAddMarkerModal: () => void
@@ -19,10 +21,38 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
   onOpenModal,
   currentMarkerCount = 0
 }) => {
-  const { hasBulkImport, hasGeocoding, canAddMarkers } = useFeatureAccess()
+  const { userDocument } = useAuth()
+  const { canAddMarkers, planLimits } = useFeatureAccess()
+  const [isAddingMarker, setIsAddingMarker] = useState(false)
+  
+  // Debug user limits
+  debugUserLimits(userDocument)
   
   // Check if user can add more markers
   const canAddMoreMarkers = canAddMarkers(currentMarkerCount)
+  
+  // Check specific feature access
+  const canUseGeocoding = canUserPerformAction(userDocument, 'useGeocoding')
+  
+  // Calculate markers remaining
+  const markersRemaining = Math.max(0, planLimits.maxMarkersPerMap - currentMarkerCount)
+  
+  // Debounced handler for adding markers
+  const handleAddMarkerClick = useCallback(() => {
+    if (isAddingMarker) {
+      console.log('🚫 Add marker button clicked while already processing, ignoring')
+      return
+    }
+    
+    setIsAddingMarker(true)
+    console.log('Add marker button clicked')
+    onShowAddMarkerModal()
+    
+    // Reset the loading state after a short delay
+    setTimeout(() => {
+      setIsAddingMarker(false)
+    }, 1000)
+  }, [isAddingMarker, onShowAddMarkerModal])
   return (
     <div className="p-4">
       {/* Header with Modal Button */}
@@ -40,46 +70,59 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
         )}
       </div>
       
+      {/* Marker Count Display */}
+      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-blue-900">Your Markers</p>
+            <p className="text-xs text-blue-700">
+              {currentMarkerCount} of {planLimits.maxMarkersPerMap} used
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-lg font-semibold text-blue-900">{markersRemaining}</p>
+            <p className="text-xs text-blue-700">remaining</p>
+          </div>
+        </div>
+      </div>
+      
       <div className="space-y-3">
         <button
-          onClick={() => {
-            console.log('Add marker button clicked')
-            onShowAddMarkerModal()
-          }}
-          disabled={!hasGeocoding || !canAddMoreMarkers}
+          onClick={handleAddMarkerClick}
+          disabled={!canAddMoreMarkers || isAddingMarker}
           className={`w-full flex items-center gap-2 ${
-            hasGeocoding && canAddMoreMarkers
+            canAddMoreMarkers && !isAddingMarker
               ? 'btn-primary' 
               : 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200'
           }`}
           title={
-            !hasGeocoding 
-              ? 'Geocoding not available in your plan' 
+            isAddingMarker
+              ? 'Processing...'
               : !canAddMoreMarkers 
-                ? 'Marker limit reached - upgrade your plan' 
-                : 'Add a marker by address'
+                ? 'Marker limit reached - consider upgrading' 
+                : canUseGeocoding
+                  ? 'Add a marker by address'
+                  : 'Add a marker by coordinates'
           }
         >
           <Plus className="w-4 h-4" />
-          Add a marker
+          {isAddingMarker ? 'Processing...' : 'Add a marker'}
         </button>
         <button
           onClick={() => {
             console.log('Import CSV button clicked')
             onShowCsvModal()
           }}
-          disabled={!hasBulkImport || !canAddMoreMarkers}
+          disabled={!canAddMoreMarkers}
           className={`w-full flex items-center gap-2 ${
-            hasBulkImport && canAddMoreMarkers
+            canAddMoreMarkers
               ? 'btn-secondary' 
               : 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200'
           }`}
           title={
-            !hasBulkImport 
-              ? 'CSV import not available in your plan' 
-              : !canAddMoreMarkers 
-                ? 'Marker limit reached - upgrade your plan' 
-                : 'Import markers from CSV file'
+            !canAddMoreMarkers 
+              ? 'Marker limit reached - consider upgrading' 
+              : 'Import markers from CSV file'
           }
         >
           <Upload className="w-4 h-4" />

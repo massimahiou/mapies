@@ -74,7 +74,7 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
         user.uid,
         user.email || '',
         {
-          successUrl: `${window.location.origin}/dashboard?subscription=success`,
+          successUrl: `${window.location.origin}`,
           cancelUrl: `${window.location.origin}/dashboard?subscription=cancelled`
         }
       )
@@ -88,6 +88,35 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
     } catch (error) {
       console.error('Error upgrading plan:', error)
       alert('Payment processing failed. Please try again or contact support.')
+    } finally {
+      setUpgrading(false)
+    }
+  }
+
+  const handleManageSubscription = async () => {
+    if (!user || !userDoc?.stripeCustomerId) {
+      alert('No subscription found. Please upgrade to a paid plan first.')
+      return
+    }
+    
+    try {
+      setUpgrading(true)
+      
+      // Initialize Stripe
+      await stripeService.initializeStripe(STRIPE_CONFIG.PUBLISHABLE_KEY)
+      
+      // Create customer portal session
+      const portalUrl = await stripeService.createCustomerPortalSession({
+        customerId: userDoc.stripeCustomerId,
+        returnUrl: `${window.location.origin}/dashboard`
+      })
+      
+      // Redirect to customer portal
+      await stripeService.redirectToCustomerPortal(portalUrl)
+      
+    } catch (error) {
+      console.error('Error opening customer portal:', error)
+      alert('Unable to open subscription management. Please try again or contact support.')
     } finally {
       setUpgrading(false)
     }
@@ -371,6 +400,28 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
               </table>
             </div>
           </div>
+
+          {/* Manage Subscription Button for Paid Users */}
+          {userDoc?.subscription?.plan !== 'freemium' && userDoc?.stripeCustomerId && (
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-gray-900">Manage Your Subscription</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Update payment methods, view invoices, and manage billing
+                  </p>
+                </div>
+                <button
+                  onClick={handleManageSubscription}
+                  disabled={upgrading}
+                  className="px-4 py-2 bg-pinz-600 text-white rounded-lg hover:bg-pinz-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  <CreditCard className="w-4 h-4" />
+                  {upgrading ? 'Loading...' : 'Manage Subscription'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

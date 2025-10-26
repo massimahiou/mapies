@@ -12,7 +12,7 @@ export interface FeatureAccess {
   canAddMarkers: (currentCount: number) => boolean
   canCreateMap: (currentCount: number) => boolean
   
-  // Feature access
+  // Feature access - READ FROM FIRESTORE LIMITS, NOT STATIC CONFIG
   hasGeocoding: boolean
   hasSmartGrouping: boolean
   hasBulkImport: boolean
@@ -76,7 +76,10 @@ export const useFeatureAccess = (): FeatureAccess => {
   const [usage, setUsage] = useState<any>(null)
 
   const currentPlan = userDocument?.subscription?.plan || 'freemium'
-  const planLimits = SUBSCRIPTION_PLANS[currentPlan] || SUBSCRIPTION_PLANS.freemium
+  
+  // CRITICAL FIX: Use user's actual Firestore limits, not static config
+  const userLimits = userDocument?.limits
+  const planLimits = userLimits || SUBSCRIPTION_PLANS[currentPlan] || SUBSCRIPTION_PLANS.freemium
 
   useEffect(() => {
     const loadUsage = async () => {
@@ -114,16 +117,18 @@ export const useFeatureAccess = (): FeatureAccess => {
     return await UsageTracker.needsUpgrade(user.uid, action, feature)
   }
 
+  // CRITICAL FIX: Read feature flags from user's actual Firestore limits
   return {
     currentPlan,
     planLimits,
     canAddMarkers,
     canCreateMap,
-    hasGeocoding: planLimits?.geocoding || false,
-    hasSmartGrouping: planLimits?.smartGrouping || false,
-    hasBulkImport: planLimits?.bulkImport || false,
-    showWatermark: planLimits?.watermark || false,
-    customizationLevel: planLimits?.customizationLevel || 'basic',
+    // Use user's actual limits from Firestore, fallback to plan defaults
+    hasGeocoding: userLimits?.geocoding ?? (planLimits?.geocoding || false),
+    hasSmartGrouping: userLimits?.smartGrouping ?? (planLimits?.smartGrouping || false),
+    hasBulkImport: userLimits?.bulkImport ?? (planLimits?.bulkImport || false),
+    showWatermark: userLimits?.watermark ?? (planLimits?.watermark || false),
+    customizationLevel: userLimits?.customizationLevel ?? (planLimits?.customizationLevel || 'basic'),
     usage,
     getRecommendedUpgrade: getRecommendedUpgradeForFeature,
     needsUpgrade: checkUpgradeNeeds
@@ -132,8 +137,9 @@ export const useFeatureAccess = (): FeatureAccess => {
 
 // Helper hook for specific feature checks
 export const useFeatureCheck = (feature: string) => {
-  const { planLimits } = useFeatureAccess()
-  return planLimits?.[feature] || false
+  const { userDocument } = useAuth()
+  const userLimits = userDocument?.limits
+  return userLimits?.[feature as keyof typeof userLimits] || false
 }
 
 // Helper hook for usage warnings

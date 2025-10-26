@@ -11,8 +11,8 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
 
   const handleWatermarkClick = () => {
     if (mode === 'public') {
-      // For public maps, redirect directly to dashboard
-      onUpgrade?.()
+      // For public maps, show the upgrade popup
+      setShowPopup(true)
     } else if (mode === 'dashboard') {
       // For dashboard, show the upgrade popup
       setShowPopup(true)
@@ -34,7 +34,7 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
       {/* Interactive Watermark */}
       <div 
         onClick={mode !== 'static' ? handleWatermarkClick : undefined}
-        className={`absolute bottom-2 right-2 md:right-auto md:left-2 z-[500] flex items-center gap-1 bg-white/90 backdrop-blur-sm px-2 py-1 rounded shadow-lg border border-gray-200/50 transition-all duration-200 group ${
+        className={`absolute bottom-2 left-2 z-[9999] flex items-center gap-1 bg-white/95 backdrop-blur-sm px-3 py-2 rounded-lg shadow-xl border border-gray-300/60 transition-all duration-200 group ${
           mode === 'static' 
             ? '' // No cursor or hover effects for static mode
             : 'cursor-pointer hover:bg-white hover:shadow-xl' // Interactive styling for other modes
@@ -46,8 +46,8 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
           alt="Pinz Logo"
           className="h-3 w-auto"
         />
-        <span className={`text-xs text-gray-600 font-medium transition-colors ${
-          mode === 'static' ? '' : 'group-hover:text-gray-800'
+        <span className={`text-sm text-gray-700 font-semibold transition-colors ${
+          mode === 'static' ? '' : 'group-hover:text-gray-900'
         }`}>
           Powered by Pinz
         </span>
@@ -56,8 +56,8 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
         )}
       </div>
 
-      {/* Upgrade Popup - Only show for dashboard mode */}
-      {showPopup && mode === 'dashboard' && (
+      {/* Upgrade Popup - Show for both dashboard and public modes */}
+      {showPopup && (mode === 'dashboard' || mode === 'public') && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10001] p-4">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200">
             {/* Close Button */}
@@ -77,12 +77,15 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
 
               {/* Title */}
               <h3 className="text-xl font-bold text-gray-900 mb-2">
-                Remove Watermark
+                {mode === 'public' ? 'This won\'t be here with a plan!' : 'Remove Watermark'}
               </h3>
 
               {/* Description */}
               <p className="text-gray-600 mb-6 text-sm leading-relaxed">
-                Upgrade to any paid plan to remove the "Powered by Pinz" watermark from your maps and give them a professional, clean look.
+                {mode === 'public' 
+                  ? 'Create your own maps without watermarks! Get started with our Starter plan and build professional maps that represent your brand.'
+                  : 'Upgrade to any paid plan to remove the "Powered by Pinz" watermark and give your maps a professional look.'
+                }
               </p>
 
               {/* Benefits */}
@@ -114,7 +117,7 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
                   onClick={handleUpgrade}
                   className="w-full bg-gradient-to-r from-pinz-500 to-pinz-600 text-white py-3 px-4 rounded-xl font-semibold hover:from-pinz-600 hover:to-pinz-700 transition-all duration-200 shadow-lg hover:shadow-xl"
                 >
-                  View Plans & Upgrade
+                  {mode === 'public' ? 'Get Started - View Plans' : 'View Plans & Upgrade'}
                 </button>
                 <button
                   onClick={handleClosePopup}
@@ -126,7 +129,10 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
 
               {/* Small print */}
               <p className="text-xs text-gray-400 mt-4">
-                Starting from $14/month • Cancel anytime
+                {mode === 'public' 
+                  ? 'Starting from $14/month • Cancel anytime' 
+                  : 'Starting from $14/month • Cancel anytime'
+                }
               </p>
             </div>
           </div>

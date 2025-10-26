@@ -51,6 +51,7 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
   const [markerRows, setMarkerRows] = useState<MarkerRow[]>([
     { id: '1', name: '', address: '' }
   ])
+  const [isProcessing, setIsProcessing] = useState(false)
 
   // Geocoding function using OpenStreetMap Nominatim
   const geocodeAddress = async (address: string): Promise<{lat: number, lng: number} | null> => {
@@ -186,131 +187,142 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
   }, [markerRows.map(row => row.address).join(',')])
 
   const processMarkers = async () => {
-    const validRows = markerRows.filter(row => row.name.trim() && row.address.trim())
+    if (isProcessing) {
+      console.log('🚫 Process markers called while already processing, ignoring')
+      return
+    }
     
-    if (validRows.length === 0) {
-      alert('Please add at least one marker with both name and address.')
-      return
-    }
-
-    if (!currentMapId || !userId) {
-      alert('Please select a map first.')
-      return
-    }
-
-    // Check if user has geocoding access for address-based markers
-    if (!hasGeocoding) {
-      alert('❌ Geocoding is not available in your current plan. Please upgrade to add markers by address.')
-      return
-    }
-
-    // Prepare address data for duplicate checking
-    const addressData: AddressData[] = validRows.map(row => ({
-      name: row.name.trim(),
-      address: row.address.trim()
-    }))
-
-    // Get existing markers from the current map for comparison
-    let existingMarkers: AddressData[] = []
+    setIsProcessing(true)
+    
     try {
-      const currentMapMarkers = await getMapMarkers(userId, currentMapId)
-      existingMarkers = currentMapMarkers.map(marker => ({
-        name: marker.name,
-        address: marker.address,
-        lat: marker.lat,
-        lng: marker.lng
+      const validRows = markerRows.filter(row => row.name.trim() && row.address.trim())
+      
+      if (validRows.length === 0) {
+        alert('Please add at least one marker with both name and address.')
+        return
+      }
+
+      if (!currentMapId || !userId) {
+        alert('Please select a map first.')
+        return
+      }
+
+      // Check if user has geocoding access for address-based markers
+      if (!hasGeocoding) {
+        alert('📍 Address geocoding is available with an upgraded plan. Please upgrade to add markers by address.')
+        return
+      }
+
+      // Prepare address data for duplicate checking
+      const addressData: AddressData[] = validRows.map(row => ({
+        name: row.name.trim(),
+        address: row.address.trim()
       }))
-    } catch (error) {
-      console.error('Error loading existing markers:', error)
-    }
 
-    // Check marker limits before processing
-    if (!canAddMarkers(existingMarkers.length)) {
-      alert(`Cannot add more markers. You've reached your limit of ${existingMarkers.length} markers. Upgrade your plan to add more.`)
-      return
-    }
-
-    // Check for duplicates
-    const duplicateCheck = checkForDuplicates(addressData, existingMarkers)
-    console.log(`Found ${duplicateCheck.duplicateCount} duplicates`)
-
-    const newMarkers: Marker[] = []
-
-    // Process only unique addresses
-    for (let i = 0; i < duplicateCheck.unique.length; i++) {
-      const addressData = duplicateCheck.unique[i]
-      
-      // Add delay between requests to avoid rate limiting
-      if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000))
+      // Get existing markers from the current map for comparison
+      let existingMarkers: AddressData[] = []
+      try {
+        const currentMapMarkers = await getMapMarkers(userId, currentMapId)
+        existingMarkers = currentMapMarkers.map(marker => ({
+          name: marker.name,
+          address: marker.address,
+          lat: marker.lat,
+          lng: marker.lng
+        }))
+      } catch (error) {
+        console.error('Error loading existing markers:', error)
       }
 
-      console.log(`Processing: ${addressData.name} - ${addressData.address}`)
-      
-      // Geocode the address
-      const coordinates = await geocodeAddress(addressData.address)
-      
-      if (coordinates) {
-        console.log(`✅ Successfully geocoded ${addressData.name}:`, coordinates)
+      // Check marker limits before processing
+      if (!canAddMarkers(existingMarkers.length)) {
+        alert(`Cannot add more markers. You've used all ${existingMarkers.length} markers in your current plan. Consider upgrading for more markers.`)
+        return
+      }
+
+      // Check for duplicates
+      const duplicateCheck = checkForDuplicates(addressData, existingMarkers)
+      console.log(`Found ${duplicateCheck.duplicateCount} duplicates`)
+
+      const newMarkers: Marker[] = []
+
+      // Process only unique addresses
+      for (let i = 0; i < duplicateCheck.unique.length; i++) {
+        const addressData = duplicateCheck.unique[i]
         
-        // Add marker to Firebase
-        try {
-          const markerId = await addMarkerToMap(userId, currentMapId, {
-            name: addressData.name,
-            address: addressData.address,
-            lat: coordinates.lat,
-            lng: coordinates.lng,
-            type: 'other',
-            visible: true
-          }, hasSmartGrouping)
-          
-          // Also add to local state for immediate UI update
-          const marker: Marker = {
-            id: markerId,
-            name: addressData.name,
-            address: addressData.address,
-            lat: coordinates.lat,
-            lng: coordinates.lng,
-            visible: true,
-            type: 'other'
-          }
-          newMarkers.push(marker)
-        } catch (error) {
-          console.error('Error adding marker to Firebase:', error)
-          // Still add to local state even if Firebase fails
-          const marker: Marker = {
-            id: `marker-${Date.now()}-${Math.random()}`,
-            name: addressData.name,
-            address: addressData.address,
-            lat: coordinates.lat,
-            lng: coordinates.lng,
-            visible: true,
-            type: 'other'
-          }
-          newMarkers.push(marker)
+        // Add delay between requests to avoid rate limiting
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000))
         }
-      } else {
-        console.log(`❌ Failed to geocode: ${addressData.name} - ${addressData.address}`)
+
+        console.log(`Processing: ${addressData.name} - ${addressData.address}`)
+        
+        // Geocode the address
+        const coordinates = await geocodeAddress(addressData.address)
+        
+        if (coordinates) {
+          console.log(`✅ Successfully geocoded ${addressData.name}:`, coordinates)
+          
+          // Add marker to Firebase
+          try {
+            const markerId = await addMarkerToMap(userId, currentMapId, {
+              name: addressData.name,
+              address: addressData.address,
+              lat: coordinates.lat,
+              lng: coordinates.lng,
+              type: 'other',
+              visible: true
+            }, hasSmartGrouping)
+            
+            // Also add to local state for immediate UI update
+            const marker: Marker = {
+              id: markerId,
+              name: addressData.name,
+              address: addressData.address,
+              lat: coordinates.lat,
+              lng: coordinates.lng,
+              visible: true,
+              type: 'other'
+            }
+            newMarkers.push(marker)
+          } catch (error) {
+            console.error('Error adding marker to Firebase:', error)
+            // Still add to local state even if Firebase fails
+            const marker: Marker = {
+              id: `marker-${Date.now()}-${Math.random()}`,
+              name: addressData.name,
+              address: addressData.address,
+              lat: coordinates.lat,
+              lng: coordinates.lng,
+              visible: true,
+              type: 'other'
+            }
+            newMarkers.push(marker)
+          }
+        } else {
+          console.log(`❌ Failed to geocode: ${addressData.name} - ${addressData.address}`)
+        }
       }
-    }
 
-    if (newMarkers.length > 0) {
-      onMarkersAdded(newMarkers)
-      onClose()
-      // Reset form
-      setMarkerRows([{ id: '1', name: '', address: '' }])
-    } else if (duplicateCheck.duplicateCount > 0) {
-      // All addresses were duplicates, just close modal and show notification
-      onClose()
-      // Reset form
-      setMarkerRows([{ id: '1', name: '', address: '' }])
-    } else {
-      // No addresses could be geocoded (invalid addresses)
-      alert('No markers could be geocoded. Please check your addresses.')
-    }
+      if (newMarkers.length > 0) {
+        onMarkersAdded(newMarkers)
+        onClose()
+        // Reset form
+        setMarkerRows([{ id: '1', name: '', address: '' }])
+      } else if (duplicateCheck.duplicateCount > 0) {
+        // All addresses were duplicates, just close modal and show notification
+        onClose()
+        // Reset form
+        setMarkerRows([{ id: '1', name: '', address: '' }])
+      } else {
+        // No addresses could be geocoded (invalid addresses)
+        alert('No markers could be geocoded. Please check your addresses.')
+      }
 
-    // Show duplicate notification
-    onShowDuplicateNotification(duplicateCheck.duplicateCount, validRows.length)
+      // Show duplicate notification
+      onShowDuplicateNotification(duplicateCheck.duplicateCount, validRows.length)
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   if (!isOpen) return null
@@ -338,7 +350,7 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
                   Address Geocoding Limited
                 </p>
                 <p className="text-xs text-yellow-700 mt-1">
-                  Address geocoding is not available in your current plan. You'll need to provide exact coordinates (lat/lng) for markers.
+                  Address geocoding is available with upgraded plans. You'll need to provide exact coordinates (lat/lng) for markers.
                 </p>
               </div>
             </div>
@@ -448,10 +460,10 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
         <div className="flex gap-2">
           <button
             onClick={processMarkers}
-            disabled={isUploading}
+            disabled={isUploading || isProcessing}
             className="flex-1 btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isUploading ? 'Processing...' : 'Add Markers'}
+            {isUploading || isProcessing ? 'Processing...' : 'Add Markers'}
           </button>
           <button
             onClick={onClose}

@@ -6,6 +6,8 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { useSearchParams } from 'react-router-dom'
 import { Navigation, MapPin, X } from 'lucide-react'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
+import { formatAddressForPopup } from '../utils/addressUtils'
+import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from '../utils/freemiumDefaults'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -51,23 +53,7 @@ const EmbedMap: React.FC = () => {
   const tileLayerRef = useRef<L.TileLayer | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [markers, setMarkers] = useState<Marker[]>([])
-  const [mapSettings, setMapSettings] = useState<MapSettings>({
-    style: 'light',
-    markerShape: 'circle',
-    markerColor: '#3B82F6',
-    markerSize: 'medium',
-    markerBorder: 'white',
-    markerBorderWidth: 2,
-    // Clustering settings
-    clusteringEnabled: true,
-    clusterRadius: 50,
-    // Search bar settings
-    searchBarBackgroundColor: '#ffffff',
-    searchBarTextColor: '#000000',
-    searchBarHoverColor: '#f3f4f6',
-    // Name rules settings
-    nameRules: []
-  })
+  const [mapSettings, setMapSettings] = useState<MapSettings>(getFreemiumCompliantDefaults())
   const [folderIcons, setFolderIcons] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -288,7 +274,7 @@ const EmbedMap: React.FC = () => {
 
         if (mapData.settings) {
           console.log('🔍 EmbedMap: Loading map settings from Firestore:', mapData.settings)
-          setMapSettings({
+          const rawSettings = {
             ...mapData.settings,
             clusteringEnabled: mapData.settings.clusteringEnabled !== undefined ? mapData.settings.clusteringEnabled : true,
             clusterRadius: mapData.settings.clusterRadius || 50,
@@ -298,11 +284,13 @@ const EmbedMap: React.FC = () => {
             searchBarHoverColor: mapData.settings.searchBarHoverColor || '#f3f4f6',
             // Name rules settings with defaults
             nameRules: mapData.settings.nameRules || []
-          })
-          console.log('🔍 EmbedMap: Final clustering settings:', {
-            clusteringEnabled: mapData.settings.clusteringEnabled,
-            clusterRadius: mapData.settings.clusterRadius
-          })
+          }
+          
+          // Automatically fix any premium settings to be freemium-compliant
+          const compliantSettings = ensureFreemiumCompliance(rawSettings, 'freemium')
+          setMapSettings(compliantSettings)
+          
+          console.log('🔍 EmbedMap: Final compliant settings:', compliantSettings)
         }
 
         // Load folder icons for this map using the map owner's ID
@@ -522,7 +510,7 @@ const EmbedMap: React.FC = () => {
         .bindPopup(`
           <div style="padding: 8px; font-family: system-ui, sans-serif;">
             <div style="font-weight: 600; color: #000; font-size: 14px; margin: 0 0 4px 0;">${applyNameRules(marker.name, mapSettings.nameRules, true)}</div>
-            <div style="color: #666; font-size: 12px; margin: 0;">${marker.address}</div>
+            <div style="color: #666; font-size: 12px; margin: 0;">${formatAddressForPopup(marker.address)}</div>
           </div>
         `)
 

@@ -19,6 +19,7 @@ export interface UserDocument {
   createdAt: Date
   updatedAt: Date
   lastLoginAt?: Date
+  stripeCustomerId?: string
   profile?: {
     firstName?: string
     lastName?: string
@@ -38,30 +39,23 @@ export interface UserDocument {
     stripeCustomerId?: string
   }
   limits?: {
-    // Marker limits
+    // All limits and features in one object
     maxMarkersPerMap: number
     maxTotalMarkers: number
-    
-    // Map limits
     maxMaps: number
-    
+    maxStorageMB: number
     // Feature flags
     watermark: boolean
     bulkImport: boolean
     geocoding: boolean
     smartGrouping: boolean
-    
-    // Customization levels
     customizationLevel: 'basic' | 'premium'
-    
-    // Storage limits
-    maxStorageMB: number
-    
-    // Legacy fields for backward compatibility
+    // Additional fields
     maps: number
     markers: number
     storage: number
   }
+  
   usage?: {
     maps: number
     markers: number
@@ -107,17 +101,18 @@ export const createUserDocument = async (user: User, additionalData?: Partial<Us
           ...additionalData?.subscription
         },
         limits: {
-          // Set limits based on plan
+          // All limits and features in one object
           maxMarkersPerMap: planLimits.maxMarkersPerMap,
           maxTotalMarkers: planLimits.maxTotalMarkers,
           maxMaps: planLimits.maxMaps,
+          maxStorageMB: planLimits.maxStorageMB,
+          // Feature flags
           watermark: planLimits.watermark,
           bulkImport: planLimits.bulkImport,
           geocoding: planLimits.geocoding,
           smartGrouping: planLimits.smartGrouping,
           customizationLevel: planLimits.customizationLevel,
-          maxStorageMB: planLimits.maxStorageMB,
-          // Legacy fields
+          // Additional fields
           maps: planLimits.maxMaps,
           markers: planLimits.maxMarkersPerMap,
           storage: planLimits.maxStorageMB
@@ -238,21 +233,20 @@ export const updateSubscriptionPlan = async (uid: string, plan: 'freemium' | 'st
     const userRef = doc(db, 'users', uid)
     const planLimits = SUBSCRIPTION_PLANS[plan]
     
-    // Build update object dynamically to avoid undefined values
+    // Build update object with new structure
     const updateData: any = {
       'subscription.plan': plan,
       'subscription.status': 'active',
-      // Update limits based on new plan
+      // Update limits (all in one object)
       'limits.maxMarkersPerMap': planLimits.maxMarkersPerMap,
       'limits.maxTotalMarkers': planLimits.maxTotalMarkers,
       'limits.maxMaps': planLimits.maxMaps,
+      'limits.maxStorageMB': planLimits.maxStorageMB,
       'limits.watermark': planLimits.watermark,
       'limits.bulkImport': planLimits.bulkImport,
       'limits.geocoding': planLimits.geocoding,
       'limits.smartGrouping': planLimits.smartGrouping,
       'limits.customizationLevel': planLimits.customizationLevel,
-      'limits.maxStorageMB': planLimits.maxStorageMB,
-      // Legacy fields
       'limits.maps': planLimits.maxMaps,
       'limits.markers': planLimits.maxMarkersPerMap,
       'limits.storage': planLimits.maxStorageMB,

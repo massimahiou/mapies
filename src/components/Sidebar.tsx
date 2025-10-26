@@ -10,6 +10,7 @@ import DataTabContent from './sidebar/DataTabContent'
 import EditTabContent from './sidebar/EditTabContent'
 import PublishTabContent from './sidebar/PublishTabContent'
 import { useFeatureAccess, useUsageWarning } from '../hooks/useFeatureAccess'
+import { ensureFreemiumCompliance } from '../utils/freemiumDefaults'
 
 interface Marker {
   id: string
@@ -45,6 +46,7 @@ interface SidebarProps {
   isUploading?: boolean
   uploadProgress?: { processed: number; total: number; currentAddress: string }
   userId: string
+  onOpenSubscription?: () => void
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -70,12 +72,13 @@ const Sidebar: React.FC<SidebarProps> = ({
   onMapsChange,
   isUploading = false,
   uploadProgress = { processed: 0, total: 0, currentAddress: '' },
-  userId
+  userId,
+  onOpenSubscription
 }) => {
   const { signOut, user } = useAuth()
   const { showToast } = useToast()
-  const { canCreateMap } = useFeatureAccess()
-  const { showWarning, showError, limit, currentCount } = useUsageWarning('maps', maps.length)
+  const { canCreateMap, currentPlan } = useFeatureAccess()
+  const { limit } = useUsageWarning('maps', maps.length)
 
   // Generate public share URL
 
@@ -178,26 +181,19 @@ const Sidebar: React.FC<SidebarProps> = ({
     
     // Check if user can create more maps
     if (!canCreateMap(maps.length)) {
-      showToast({
-        type: 'error',
-        title: 'Map Limit Reached',
-        message: `You've reached your map limit (${currentCount}/${limit}). Upgrade your plan to create more maps.`
-      })
+      // Message is now shown inline in the UI, no need for toast
       return
     }
     
     setIsCreatingMap(true)
     try {
-      // Create map with default settings, ensuring nameRules is empty
-      const defaultMapSettings = {
-        ...mapSettings,
-        nameRules: [] // Always start with empty name rules
-      }
+      // Create map with freemium-compliant default settings
+      const freemiumCompliantSettings = ensureFreemiumCompliance(mapSettings, currentPlan)
       
       const mapId = await createMap(user.uid, {
         name: newMapName.trim(),
         description: 'New map',
-        settings: defaultMapSettings
+        settings: freemiumCompliantSettings
       })
       
       // Refresh maps list
@@ -513,38 +509,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
                 
-                {/* Map Usage Warning */}
-                {(showWarning || showError) && (
-                  <div className={`mb-4 p-3 border rounded-lg ${
-                    showError 
-                      ? 'bg-red-50 border-red-200' 
-                      : 'bg-yellow-50 border-yellow-200'
-                  }`}>
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className={`w-4 h-4 ${
-                        showError ? 'text-red-600' : 'text-yellow-600'
-                      }`} />
-                      <p className={`text-sm ${
-                        showError ? 'text-red-800' : 'text-yellow-800'
-                      }`}>
-                        {showError 
-                          ? `You've reached your map limit (${currentCount}/${limit}). Upgrade your plan to create more maps.`
-                          : `You're approaching your map limit (${currentCount}/${limit}). Consider upgrading your plan for more capacity.`
-                        }
-                      </p>
-                    </div>
-                    {showError && (
-                      <div className="mt-2">
-                        <button 
-                          onClick={() => {/* TODO: Open upgrade modal */}}
-                          className="text-sm text-red-600 hover:text-red-700 underline"
-                        >
-                          Upgrade Now
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* Map Usage Warning - REMOVED - Now only shown in create map functionality */}
 
                 {/* Map Selector */}
                 <div className="mb-4">
@@ -563,10 +528,32 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                     
                     {showMapSelector && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[60]">
                         <div className="p-2">
                           {/* Create New Map */}
                           <div className="p-2 border-b border-gray-100">
+                            {/* Map Limit Message - Only show if user can't create more maps */}
+                            {!canCreateMap(maps.length) && (
+                              <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div className="flex items-center gap-2">
+                                  <AlertTriangle className="w-4 h-4 text-blue-600" />
+                                  <p className="text-sm text-blue-800">
+                                    You've used all {limit} maps in your current plan. Consider upgrading for more maps.
+                                  </p>
+                                </div>
+                                {onOpenSubscription && (
+                                  <div className="mt-2">
+                                    <button 
+                                      onClick={onOpenSubscription}
+                                      className="text-sm text-blue-600 hover:text-blue-700 underline"
+                                    >
+                                      Learn More
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            
                             <div className="flex gap-2">
                               <input
                                 type="text"
@@ -575,10 +562,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 onChange={(e) => setNewMapName(e.target.value)}
                                 className="flex-1 text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                                 onKeyPress={(e) => e.key === 'Enter' && handleCreateMap()}
+                                disabled={!canCreateMap(maps.length)}
                               />
                               <button
                                 onClick={handleCreateMap}
-                                disabled={!newMapName.trim() || isCreatingMap}
+                                disabled={!newMapName.trim() || isCreatingMap || !canCreateMap(maps.length)}
                                 className="px-3 py-1 bg-pinz-600 text-white text-sm rounded hover:bg-pinz-700 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {isCreatingMap ? '...' : 'Create'}
@@ -836,7 +824,19 @@ const Sidebar: React.FC<SidebarProps> = ({
             isUploading={isUploading}
             uploadProgress={uploadProgress}
             onOpenModal={onOpenDataManagementModal}
-            currentMarkerCount={markers.length}
+            currentMarkerCount={(() => {
+              // Calculate marker count based on map ownership
+              const currentMap = maps.find(m => m.id === currentMapId)
+              const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid) : true
+              
+              if (isOwnedMap) {
+                // For owned maps: count all markers (current behavior)
+                return markers.length
+              } else {
+                // For shared maps: count 0 markers since all markers belong to the map owner
+                return 0
+              }
+            })()}
           />
         )}
 

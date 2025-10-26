@@ -18,8 +18,13 @@ export class SubscriptionOperations {
     try {
       const subscriptionRef = this.db.collection('subscriptions').doc(subscriptionData.stripeSubscriptionId);
       
+      // Filter out undefined values to avoid Firestore errors
+      const cleanData = Object.fromEntries(
+        Object.entries(subscriptionData).filter(([_, value]) => value !== undefined)
+      );
+      
       await subscriptionRef.set({
-        ...subscriptionData,
+        ...cleanData,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
@@ -45,8 +50,13 @@ export class SubscriptionOperations {
     try {
       const subscriptionRef = this.db.collection('subscriptions').doc(subscriptionId);
       
+      // Filter out undefined values to avoid Firestore errors
+      const cleanData = Object.fromEntries(
+        Object.entries(updateData).filter(([_, value]) => value !== undefined)
+      );
+      
       await subscriptionRef.update({
-        ...updateData,
+        ...cleanData,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 

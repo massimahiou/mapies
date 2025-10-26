@@ -34,9 +34,10 @@ export class UsageTracker {
 
       const userData = userDoc.data()
       const plan = userData.subscription?.plan || 'freemium'
-      const planLimits = SUBSCRIPTION_PLANS[plan]
+      const planConfig = SUBSCRIPTION_PLANS[plan]
 
-      const limit = planLimits.maxMarkersPerMap
+      // Use Firestore limits if they exist, otherwise fall back to plan defaults
+      const limit = userData.limits?.maxMarkersPerMap ?? planConfig.maxMarkersPerMap
       const allowed = currentMarkers < limit
 
       return {
@@ -63,9 +64,10 @@ export class UsageTracker {
 
       const userData = userDoc.data()
       const plan = userData.subscription?.plan || 'freemium'
-      const planLimits = SUBSCRIPTION_PLANS[plan]
+      const planConfig = SUBSCRIPTION_PLANS[plan]
 
-      const limit = planLimits.maxMaps
+      // Use Firestore limits if they exist, otherwise fall back to plan defaults
+      const limit = userData.limits?.maxMaps ?? planConfig.maxMaps
       const allowed = currentMaps < limit
 
       return {

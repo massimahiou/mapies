@@ -46,6 +46,7 @@ interface ResponsiveSidebarProps {
   uploadProgress?: { processed: number; total: number; currentAddress: string }
   onSignOut: () => void
   userId: string
+  onOpenSubscription?: () => void
 }
 
 const ResponsiveSidebar: React.FC<ResponsiveSidebarProps> = (props) => {

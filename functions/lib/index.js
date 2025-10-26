@@ -1,15 +1,16 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createCustomerPortalSession = exports.createCheckoutSession = exports.leaveSharedMap = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
+exports.listPrices = exports.testCustomerPortal = exports.createCustomerPortalSession = exports.createCheckoutSession = exports.leaveSharedMap = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
-const validation_1 = require("./utils/validation");
+const stripe_1 = require("stripe");
 const logger_1 = require("./utils/logger");
 const subscriptionManager_1 = require("./stripe/subscriptionManager");
 const customerManager_1 = require("./stripe/customerManager");
 const checkout_1 = require("./checkout");
 Object.defineProperty(exports, "createCheckoutSession", { enumerable: true, get: function () { return checkout_1.createCheckoutSession; } });
 Object.defineProperty(exports, "createCustomerPortalSession", { enumerable: true, get: function () { return checkout_1.createCustomerPortalSession; } });
+Object.defineProperty(exports, "testCustomerPortal", { enumerable: true, get: function () { return checkout_1.testCustomerPortal; } });
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
     admin.initializeApp();
@@ -25,45 +26,73 @@ exports.handleMapiesStripeWebhooks = functions.https.onRequest(async (req, res) 
             return;
         }
         // Get Stripe signature from headers
-        const signature = req.headers['stripe-signature'];
+        const signature = req.get('stripe-signature');
         if (!signature) {
             logger.error('Missing Stripe signature');
             res.status(400).send('Missing Stripe signature');
             return;
         }
-        // Get webhook secret from environment
-        const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-        if (!webhookSecret) {
-            logger.error('Missing STRIPE_WEBHOOK_SECRET environment variable');
-            res.status(500).send('Server configuration error');
-            return;
+        // Hardcoded webhook secret
+        const webhookSecret = 'whsec_xEZyejEe4qCRqQV7xCCWBAPdQItEQkBf';
+        console.log('Using hardcoded webhook secret');
+        console.log('Webhook secret length:', webhookSecret.length);
+        // Get raw body - try different approaches
+        let rawBody;
+        // Try to get raw body from Firebase Functions
+        if (req.rawBody) {
+            rawBody = req.rawBody;
+            console.log('Using req.rawBody');
         }
-        // Verify webhook signature
-        const payload = JSON.stringify(req.body);
-        const isValidSignature = validation_1.ValidationUtils.verifyStripeSignature(payload, signature, webhookSecret);
-        if (!isValidSignature) {
-            logger.error('Invalid Stripe signature');
+        else if (Buffer.isBuffer(req.body)) {
+            rawBody = req.body;
+            console.log('Using Buffer body');
+        }
+        else {
+            // Fallback to JSON stringify
+            rawBody = JSON.stringify(req.body);
+            console.log('Using JSON.stringify fallback');
+        }
+        console.log('Raw body length:', rawBody.length);
+        console.log('Raw body type:', typeof rawBody);
+        console.log('Raw body first 100 chars:', rawBody.toString().substring(0, 100));
+        console.log('Received signature:', signature);
+        console.log('Request headers:', JSON.stringify(req.headers, null, 2));
+        // Initialize Stripe with secret key
+        const stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY || functions.config().stripe.secret_key, {
+            apiVersion: '2023-10-16',
+        });
+        // Use Stripe's official signature verification
+        let event;
+        try {
+            event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+            console.log('✅ Signature verification successful');
+        }
+        catch (err) {
+            console.error('❌ Signature verification failed:', err);
+            logger.error('Invalid Stripe signature', err);
             res.status(400).send('Invalid signature');
             return;
         }
-        // Parse the event
-        const event = req.body;
         // Validate event structure
-        if (!validation_1.ValidationUtils.validateStripeEvent(event)) {
+        if (!event.id || !event.type || !event.data) {
             logger.error('Invalid Stripe event structure');
             res.status(400).send('Invalid event structure');
             return;
         }
         logger.logStripeEvent(event.type, event.id, event.data.object);
+        console.log(`🎯 Processing ${event.type} event for ${event.id}`);
         // Process the event
         const result = await processStripeEvent(event, startTime);
         // Log the result
         logger.logWebhookResult(result);
+        console.log(`✅ Event processing result:`, result);
         // Send response
         if (result.success) {
+            console.log(`🎉 Successfully processed ${event.type} event`);
             res.status(200).send('Webhook processed successfully');
         }
         else {
+            console.log(`❌ Failed to process ${event.type} event:`, result.error);
             res.status(500).send('Webhook processing failed');
         }
     }
@@ -89,42 +118,34 @@ async function processStripeEvent(event, startTime) {
     const eventType = event.type;
     const stripeObject = event.data.object;
     try {
-        // Check if event was already processed (idempotency)
-        const processedEventsRef = admin.firestore().collection('processedWebhookEvents').doc(eventId);
-        const processedEvent = await processedEventsRef.get();
-        if (processedEvent.exists) {
-            logger.info(`Event ${eventId} already processed, skipping`);
-            return {
-                success: true,
-                eventId,
-                eventType,
-                processingTime: Date.now() - startTime
-            };
-        }
-        // Process the event based on type
+        logger.info(`Processing ${eventType} event`, { eventId, objectId: stripeObject.id });
+        // Process event based on type
         await processEventByType(eventType, stripeObject);
-        // Mark event as processed
-        await processedEventsRef.set({
+        const processingTime = Date.now() - startTime;
+        logger.info(`Successfully processed ${eventType} event`, {
             eventId,
-            eventType,
-            processedAt: admin.firestore.FieldValue.serverTimestamp(),
-            processingTime: Date.now() - startTime
+            processingTime
         });
         return {
             success: true,
             eventId,
             eventType,
-            processingTime: Date.now() - startTime
+            processingTime
         };
     }
     catch (error) {
-        logger.error(`Error processing event ${eventId}:`, error);
+        const processingTime = Date.now() - startTime;
+        logger.error(`Failed to process ${eventType} event`, {
+            eventId,
+            error: error instanceof Error ? error.message : 'Unknown error',
+            processingTime
+        });
         return {
             success: false,
             eventId,
             eventType,
             error: error instanceof Error ? error.message : 'Unknown error',
-            processingTime: Date.now() - startTime
+            processingTime
         };
     }
 }
@@ -133,17 +154,12 @@ async function processStripeEvent(event, startTime) {
  */
 async function processEventByType(eventType, stripeObject) {
     switch (eventType) {
-        // Customer events
         case 'customer.created':
             await customerManager_1.CustomerManager.handleCustomerCreated(stripeObject);
-            break;
-        case 'customer.updated':
-            await customerManager_1.CustomerManager.handleCustomerUpdated(stripeObject);
             break;
         case 'customer.deleted':
             await customerManager_1.CustomerManager.handleCustomerDeleted(stripeObject);
             break;
-        // Subscription events
         case 'customer.subscription.created':
             await subscriptionManager_1.SubscriptionManager.handleSubscriptionCreated(stripeObject);
             break;
@@ -152,13 +168,6 @@ async function processEventByType(eventType, stripeObject) {
             break;
         case 'customer.subscription.deleted':
             await subscriptionManager_1.SubscriptionManager.handleSubscriptionDeleted(stripeObject);
-            break;
-        // Invoice events
-        case 'invoice.payment_succeeded':
-            await subscriptionManager_1.SubscriptionManager.handleInvoicePaymentSucceeded(stripeObject);
-            break;
-        case 'invoice.payment_failed':
-            await subscriptionManager_1.SubscriptionManager.handleInvoicePaymentFailed(stripeObject);
             break;
         case 'invoice.upcoming':
             await subscriptionManager_1.SubscriptionManager.handleInvoiceUpcoming(stripeObject);
@@ -169,14 +178,9 @@ async function processEventByType(eventType, stripeObject) {
         case 'invoice.finalized':
             await subscriptionManager_1.SubscriptionManager.handleInvoiceFinalized(stripeObject);
             break;
-        // Payment Intent events
-        case 'payment_intent.payment_failed':
-            await subscriptionManager_1.SubscriptionManager.handlePaymentIntentFailed(stripeObject);
-            break;
         case 'payment_intent.succeeded':
             await subscriptionManager_1.SubscriptionManager.handlePaymentIntentSucceeded(stripeObject);
             break;
-        // Checkout events
         case 'checkout.session.completed':
             await subscriptionManager_1.SubscriptionManager.handleCheckoutSessionCompleted(stripeObject);
             break;
@@ -186,28 +190,27 @@ async function processEventByType(eventType, stripeObject) {
                 customerId: stripeObject.customer
             });
             break;
-        // Customer Portal events
+        case 'invoice.payment_succeeded':
+            await subscriptionManager_1.SubscriptionManager.handleInvoicePaymentSucceeded(stripeObject);
+            break;
+        case 'invoice.payment_failed':
+            await subscriptionManager_1.SubscriptionManager.handleInvoicePaymentFailed(stripeObject);
+            break;
+        case 'payment_intent.payment_failed':
+            await subscriptionManager_1.SubscriptionManager.handlePaymentIntentFailed(stripeObject);
+            break;
         case 'billing_portal.session.created':
             logger.info('Customer portal session created', {
                 sessionId: stripeObject.id,
                 customerId: stripeObject.customer
             });
             break;
-        // Coupon events
         case 'coupon.created':
         case 'coupon.updated':
         case 'coupon.deleted':
             logger.info(`Coupon event: ${eventType}`, {
                 couponId: stripeObject.id,
                 name: stripeObject.name
-            });
-            break;
-        // Product and Price events (for future use)
-        case 'price.created':
-        case 'price.updated':
-            logger.info(`Price event: ${eventType}`, {
-                priceId: stripeObject.id,
-                productId: stripeObject.product
             });
             break;
         case 'product.created':
@@ -217,7 +220,6 @@ async function processEventByType(eventType, stripeObject) {
                 name: stripeObject.name
             });
             break;
-        // Tax events
         case 'tax_rate.created':
         case 'tax_rate.updated':
             logger.info(`Tax rate event: ${eventType}`, {
@@ -225,76 +227,62 @@ async function processEventByType(eventType, stripeObject) {
                 displayName: stripeObject.display_name
             });
             break;
-        // Default case for unhandled events
         default:
             logger.info(`Unhandled event type: ${eventType}`, {
-                eventId: stripeObject.id,
-                objectType: stripeObject.object
+                eventId: stripeObject.id || 'unknown'
             });
-            break;
     }
 }
 /**
- * Health check endpoint
+ * Webhook status endpoint for debugging
  */
-exports.webhookStatus = functions.https.onRequest(async (req, res) => {
-    try {
-        const status = {
-            status: 'healthy',
-            timestamp: new Date().toISOString(),
-            version: '1.0.0',
-            environment: process.env.NODE_ENV || 'development'
-        };
-        res.status(200).json(status);
+exports.webhookStatus = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
     }
-    catch (error) {
-        logger.error('Health check error:', error);
-        res.status(500).json({ status: 'unhealthy', error: error instanceof Error ? error.message : 'Unknown error' });
-    }
+    return {
+        status: 'active',
+        timestamp: new Date().toISOString(),
+        version: '1.0.0'
+    };
 });
+/**
+ * Leave shared map function
+ */
 exports.leaveSharedMap = functions.https.onCall(async (data, context) => {
     var _a;
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+    }
+    const { mapId } = data;
+    const userId = context.auth.uid;
+    if (!mapId) {
+        throw new functions.https.HttpsError('invalid-argument', 'Map ID is required');
+    }
     try {
-        // Verify authentication
-        if (!context.auth) {
-            throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
-        }
-        const { mapId, ownerId, userEmail } = data;
-        // Validate input
-        if (!mapId || !ownerId || !userEmail) {
-            throw new functions.https.HttpsError('invalid-argument', 'Missing required parameters');
-        }
-        // Verify the requesting user matches the email
-        if (context.auth.token.email !== userEmail) {
-            throw new functions.https.HttpsError('permission-denied', 'User email does not match');
-        }
-        logger.info('Processing leave shared map request', { mapId, ownerId, userEmail });
-        const db = admin.firestore();
-        const mapRef = db.collection('users').doc(ownerId).collection('maps').doc(mapId);
-        // Get the current map data
+        logger.info('User leaving shared map', { userId, mapId });
+        // Get the map document
+        const mapRef = admin.firestore().collection('users').doc(userId).collection('maps').doc(mapId);
         const mapDoc = await mapRef.get();
         if (!mapDoc.exists) {
             throw new functions.https.HttpsError('not-found', 'Map not found');
         }
         const mapData = mapDoc.data();
-        const currentSharing = mapData === null || mapData === void 0 ? void 0 : mapData.sharing;
-        if (!currentSharing) {
-            throw new functions.https.HttpsError('failed-precondition', 'Map is not shared');
+        if (!mapData) {
+            throw new functions.https.HttpsError('not-found', 'Map data not found');
         }
-        // Check if user is in the shared list
-        const userInSharedList = (_a = currentSharing.sharedWith) === null || _a === void 0 ? void 0 : _a.some((user) => user.email === userEmail);
-        if (!userInSharedList) {
-            throw new functions.https.HttpsError('permission-denied', 'User is not in the shared list');
+        // Check if user is the owner
+        if (mapData.userId === userId) {
+            throw new functions.https.HttpsError('permission-denied', 'Map owner cannot leave their own map');
         }
-        // Remove user from shared list
-        const updatedSharedWith = currentSharing.sharedWith.filter((user) => user.email !== userEmail);
-        const updatedSharing = Object.assign(Object.assign({}, currentSharing), { sharedWith: updatedSharedWith, isShared: updatedSharedWith.length > 0 });
-        // Update the map document
+        // Remove user from sharedWith array
+        const sharedWith = ((_a = mapData.sharing) === null || _a === void 0 ? void 0 : _a.sharedWith) || [];
+        const updatedSharedWith = sharedWith.filter((user) => { var _a; return user.email !== ((_a = context.auth) === null || _a === void 0 ? void 0 : _a.token.email); });
         await mapRef.update({
-            sharing: updatedSharing,
+            'sharing.sharedWith': updatedSharedWith,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
-        logger.info('User successfully removed from shared map', { mapId, ownerId, userEmail });
+        logger.info('Successfully left shared map', { userId, mapId });
         return { success: true, message: 'Successfully left the shared map' };
     }
     catch (error) {
@@ -305,4 +293,6 @@ exports.leaveSharedMap = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', 'Internal server error');
     }
 });
+var listPrices_1 = require("./listPrices");
+Object.defineProperty(exports, "listPrices", { enumerable: true, get: function () { return listPrices_1.listPrices; } });
 //# sourceMappingURL=index.js.map

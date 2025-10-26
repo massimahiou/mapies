@@ -69,7 +69,7 @@ class StripeService {
     // Handle freemium plan - redirect to success page since it's free
     if (planId === 'freemium') {
       console.log('Freemium plan selected - redirecting to success page')
-      const successUrl = options?.successUrl || `${window.location.origin}/dashboard?subscription=success&plan=freemium`
+      const successUrl = options?.successUrl || `${window.location.origin}`
       window.location.href = successUrl
       return { sessionId: 'freemium', url: successUrl }
     }

@@ -14,7 +14,9 @@ class SubscriptionOperations {
     static async createSubscription(subscriptionData) {
         try {
             const subscriptionRef = this.db.collection('subscriptions').doc(subscriptionData.stripeSubscriptionId);
-            await subscriptionRef.set(Object.assign(Object.assign({}, subscriptionData), { createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }));
+            // Filter out undefined values to avoid Firestore errors
+            const cleanData = Object.fromEntries(Object.entries(subscriptionData).filter(([_, value]) => value !== undefined));
+            await subscriptionRef.set(Object.assign(Object.assign({}, cleanData), { createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }));
             this.logger.logSubscriptionUpdate(subscriptionData.stripeSubscriptionId, 'subscription_created', subscriptionData);
         }
         catch (error) {
@@ -28,7 +30,9 @@ class SubscriptionOperations {
     static async updateSubscription(subscriptionId, updateData) {
         try {
             const subscriptionRef = this.db.collection('subscriptions').doc(subscriptionId);
-            await subscriptionRef.update(Object.assign(Object.assign({}, updateData), { updatedAt: admin.firestore.FieldValue.serverTimestamp() }));
+            // Filter out undefined values to avoid Firestore errors
+            const cleanData = Object.fromEntries(Object.entries(updateData).filter(([_, value]) => value !== undefined));
+            await subscriptionRef.update(Object.assign(Object.assign({}, cleanData), { updatedAt: admin.firestore.FieldValue.serverTimestamp() }));
             this.logger.logSubscriptionUpdate(subscriptionId, 'subscription_updated', updateData);
         }
         catch (error) {

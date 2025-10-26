@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { UserSubscriptionData } from '../types';
 import { Logger } from '../utils/logger';
+import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans';
 
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
@@ -66,12 +67,38 @@ export class UserOperations {
   ): Promise<void> {
     try {
       const userRef = this.db.collection('users').doc(userId);
+      const plan = subscriptionData.subscriptionTier || 'freemium';
+      const planConfig = SUBSCRIPTION_PLANS[plan];
       
       await userRef.set({
         stripeCustomerId,
         email,
         subscriptionStatus: 'free',
         subscriptionTier: 'freemium',
+        // NEW STRUCTURE: Separate limits and features
+        limits: {
+          maxMarkersPerMap: planConfig.limits.maxMarkersPerMap,
+          maxTotalMarkers: planConfig.limits.maxTotalMarkers,
+          maxMaps: planConfig.limits.maxMaps,
+          maxStorageMB: planConfig.limits.maxStorageMB
+        },
+        features: {
+          watermark: planConfig.features.watermark,
+          bulkImport: planConfig.features.bulkImport,
+          geocoding: planConfig.features.geocoding,
+          smartGrouping: planConfig.features.smartGrouping,
+          customIcons: planConfig.features.customIcons,
+          advancedAnalytics: planConfig.features.advancedAnalytics,
+          prioritySupport: planConfig.features.prioritySupport
+        },
+        customizationLevel: planConfig.customizationLevel,
+        usage: {
+          maps: 0,
+          markers: 0,
+          storage: 0,
+          mapsCount: 0,
+          markersCount: 0
+        },
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         ...subscriptionData

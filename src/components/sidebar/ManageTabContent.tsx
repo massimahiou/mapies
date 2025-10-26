@@ -613,7 +613,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
       showToast({ 
         type: 'error', 
         title: 'Premium Feature', 
-        message: 'Custom logos are only available with premium customization. Upgrade your plan to use this feature.' 
+        message: 'Custom logos are available with premium customization plans.' 
       })
       return
     }
@@ -840,8 +840,8 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
               showError ? 'text-red-800' : 'text-yellow-800'
             }`}>
               {showError 
-                ? `You've reached your marker limit (${currentCount}/${limit}). Upgrade your plan to add more markers.`
-                : `You're approaching your marker limit (${currentCount}/${limit}). Consider upgrading your plan for more capacity.`
+                ? `You've used all ${limit} markers in your current plan. Consider upgrading for more markers.`
+                : `You're using ${currentCount} of ${limit} markers. Consider upgrading for more capacity.`
               }
             </p>
           </div>
@@ -851,7 +851,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                 onClick={() => {/* TODO: Open upgrade modal */}}
                 className="text-sm text-red-600 hover:text-red-700 underline"
               >
-                Upgrade Now
+                Learn More
               </button>
             </div>
           )}
@@ -899,17 +899,17 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
               <Lock className="w-4 h-4 text-yellow-600" />
               <div className="flex-1">
                 <p className="text-sm text-yellow-800 font-medium">
-                  Name Rules Not Available
+                  Name Rules Available with Upgrade
                 </p>
                 <p className="text-xs text-yellow-700 mt-1">
-                  Name rules (smart grouping) require Professional plan or higher. Upgrade to automatically rename and group markers.
+                  Name rules (smart grouping) are available with Professional plan or higher. Upgrade to automatically rename and group markers.
                 </p>
               </div>
               <button 
                 onClick={() => {/* TODO: Open upgrade modal */}}
                 className="text-xs text-yellow-600 hover:text-yellow-700 underline font-medium"
               >
-                Upgrade Now
+                Learn More
               </button>
             </div>
           </div>

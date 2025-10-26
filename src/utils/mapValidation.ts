@@ -24,6 +24,45 @@ export interface PremiumFeatureCheck {
 }
 
 /**
+ * Automatically fixes map settings to be compliant with the user's plan
+ * This prevents maps from being disabled due to invalid settings
+ */
+export function fixMapSettingsForPlan(
+  mapSettings: MapSettings,
+  ownerPlan: keyof typeof SUBSCRIPTION_PLANS
+): MapSettings {
+  const planLimits = SUBSCRIPTION_PLANS[ownerPlan] || SUBSCRIPTION_PLANS.freemium
+  
+  const fixedSettings = { ...mapSettings }
+  
+  // Fix premium customization issues
+  if (planLimits.customizationLevel !== 'premium') {
+    // Reset to default shape if non-default shape is used
+    if (fixedSettings.markerShape !== 'circle') {
+      fixedSettings.markerShape = 'circle'
+    }
+    
+    // Reset search bar colors to defaults if custom colors are used
+    if (fixedSettings.searchBarBackgroundColor !== '#ffffff') {
+      fixedSettings.searchBarBackgroundColor = '#ffffff'
+    }
+    if (fixedSettings.searchBarTextColor !== '#000000') {
+      fixedSettings.searchBarTextColor = '#000000'
+    }
+    if (fixedSettings.searchBarHoverColor !== '#f3f4f6') {
+      fixedSettings.searchBarHoverColor = '#f3f4f6'
+    }
+  }
+  
+  // Fix smart grouping issues
+  if (!planLimits.smartGrouping && fixedSettings.nameRules && fixedSettings.nameRules.length > 0) {
+    fixedSettings.nameRules = []
+  }
+  
+  return fixedSettings
+}
+
+/**
  * Validates if a map respects the owner's current subscription plan
  * Checks for premium features that shouldn't be available on lower plans
  */
@@ -35,6 +74,20 @@ export function validateMapAgainstPlan(
 ): MapValidationResult {
   const planLimits = SUBSCRIPTION_PLANS[ownerPlan] || SUBSCRIPTION_PLANS.freemium
   const premiumFeaturesUsed: string[] = []
+
+  console.log('🔍 Map Validation Debug:', {
+    ownerPlan,
+    planLimits,
+    markersCount: markers.length,
+    mapSettings: {
+      markerShape: mapSettings.markerShape,
+      markerColor: mapSettings.markerColor,
+      searchBarBackgroundColor: mapSettings.searchBarBackgroundColor,
+      searchBarTextColor: mapSettings.searchBarTextColor,
+      searchBarHoverColor: mapSettings.searchBarHoverColor,
+      nameRules: mapSettings.nameRules?.length || 0
+    }
+  })
 
   // Check marker count limit
   if (markers.length > planLimits.maxMarkersPerMap) {
@@ -63,17 +116,33 @@ export function validateMapAgainstPlan(
   }
 
   // Check for premium customization
-  // Premium customization includes custom colors, shapes, and advanced styling
+  // Premium customization includes advanced styling (search bar colors, non-default shapes)
+  // Basic customization (border, border width, basic colors) is available to all plans
   const hasPremiumCustomization = 
     mapSettings.markerShape !== 'circle' || // Non-default shapes
-    mapSettings.markerColor !== '#3B82F6' || // Non-default colors
-    mapSettings.markerBorder !== 'none' || // Custom borders
-    mapSettings.markerBorderWidth > 0 || // Custom border width
     mapSettings.searchBarBackgroundColor !== '#ffffff' || // Custom search bar colors
     mapSettings.searchBarTextColor !== '#000000' || // Custom text colors
     mapSettings.searchBarHoverColor !== '#f3f4f6' // Custom hover colors
 
+  console.log('🔍 Premium Customization Check:', {
+    hasPremiumCustomization,
+    checks: {
+      markerShapeNotCircle: mapSettings.markerShape !== 'circle',
+      searchBarBackgroundNotWhite: mapSettings.searchBarBackgroundColor !== '#ffffff',
+      searchBarTextNotBlack: mapSettings.searchBarTextColor !== '#000000',
+      searchBarHoverNotGray: mapSettings.searchBarHoverColor !== '#f3f4f6'
+    },
+    values: {
+      markerShape: mapSettings.markerShape,
+      searchBarBackgroundColor: mapSettings.searchBarBackgroundColor,
+      searchBarTextColor: mapSettings.searchBarTextColor,
+      searchBarHoverColor: mapSettings.searchBarHoverColor
+    },
+    customizationLevel: planLimits.customizationLevel
+  })
+
   if (hasPremiumCustomization && planLimits.customizationLevel !== 'premium') {
+    console.log('❌ Premium customization detected for basic plan')
     premiumFeaturesUsed.push('premium_customization')
   }
 
@@ -98,6 +167,7 @@ export function validateMapAgainstPlan(
 
   // If any premium features are used without proper plan, map is invalid
   if (premiumFeaturesUsed.length > 0) {
+    console.log('❌ Map validation failed - premium features used:', premiumFeaturesUsed)
     return {
       isValid: false,
       reason: 'Map uses premium features not available in current plan',
@@ -105,6 +175,7 @@ export function validateMapAgainstPlan(
     }
   }
 
+  console.log('✅ Map validation passed - no premium features detected')
   return {
     isValid: true,
     premiumFeaturesUsed: []
@@ -173,17 +244,16 @@ function checkCustomLogosUsage(markers: Marker[], folderIcons?: Record<string, s
 
 /**
  * Checks if smart grouping features are being used
+ * Note: Basic clustering is available to all plans, only advanced smart grouping is premium
  */
 function checkSmartGroupingUsage(markers: Marker[], mapSettings: MapSettings): boolean {
-  // Check if name rules are applied
+  // Check if name rules are applied (premium feature)
   if (mapSettings.nameRules && mapSettings.nameRules.length > 0) {
     return true
   }
 
-  // Check for clustering usage (indicates smart grouping)
-  if (mapSettings.clusteringEnabled) {
-    return true
-  }
+  // Basic clustering is available to all plans - don't flag it as premium
+  // Only advanced smart grouping features should be flagged
 
   // Check for renamed markers (indicates smart grouping was used)
   const hasRenamedMarkers = markers.some(marker => {
@@ -202,9 +272,9 @@ export function getPremiumFeatureDescription(feature: string): string {
   const descriptions: Record<string, string> = {
     'geocoding': 'Geocoded markers (address-to-coordinates conversion)',
     'name_rules': 'Custom name rules and smart grouping',
-    'premium_customization': 'Premium customization options',
+    'premium_customization': 'Advanced customization options (search bar colors, non-default shapes)',
     'bulk_import': 'Bulk marker import',
-    'smart_grouping': 'Smart grouping and clustering',
+    'smart_grouping': 'Advanced smart grouping (name rules and categorization)',
     'custom_logos': 'Custom logos for markers',
     'marker_limit_exceeded': 'Exceeds marker limit for current plan'
   }
@@ -221,6 +291,47 @@ export function isMarkerGeocoded(marker: Marker): boolean {
   // For now, we'll assume markers with addresses but no coordinates were geocoded
   return !!(marker.address && marker.address.trim() !== '' && 
            (!marker.lat || !marker.lng || marker.lat === 0 || marker.lng === 0))
+}
+
+/**
+ * User-friendly descriptions of premium features
+ */
+export const PREMIUM_FEATURE_DESCRIPTIONS: Record<string, PremiumFeatureCheck> = {
+  'marker_limit_exceeded': {
+    feature: 'marker_limit_exceeded',
+    isUsed: false,
+    description: 'Your map has too many markers for the freemium plan. Upgrade to add more markers.'
+  },
+  'geocoding': {
+    feature: 'geocoding',
+    isUsed: false,
+    description: 'Auto-geocoding requires a paid plan. You can still add markers manually.'
+  },
+  'name_rules': {
+    feature: 'name_rules',
+    isUsed: false,
+    description: 'Smart grouping rules require a paid plan. Your markers will use basic grouping.'
+  },
+  'premium_customization': {
+    feature: 'premium_customization',
+    isUsed: false,
+    description: 'Advanced customization (custom shapes, search bar colors) requires a paid plan. Your map will use basic styling.'
+  },
+  'bulk_import': {
+    feature: 'bulk_import',
+    isUsed: false,
+    description: 'Bulk import feature requires a paid plan. You can still add markers one by one.'
+  },
+  'smart_grouping': {
+    feature: 'smart_grouping',
+    isUsed: false,
+    description: 'Smart grouping feature requires a paid plan. Your markers will use basic grouping.'
+  },
+  'custom_logos': {
+    feature: 'custom_logos',
+    isUsed: false,
+    description: 'Custom logos require premium customization. Your map will use default icons.'
+  }
 }
 
 /**

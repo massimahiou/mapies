@@ -1,6 +1,6 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
-import { parse } from 'csv-parse/sync';
+import { parse } from 'csv-parse';
 import { Logger } from './utils/logger';
 
 const logger = Logger.getInstance();
@@ -212,19 +212,31 @@ export class CsvProcessingService {
       // Parse CSV content with error handling for inconsistent columns
       let records: any[];
       try {
-        records = parse(csvContent, {
-          columns: true,
-          skip_empty_lines: true,
-          trim: true,
-          relax_column_count: true, // Allow inconsistent column counts
-          relax_quotes: true, // Handle malformed quotes
-          on_record: (record, context) => {
-            // Log problematic rows for debugging
-            if (context.error) {
-              logger.warn(`CSV parsing warning on line ${context.lines}:`, context.error.message);
+        records = await new Promise((resolve, reject) => {
+          const parsedRecords: any[] = [];
+          parse(csvContent, {
+            columns: true,
+            skip_empty_lines: true,
+            trim: true,
+            relax_column_count: true, // Allow inconsistent column counts
+            relax_quotes: true, // Handle malformed quotes
+            on_record: (record, context) => {
+              // Log problematic rows for debugging
+              if (context.error) {
+                logger.warn(`CSV parsing warning on line ${context.lines}:`, context.error.message);
+              }
+              parsedRecords.push(record);
             }
-            return record;
-          }
+          })
+          .on('data', (record) => {
+            parsedRecords.push(record);
+          })
+          .on('end', () => {
+            resolve(parsedRecords);
+          })
+          .on('error', (error) => {
+            reject(error);
+          });
         });
       } catch (parseError) {
         logger.error('CSV parsing error:', parseError);

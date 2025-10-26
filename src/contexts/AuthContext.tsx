@@ -76,6 +76,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const signOut = async () => {
     const { signOutUser } = await import('../firebase/auth')
     await signOutUser()
+    // Redirect to landing page after sign out
+    window.location.href = '/'
   }
 
   const value = {

@@ -35,7 +35,7 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     maxTotalMarkers: 50,
     maxMaps: 1,
     watermark: true,
-    bulkImport: true,
+    bulkImport: false,
     geocoding: false,
     smartGrouping: false,
     customizationLevel: 'basic',

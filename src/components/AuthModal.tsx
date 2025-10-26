@@ -1,187 +1,350 @@
-import React, { useState } from 'react'
-import { X, Mail, Lock } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { X, Mail, Lock, User, Eye, EyeOff, ArrowRight, CheckCircle } from 'lucide-react'
+import { createAccount, signIn } from '../firebase/auth'
 import { useAuth } from '../contexts/AuthContext'
 
 interface AuthModalProps {
   isOpen: boolean
   onClose: () => void
-  initialMode?: 'login' | 'signup'
+  onAuthSuccess: () => void
 }
 
-const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMode = 'login' }) => {
-  const [mode, setMode] = useState<'login' | 'signup'>(initialMode)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess }) => {
+  const { user } = useAuth()
+  const [isLogin, setIsLogin] = useState(true)
+  const [showPassword, setShowPassword] = useState(false)
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    confirmPassword: '',
+    name: ''
+  })
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const { signIn, signUp } = useAuth()
+  // Check if user is already authenticated
+  useEffect(() => {
+    if (user && isOpen) {
+      // User is already logged in, show welcome message briefly then redirect
+      setTimeout(() => {
+        onAuthSuccess()
+      }, 1500)
+    }
+  }, [user, isOpen, onAuthSuccess])
+
+  // If user is already authenticated, show welcome message
+  if (user && isOpen) {
+    return (
+      <AnimatePresence>
+        <motion.div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+        >
+          <motion.div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden"
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Background Gradient */}
+            <div className="absolute inset-0 bg-gradient-to-br from-pink-50 to-rose-50 opacity-50"></div>
+            
+            {/* Close Button */}
+            <button
+              onClick={onClose}
+              className="absolute top-4 right-4 z-20 p-2 text-gray-400 hover:text-gray-600 transition-colors bg-white/80 hover:bg-white rounded-full shadow-sm"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="relative z-10 p-8 text-center">
+              {/* Logo */}
+              <div className="mb-8">
+                <img
+                  src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
+                  alt="Pinz Logo"
+                  className="h-12 mx-auto mb-4"
+                />
+              </div>
+
+              {/* Welcome Message */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle className="w-8 h-8 text-green-600" />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                  Welcome Back!
+                </h2>
+                <p className="text-gray-600 mb-6">
+                  You're already signed in. Redirecting to your dashboard...
+                </p>
+                <div className="flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-pink-600"></div>
+                </div>
+              </motion.div>
+            </div>
+          </motion.div>
+        </motion.div>
+      </AnimatePresence>
+    )
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData(prev => ({
+      ...prev,
+      [e.target.name]: e.target.value
+    }))
+    setError('')
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setIsLoading(true)
     setError('')
-    setLoading(true)
 
     try {
-      if (mode === 'signup') {
-        if (password !== confirmPassword) {
-          setError('Passwords do not match')
-          setLoading(false)
-          return
-        }
-        if (password.length < 6) {
-          setError('Password must be at least 6 characters')
-          setLoading(false)
-          return
-        }
-        await signUp(email, password)
+      if (isLogin) {
+        // Sign in
+        await signIn(formData.email, formData.password)
+        console.log('User signed in successfully')
       } else {
-        await signIn(email, password)
+        // Register
+        if (formData.password !== formData.confirmPassword) {
+          setError('Passwords do not match')
+          return
+        }
+        await createAccount(formData.email, formData.password)
+        console.log('User created successfully')
       }
-      onClose()
-    } catch (error: any) {
-      setError(error.message)
+      
+      // Close modal and redirect on success
+      onAuthSuccess()
+    } catch (err: any) {
+      console.error('Authentication error:', err)
+      
+      // Handle specific Firebase auth errors
+      let errorMessage = 'Authentication failed. Please try again.'
+      
+      if (err.code === 'auth/email-already-in-use') {
+        errorMessage = 'This email is already registered. Please sign in instead.'
+      } else if (err.code === 'auth/weak-password') {
+        errorMessage = 'Password should be at least 6 characters long.'
+      } else if (err.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address.'
+      } else if (err.code === 'auth/user-not-found') {
+        errorMessage = 'No account found with this email. Please create an account.'
+      } else if (err.code === 'auth/wrong-password') {
+        errorMessage = 'Incorrect password. Please try again.'
+      } else if (err.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many failed attempts. Please try again later.'
+      } else if (err.message) {
+        errorMessage = err.message
+      }
+      
+      setError(errorMessage)
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
   const switchMode = () => {
-    setMode(mode === 'login' ? 'signup' : 'login')
+    setIsLogin(!isLogin)
     setError('')
-    setEmail('')
-    setPassword('')
-    setConfirmPassword('')
+    setFormData({
+      email: '',
+      password: '',
+      confirmPassword: '',
+      name: ''
+    })
   }
 
-  if (!isOpen) return null
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <div className="flex items-center gap-3">
-            <img 
-              src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_icon.png?alt=media&token=4fb7d58e-0bd8-4a64-bd29-2f99565f2973"
-              alt="Pinz Icon"
-              className="w-6 h-6"
-            />
-            <h2 className="text-xl font-semibold text-gray-900">
-              {mode === 'login' ? 'Sign In to PINZ' : 'Create PINZ Account'}
-            </h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+        >
+          <motion.div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden"
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6">
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-md text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* Email */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Email Address
-            </label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-pinz-500 focus:border-transparent"
-                placeholder="Enter your email"
-                required
-              />
-            </div>
-          </div>
-
-          {/* Password */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Password
-            </label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-pinz-500 focus:border-transparent"
-                placeholder="Enter your password"
-                required
-              />
-            </div>
-          </div>
-
-          {/* Confirm Password (Signup only) */}
-          {mode === 'signup' && (
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Confirm Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-pinz-500 focus:border-transparent"
-                  placeholder="Confirm your password"
-                  required
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full py-2 px-4 rounded-md font-medium transition-colors ${
-              loading
-                ? 'bg-gray-400 cursor-not-allowed'
-                : mode === 'login'
-                ? 'bg-pinz-600 hover:bg-pinz-700 text-white'
-                : 'bg-pinz-600 hover:bg-pinz-700 text-white'
-            }`}
-          >
-            {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
-          </button>
-        </form>
-
-        {/* Footer */}
-        <div className="px-6 py-4 bg-gray-50 rounded-b-lg">
-          <p className="text-center text-sm text-gray-600">
-            {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+            {/* Background Gradient */}
+            <div className="absolute inset-0 bg-gradient-to-br from-pink-50 to-rose-50 opacity-50"></div>
+            
+            {/* Close Button */}
             <button
-              onClick={switchMode}
-              className="text-pinz-600 hover:text-pinz-700 font-medium"
+              onClick={onClose}
+              className="absolute top-4 right-4 z-20 p-2 text-gray-400 hover:text-gray-600 transition-colors bg-white/80 hover:bg-white rounded-full shadow-sm"
             >
-              {mode === 'login' ? 'Sign up' : 'Sign in'}
+              <X className="w-5 h-5" />
             </button>
-          </p>
-        </div>
-      </div>
-    </div>
+
+            <div className="relative z-10 p-8">
+              {/* Logo */}
+              <div className="text-center mb-8">
+                <img
+                  src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
+                  alt="Pinz Logo"
+                  className="h-12 mx-auto mb-4"
+                />
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                  {isLogin ? 'Welcome Back' : 'Create Account'}
+                </h2>
+                <p className="text-gray-600">
+                  {isLogin 
+                    ? 'Sign in to continue to your dashboard' 
+                    : 'Join thousands of users creating amazing maps'
+                  }
+                </p>
+              </div>
+
+              {/* Form */}
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {!isLogin && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                      <input
+                        type="text"
+                        name="name"
+                        placeholder="Full Name"
+                        value={formData.name}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all duration-200"
+                        required={!isLogin}
+                      />
+                    </div>
+                  </motion.div>
+                )}
+
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input
+                    type="email"
+                    name="email"
+                    placeholder="Email Address"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                </div>
+
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    name="password"
+                    placeholder="Password"
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all duration-200"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+
+                {!isLogin && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        name="confirmPassword"
+                        placeholder="Confirm Password"
+                        value={formData.confirmPassword}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all duration-200"
+                        required={!isLogin}
+                      />
+                    </div>
+                  </motion.div>
+                )}
+
+                {error && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm"
+                  >
+                    {error}
+                  </motion.div>
+                )}
+
+                <motion.button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-3 px-6 bg-gradient-to-r from-pink-600 to-rose-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  {isLoading ? (
+                    <div className="flex items-center">
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                      {isLogin ? 'Signing In...' : 'Creating Account...'}
+                    </div>
+                  ) : (
+                    <div className="flex items-center">
+                      {isLogin ? 'Sign In' : 'Create Account'}
+                      <ArrowRight className="ml-2 w-5 h-5" />
+                    </div>
+                  )}
+                </motion.button>
+              </form>
+
+              {/* Switch Mode */}
+              <div className="mt-6 text-center">
+                <p className="text-gray-600">
+                  {isLogin ? "Don't have an account?" : "Already have an account?"}
+                </p>
+                <button
+                  onClick={switchMode}
+                  className="text-pink-600 hover:text-pink-700 font-semibold transition-colors"
+                >
+                  {isLogin ? 'Create Account' : 'Sign In'}
+                </button>
+              </div>
+
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 
 export default AuthModal
-
-
-
-
-
-
-

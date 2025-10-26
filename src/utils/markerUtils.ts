@@ -146,7 +146,7 @@ export function createClusterOptions(mapSettings: MapSettings, iconCreateFunctio
     zoomToBoundsOnClick: true,
     animate: true,
     animateAddingMarkers: true,
-    disableClusteringAtZoom: 15, // Fixed default zoom level
+    disableClusteringAtZoom: 12, // Lower zoom level to show individual markers sooner
     removeOutsideVisibleBounds: true,
     iconCreateFunction
   }

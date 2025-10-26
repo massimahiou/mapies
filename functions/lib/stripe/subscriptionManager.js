@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SubscriptionManager = void 0;
 const stripe_1 = require("stripe");
 const admin = require("firebase-admin");
+const functions = require("firebase-functions");
 const userOperations_1 = require("../firestore/userOperations");
 const subscriptionOperations_1 = require("../firestore/subscriptionOperations");
 const logger_1 = require("../utils/logger");
@@ -12,28 +13,82 @@ if (!admin.apps.length) {
 }
 class SubscriptionManager {
     /**
+     * Get customer email from Stripe
+     */
+    static async getCustomerEmail(customerId) {
+        try {
+            const customer = await this.stripe.customers.retrieve(customerId);
+            return customer.email || undefined;
+        }
+        catch (error) {
+            this.logger.warn(`Failed to get customer email for ${customerId}:`, error);
+            return undefined;
+        }
+    }
+    /**
+     * Get limits for a subscription plan
+     */
+    static getLimitsForPlan(plan) {
+        const limits = {
+            freemium: {
+                maxMaps: 1,
+                maxMarkersPerMap: 50,
+                customIcons: false,
+                advancedAnalytics: false,
+                prioritySupport: false
+            },
+            starter: {
+                maxMaps: 10,
+                maxMarkersPerMap: 200,
+                customIcons: true,
+                advancedAnalytics: false,
+                prioritySupport: false
+            },
+            professional: {
+                maxMaps: 50,
+                maxMarkersPerMap: 1000,
+                customIcons: true,
+                advancedAnalytics: true,
+                prioritySupport: true
+            },
+            enterprise: {
+                maxMaps: -1,
+                maxMarkersPerMap: -1,
+                customIcons: true,
+                advancedAnalytics: true,
+                prioritySupport: true
+            }
+        };
+        return limits[plan];
+    }
+    /**
      * Determine subscription tier based on price ID
      */
     static getSubscriptionTier(priceId) {
         const config = {
-            starter: process.env.STRIPE_PRICE_ID_STARTER,
-            professional: process.env.STRIPE_PRICE_ID_PROFESSIONAL,
-            enterprise: process.env.STRIPE_PRICE_ID_ENTERPRISE,
+            starter: functions.config().stripe.price_id_starter,
+            professional: functions.config().stripe.price_id_professional,
+            enterprise: functions.config().stripe.price_id_enterprise,
+            freemium: functions.config().stripe.price_id_freemium,
             // Legacy support
-            premium: process.env.STRIPE_PRICE_ID_PREMIUM,
-            pro: process.env.STRIPE_PRICE_ID_PRO
+            premium: functions.config().stripe.price_id_premium,
+            pro: functions.config().stripe.price_id_pro
         };
+        console.log('Price ID mapping:', { priceId, config });
         if (priceId === config.enterprise)
             return 'enterprise';
         if (priceId === config.professional)
             return 'professional';
         if (priceId === config.starter)
             return 'starter';
+        if (priceId === config.freemium)
+            return 'freemium';
         if (priceId === config.pro)
             return 'professional'; // Legacy mapping
         if (priceId === config.premium)
             return 'starter'; // Legacy mapping
         // Default to freemium if price ID doesn't match
+        console.log('Price ID not found, defaulting to freemium:', priceId);
         return 'freemium';
     }
     /**
@@ -51,17 +106,27 @@ class SubscriptionManager {
             // Get the first price item to determine tier
             const priceItem = subscription.items.data[0];
             const subscriptionTier = this.getSubscriptionTier(priceItem.price.id);
-            // Update user subscription data
-            const userSubscriptionData = {
-                subscriptionStatus: subscription.status,
-                subscriptionId: subscription.id,
-                subscriptionTier,
-                subscriptionStartDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_start * 1000),
-                subscriptionEndDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
-                cancelAtPeriodEnd: subscription.cancel_at_period_end,
-                nextBillingDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000)
-            };
-            await userOperations_1.UserOperations.updateUserSubscription(userId, userSubscriptionData);
+            // Update user subscription data - preserve existing structure and update nested subscription object
+            const userRef = admin.firestore().collection('users').doc(userId);
+            // Update the nested subscription object and limits based on the plan
+            const limits = this.getLimitsForPlan(subscriptionTier);
+            await userRef.update({
+                'subscription.plan': subscriptionTier,
+                'subscription.status': subscription.status,
+                'subscription.subscriptionId': subscription.id,
+                'subscription.subscriptionStartDate': admin.firestore.Timestamp.fromMillis(subscription.current_period_start * 1000),
+                'subscription.subscriptionEndDate': admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
+                'subscription.cancelAtPeriodEnd': subscription.cancel_at_period_end,
+                'subscription.nextBillingDate': admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
+                'limits.maxMaps': limits.maxMaps,
+                'limits.maxMarkersPerMap': limits.maxMarkersPerMap,
+                'limits.customIcons': limits.customIcons,
+                'limits.advancedAnalytics': limits.advancedAnalytics,
+                'limits.prioritySupport': limits.prioritySupport,
+                'stripeCustomerId': customerId,
+                'email': await this.getCustomerEmail(customerId),
+                'updatedAt': admin.firestore.FieldValue.serverTimestamp()
+            });
             // Create subscription document
             const subscriptionDoc = {
                 userId,
@@ -179,16 +244,18 @@ class SubscriptionManager {
                 this.logger.warn(`No user found for customer ${customerId}`);
                 return;
             }
-            // Update last payment date
-            await userOperations_1.UserOperations.updateLastPaymentDate(userId);
+            // Update last payment date and next billing date using direct Firestore update
+            const userRef = admin.firestore().collection('users').doc(userId);
+            const updateData = {
+                'subscription.lastPaymentDate': admin.firestore.Timestamp.fromMillis(invoice.created * 1000),
+                'updatedAt': admin.firestore.FieldValue.serverTimestamp()
+            };
             // If this is a subscription invoice, update next billing date
             if (invoice.subscription) {
                 const subscription = await this.stripe.subscriptions.retrieve(invoice.subscription);
-                const userSubscriptionData = {
-                    nextBillingDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000)
-                };
-                await userOperations_1.UserOperations.updateUserSubscription(userId, userSubscriptionData);
+                updateData['subscription.nextBillingDate'] = admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000);
             }
+            await userRef.update(updateData);
             this.logger.info(`Payment succeeded for user ${userId}`, {
                 invoiceId: invoice.id,
                 amount: invoice.amount_paid
@@ -366,12 +433,31 @@ class SubscriptionManager {
                 this.logger.warn(`No user ID in checkout session metadata ${session.id}`);
                 return;
             }
-            // Log checkout completion for monitoring
-            this.logger.info(`Checkout session completed for user ${userId}`, {
-                sessionId: session.id,
-                customerId: customerId,
-                subscriptionId: session.subscription
-            });
+            // If this checkout created a subscription, wait a moment for it to be created
+            if (session.subscription) {
+                // Wait for subscription to be fully created
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                try {
+                    const subscription = await this.stripe.subscriptions.retrieve(session.subscription);
+                    await this.handleSubscriptionCreated(subscription);
+                    this.logger.info(`Subscription created from checkout for user ${userId}`, {
+                        sessionId: session.id,
+                        subscriptionId: session.subscription,
+                        customerId: customerId
+                    });
+                }
+                catch (subError) {
+                    this.logger.error('Error processing subscription from checkout:', subError);
+                }
+            }
+            else {
+                // Log checkout completion for monitoring
+                this.logger.info(`Checkout session completed for user ${userId}`, {
+                    sessionId: session.id,
+                    customerId: customerId,
+                    subscriptionId: session.subscription
+                });
+            }
         }
         catch (error) {
             this.logger.error('Error handling checkout session completed:', error);
@@ -380,7 +466,7 @@ class SubscriptionManager {
     }
 }
 exports.SubscriptionManager = SubscriptionManager;
-SubscriptionManager.stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY, {
+SubscriptionManager.stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY || functions.config().stripe.secret_key, {
     apiVersion: '2023-10-16',
 });
 SubscriptionManager.logger = logger_1.Logger.getInstance();
