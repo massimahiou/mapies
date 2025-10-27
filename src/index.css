@@ -9,6 +9,13 @@
   opacity: 1 !important;
 }
 
+/* Toner style - black & white high contrast */
+.toner-style .leaflet-tile-container img,
+.toner-style .leaflet-tile-container img {
+  filter: grayscale(100%) contrast(200%) brightness(90%) !important;
+  image-rendering: crisp-edges !important;
+}
+
 /* Cool location zone pulse animation */
 @keyframes pulse {
   0% {

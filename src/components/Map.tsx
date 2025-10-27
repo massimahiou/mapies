@@ -524,6 +524,14 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     }
     
     switch (mapSettings.style) {
+      case 'osm':
+        tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+        tileOptions.attribution = '© OpenStreetMap contributors'
+        break
+      case 'voyager':
+        tileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+        tileOptions.attribution = '© CARTO © OpenStreetMap'
+        break
       case 'dark':
         tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
         tileOptions.attribution = '© OpenStreetMap contributors, © CARTO'
@@ -550,12 +558,17 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
         tileOptions.attribution = '© OpenStreetMap contributors © CARTO'
         break
       case 'toner':
-        tileUrl = 'https://stamen-tiles-{s}.a.ssl.fastly.net/toner/{z}/{x}/{y}{r}.png'
-        tileOptions.attribution = '© OpenStreetMap contributors © Stamen Design'
+        // Use light tiles and apply CSS filters for toner effect
+        tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+        tileOptions = {
+          attribution: '© OpenStreetMap contributors © CARTO',
+          // Apply toner-like CSS filter
+          className: 'toner-filter'
+        } as any
         break
-      case 'satellite':
-        tileUrl = 'https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key=get_your_own_OpIi9ZULNHzrESv6T2vL'
-        tileOptions.attribution = '© MapTiler © OpenStreetMap contributors'
+      case 'topo':
+        tileUrl = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
+        tileOptions.attribution = '© OpenStreetMap contributors, © OpenTopoMap'
         break
       default:
         tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
@@ -570,6 +583,8 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       mapInstance.current.removeLayer(tileLayerRef.current)
     }
     tileLayerRef.current = L.tileLayer(tileUrl, tileOptions).addTo(mapInstance.current)
+    
+    // Note: Toner style uses dark tiles (same as dark but different name for legacy support)
 
     // Hide loading indicator when tiles are loaded
     if (mapSettings.style === 'satellite') {

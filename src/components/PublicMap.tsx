@@ -992,6 +992,14 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     }
     
     switch (effectiveSettings.style) {
+      case 'osm':
+        tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+        tileOptions.attribution = '© OpenStreetMap contributors'
+        break
+      case 'voyager':
+        tileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+        tileOptions.attribution = '© CARTO © OpenStreetMap'
+        break
       case 'dark':
         tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
         tileOptions.attribution = '© OpenStreetMap contributors, © CARTO'
@@ -1013,12 +1021,16 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         tileOptions.attribution = '© OpenStreetMap contributors © CARTO'
         break
       case 'toner':
-        tileUrl = 'https://stamen-tiles-{s}.a.ssl.fastly.net/toner/{z}/{x}/{y}{r}.png'
-        tileOptions.attribution = '© OpenStreetMap contributors © Stamen Design'
+        // Use light tiles with CSS filters for toner effect (black & white high contrast)
+        tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+        tileOptions = {
+          attribution: '© OpenStreetMap contributors © CARTO',
+          className: 'toner-filter'
+        } as any
         break
-      case 'satellite':
-        tileUrl = 'https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key=get_your_own_OpIi9ZULNHzrESv6T2vL'
-        tileOptions.attribution = '© MapTiler © OpenStreetMap contributors'
+      case 'topo':
+        tileUrl = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
+        tileOptions.attribution = '© OpenStreetMap contributors, © OpenTopoMap'
         break
       default:
         tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
