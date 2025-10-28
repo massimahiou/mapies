@@ -475,7 +475,7 @@ export const findBoundaryWithReverseGeocoding = async (
     onProgress?.(2, 10, 'Detecting boundaries...')
     
     // Step 2: Find boundary points in multiple directions
-    const numDirections = type === 'postal_code' ? 12 : 8 // More directions for postal codes
+    const numDirections = 5 // 5 directions creates a 5-point polygon
     const stepDegrees = 360 / numDirections
     const boundaryPoints: Array<{lat: number, lng: number}> = []
     
