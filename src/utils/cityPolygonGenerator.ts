@@ -483,24 +483,9 @@ export const findBoundaryWithReverseGeocoding = async (
       const bearing = i * stepDegrees
       let boundaryFound = false
       
-      // Use variable distance increments to catch irregular boundaries
-      // Start small (100m increments near center), then larger (500m increments further out)
-      const distances: number[] = []
-      
-      // Small steps near center (100m up to 800m)
-      for (let d = 100; d <= 800; d += 100) {
-        distances.push(d)
-      }
-      
-      // Medium steps (1000m to 3000m in 200m steps)
-      for (let d = 1000; d <= 3000; d += 200) {
-        distances.push(d)
-      }
-      
-      // Larger steps further out (3500m to 6000m in 500m steps)
-      for (let d = 3500; d <= 6000; d += 500) {
-        distances.push(d)
-      }
+      // Use fewer, bigger test distances to create more irregular boundaries
+      // Test at: 200m, 500m, 1km, 2km, 4km
+      const distances = [200, 500, 1000, 2000, 4000]
       
       for (let j = 0; j < distances.length; j++) {
         const distance = distances[j]
