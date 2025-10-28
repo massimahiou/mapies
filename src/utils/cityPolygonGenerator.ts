@@ -71,7 +71,8 @@ export const generatePolygonWithMapbox = async (
     // If no boundary ID, check for admin hierarchy
     for (const ctx of context) {
       console.log('🔍 Checking context:', ctx)
-      if (ctx.short_code && (ctx.id.includes('place') || ctx.id.includes('postcode'))) {
+      // Check if this is a place or postcode context
+      if (ctx.id && (ctx.id.includes('place') || ctx.id.includes('postcode'))) {
         boundaryId = ctx.id
         console.log('✅ Found boundary ID from context:', boundaryId)
         break
