@@ -1,4 +1,5 @@
 // import * as L from 'leaflet' // Not currently used
+import { MAPBOX_CONFIG } from '../config/mapbox'
 
 export interface BoundaryResult {
   success: boolean
@@ -6,6 +7,139 @@ export interface BoundaryResult {
   name: string
   coordinates: Array<{lat: number, lng: number}>
   error?: string
+}
+
+// Generate polygon using Mapbox Boundaries API (preferred method)
+export const generatePolygonWithMapbox = async (
+  input: string,
+  type: 'city' | 'postal_code'
+): Promise<BoundaryResult> => {
+  try {
+    console.log(`🗺️ Using Mapbox to search for ${type}:`, input)
+    
+    const token = MAPBOX_CONFIG.ACCESS_TOKEN
+    const searchQuery = type === 'city' 
+      ? input 
+      : input.replace(/\s+/g, '') // Remove space from postal code for Mapbox
+    
+    // Step 1: Geocode to find the location and get boundary ID
+    const geocodeUrl = `${MAPBOX_CONFIG.GEOCODING_API_URL}/${encodeURIComponent(searchQuery)}.json?access_token=${token}&country=ca&limit=1`
+    
+    console.log('🔍 Step 1: Geocoding with Mapbox...')
+    const geocodeResponse = await fetch(geocodeUrl)
+    
+    if (!geocodeResponse.ok) {
+      throw new Error(`Mapbox Geocoding failed: ${geocodeResponse.status}`)
+    }
+    
+    const geocodeData = await geocodeResponse.json()
+    console.log('📍 Geocode results:', geocodeData)
+    
+    if (!geocodeData.features || geocodeData.features.length === 0) {
+      return {
+        success: false,
+        type,
+        name: input,
+        coordinates: [],
+        error: 'Location not found'
+      }
+    }
+    
+    const feature = geocodeData.features[0]
+    const placeName = feature.place_name
+    const coordinates = feature.geometry.coordinates // [lng, lat]
+    
+    console.log('✅ Found location:', placeName)
+    console.log('📍 Coordinates:', coordinates)
+    
+    // Check if this feature has a boundary (admin boundaries)
+    let boundaryId = null
+    
+    // Look for boundary metadata in feature properties
+    const props = feature.properties
+    if (props && (props.wikidata || props.maki === 'border' || props.category === 'administrative')) {
+      // Try to use the OSM ID or other identifier
+      boundaryId = props.osm_id || props.mapbox_id
+    }
+    
+    // If no boundary ID, check for admin hierarchy
+    const context = feature.context || []
+    for (const ctx of context) {
+      if (ctx.short_code && (ctx.id.includes('place') || ctx.id.includes('postcode'))) {
+        boundaryId = ctx.id
+        break
+      }
+    }
+    
+    console.log('🗺️ Boundary ID:', boundaryId)
+    
+    // Step 2: Get boundary polygon if available
+    if (boundaryId && boundaryId.includes('place') || boundaryId && boundaryId.includes('postcode')) {
+      try {
+        const boundaryUrl = `https://api.mapbox.com/v4/${boundaryId}.json?access_token=${token}`
+        console.log('🔍 Step 2: Fetching boundary polygon...')
+        
+        const boundaryResponse = await fetch(boundaryUrl)
+        
+        if (boundaryResponse.ok) {
+          const boundaryData = await boundaryResponse.json()
+          console.log('✅ Got boundary data')
+          
+          // Extract coordinates from boundary geometry
+          if (boundaryData && boundaryData.geometry && boundaryData.geometry.coordinates) {
+            const coords: Array<{lat: number, lng: number}> = []
+            
+            // Handle different geometry types
+            const geom = boundaryData.geometry
+            if (geom.type === 'Polygon' && Array.isArray(geom.coordinates[0])) {
+              geom.coordinates[0].forEach((point: [number, number]) => {
+                coords.push({ lat: point[1], lng: point[0] })
+              })
+            } else if (geom.type === 'MultiPolygon') {
+              // Take first polygon
+              geom.coordinates[0][0].forEach((point: [number, number]) => {
+                coords.push({ lat: point[1], lng: point[0] })
+              })
+            }
+            
+            if (coords.length > 0) {
+              console.log('✅ Extracted', coords.length, 'coordinates from boundary')
+              return {
+                success: true,
+                type,
+                name: placeName,
+                coordinates: coords
+              }
+            }
+          }
+        }
+      } catch (boundaryError) {
+        console.warn('⚠️ Could not fetch boundary, using point with radius:', boundaryError)
+      }
+    }
+    
+    // Step 3: Fallback - create circular boundary around point
+    console.log('ℹ️ No boundary found, creating circular area')
+    const [lng, lat] = coordinates
+    const coords = generateCirclePoints(lat, lng, type === 'postal_code' ? 1000 : 5000)
+    
+    return {
+      success: true,
+      type,
+      name: placeName,
+      coordinates: coords
+    }
+    
+  } catch (error) {
+    console.error('❌ Error with Mapbox:', error)
+    return {
+      success: false,
+      type,
+      name: input,
+      coordinates: [],
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
 }
 
 // Fetch city or postal code boundaries from OpenStreetMap Overpass API
@@ -222,13 +356,29 @@ const generateCirclePoints = (centerLat: number, centerLng: number, radiusMeters
   return points
 }
 
-// Optimized simplified version for better postal code handling
+// Optimized simplified version - tries Mapbox first, falls back to Nominatim
 export const generateSimplifiedPolygon = async (
   input: string,
   type: 'city' | 'postal_code'
 ): Promise<BoundaryResult> => {
   try {
     console.log(`🔍 Searching for ${type}:`, input)
+    
+    // Try Mapbox first
+    try {
+      console.log('🗺️ Attempting with Mapbox first...')
+      const mapboxResult = await generatePolygonWithMapbox(input, type)
+      if (mapboxResult.success) {
+        console.log('✅ Mapbox succeeded')
+        return mapboxResult
+      }
+      console.log('⚠️ Mapbox failed, trying Nominatim fallback')
+    } catch (mapboxError) {
+      console.warn('⚠️ Mapbox error, trying Nominatim:', mapboxError)
+    }
+    
+    // Fallback to Nominatim
+    console.log('🔍 Falling back to Nominatim...')
     
     let searchQuery = ''
     let url = ''
