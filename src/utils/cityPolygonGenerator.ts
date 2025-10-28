@@ -402,23 +402,41 @@ const calculatePointAtDistance = (center: {lat: number, lng: number}, distanceMe
   }
 }
 
-// Reverse geocode a point to get its postal code
-const reverseGeocodeWithNominatim = async (point: {lat: number, lng: number}): Promise<string | null> => {
+// Reverse geocode a point to get its postal code using Mapbox
+const reverseGeocodeWithMapbox = async (point: {lat: number, lng: number}): Promise<string | null> => {
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?lat=${point.lat}&lon=${point.lng}&format=json&zoom=18&addressdetails=1`
+    const token = MAPBOX_CONFIG.ACCESS_TOKEN
+    // Mapbox reverse geocoding uses lng,lat format
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${point.lng},${point.lat}.json?access_token=${token}&country=ca&limit=1`
     
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Pinz Map App - pinz.app'
-      }
-    })
+    const response = await fetch(url)
     
-    if (!response.ok) return null
+    if (!response.ok) {
+      console.warn(`Mapbox reverse geocoding failed: ${response.status}`)
+      return null
+    }
     
     const data = await response.json()
-    return data.address?.postcode || null
+    
+    if (data.features && data.features.length > 0) {
+      const feature = data.features[0]
+      // Extract postal code from context
+      const context = feature.context || []
+      for (const ctx of context) {
+        if (ctx.id && ctx.id.includes('postcode')) {
+          return ctx.text || null
+        }
+      }
+      
+      // Fallback: check in address components
+      if (feature.properties && feature.properties.address) {
+        return feature.properties.address
+      }
+    }
+    
+    return null
   } catch (error) {
-    console.warn('Reverse geocoding failed:', error)
+    console.warn('Mapbox reverse geocoding failed:', error)
     return null
   }
 }
@@ -495,7 +513,9 @@ export const findBoundaryWithReverseGeocoding = async (
       while (currentIndex < smallSteps.length) {
         const distance = smallSteps[currentIndex]
         const testPoint = calculatePointAtDistance(center, distance, bearing)
-        const postalCode = await reverseGeocodeWithNominatim(testPoint)
+        console.log(`🔍 Testing point at ${(distance/1000).toFixed(1)}km in direction ${i + 1}`)
+        const postalCode = await reverseGeocodeWithMapbox(testPoint)
+        console.log(`📍 Postal code at ${(distance/1000).toFixed(1)}km: ${postalCode || 'none'}`)
         
         const stillInBounds = type === 'postal_code' 
           ? postalCode && postalCode.toUpperCase().replace(/\s+/g, '') === input.toUpperCase().replace(/\s+/g, '')
@@ -526,7 +546,7 @@ export const findBoundaryWithReverseGeocoding = async (
         for (let j = 0; j < mediumSteps.length; j++) {
           const distance = mediumSteps[j]
           const testPoint = calculatePointAtDistance(center, distance, bearing)
-          const postalCode = await reverseGeocodeWithNominatim(testPoint)
+          const postalCode = await reverseGeocodeWithMapbox(testPoint)
           
           const stillInBounds = type === 'postal_code' 
             ? postalCode && postalCode.toUpperCase().replace(/\s+/g, '') === input.toUpperCase().replace(/\s+/g, '')
@@ -555,7 +575,7 @@ export const findBoundaryWithReverseGeocoding = async (
         for (let j = 0; j < largeSteps.length; j++) {
           const distance = largeSteps[j]
           const testPoint = calculatePointAtDistance(center, distance, bearing)
-          const postalCode = await reverseGeocodeWithNominatim(testPoint)
+          const postalCode = await reverseGeocodeWithMapbox(testPoint)
           
           const stillInBounds = type === 'postal_code' 
             ? postalCode && postalCode.toUpperCase().replace(/\s+/g, '') === input.toUpperCase().replace(/\s+/g, '')
