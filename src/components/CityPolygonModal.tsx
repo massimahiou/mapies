@@ -28,7 +28,8 @@ const CityPolygonModal: React.FC<CityPolygonModalProps> = ({ isOpen, onClose, on
     setProgress({ current: 0, total: 10, message: 'Starting...' })
     
     try {
-      // Use advanced boundary detection for postal codes
+      // Postal codes: use Mapbox geocoding + boundary detection algorithm
+      // Cities: use Nominatim directly (better results for cities)
       const result = type === 'postal_code'
         ? await findBoundaryWithReverseGeocoding(input.trim(), type, (current, total, message) => {
             setProgress({ current, total, message })

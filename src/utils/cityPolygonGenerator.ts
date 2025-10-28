@@ -562,7 +562,7 @@ export const findBoundaryWithReverseGeocoding = async (
   }
 }
 
-// Optimized simplified version - tries Mapbox first, falls back to Nominatim
+// Optimized simplified version - uses Nominatim (better for cities)
 export const generateSimplifiedPolygon = async (
   input: string,
   type: 'city' | 'postal_code'
@@ -570,146 +570,51 @@ export const generateSimplifiedPolygon = async (
   try {
     console.log(`🔍 Searching for ${type}:`, input)
     
-    // Try Mapbox first
-    try {
-      console.log('🗺️ Attempting with Mapbox first...')
-      const mapboxResult = await generatePolygonWithMapbox(input, type)
-      if (mapboxResult.success) {
-        console.log('✅ Mapbox succeeded')
-        return mapboxResult
-      }
-      console.log('⚠️ Mapbox failed, trying Nominatim fallback')
-    } catch (mapboxError) {
-      console.warn('⚠️ Mapbox error, trying Nominatim:', mapboxError)
-    }
+    console.log('🔍 Using Nominatim for city...')
     
-    // Fallback to Nominatim
-    console.log('🔍 Falling back to Nominatim...')
-    
-    let searchQuery = ''
-    let url = ''
     let result: any = null
     
     if (type === 'postal_code') {
-      // For postal codes, try multiple search strategies
-      const cleanPostalCode = input.trim().toUpperCase().replace(/\s+/g, ' ')
-      
-      // Strategy 1: Try with format "A1A 1A1" (Canadian standard)
-      searchQuery = `postalcode=${encodeURIComponent(cleanPostalCode)}&countrycodes=ca`
-      url = `https://nominatim.openstreetmap.org/search?${searchQuery}&format=json&limit=5&polygon_geojson=1&addressdetails=1`
-      
-      console.log('🔍 Try 1: Searching with formatted postal code')
-      let response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Pinz Map App - pinz.app'
-        }
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Nominatim error: ${response.status}`)
+      // Postal codes should use findBoundaryWithReverseGeocoding, not this function
+      console.error('⚠️ generateSimplifiedPolygon called for postal_code - this should not happen')
+      return {
+        success: false,
+        type,
+        name: input,
+        coordinates: [],
+        error: 'Postal codes should use boundary detection algorithm'
       }
-      
-      let data = await response.json()
-      
-      // If no results, try without country filter
-      if (data.length === 0) {
-        console.log('🔍 Try 2: Searching without country filter')
-        url = `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(cleanPostalCode)}&format=json&limit=5&polygon_geojson=1&addressdetails=1`
-        response = await fetch(url, {
-          headers: {
-            'User-Agent': 'Pinz Map App - pinz.app'
-          }
-        })
-        
-        if (!response.ok) {
-          throw new Error(`Nominatim error: ${response.status}`)
-        }
-        
-        data = await response.json()
-      }
-      
-      // If still no results, try alternative format without space
-      if (data.length === 0 && cleanPostalCode.includes(' ')) {
-        const noSpaceCode = cleanPostalCode.replace(/\s+/g, '')
-        console.log('🔍 Try 3: Searching without space:', noSpaceCode)
-        url = `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(noSpaceCode)}&format=json&limit=5&polygon_geojson=1&addressdetails=1`
-        response = await fetch(url, {
-          headers: {
-            'User-Agent': 'Pinz Map App - pinz.app'
-          }
-        })
-        
-        if (!response.ok) {
-          throw new Error(`Nominatim error: ${response.status}`)
-        }
-        
-        data = await response.json()
-      }
-      
-      if (data.length === 0) {
-        console.log('❌ No results found for postal code')
-        return {
-          success: false,
-          type,
-          name: input,
-          coordinates: [],
-          error: 'Postal code not found'
-        }
-      }
-      
-      // Pick the best result (prefer results that have the postal code in the returned address)
-      if (!data || data.length === 0) {
-        throw new Error('No data returned from Nominatim')
-      }
-      
-      result = data[0]
-      console.log('✅ Found', data.length, 'potential matches')
-      
-      if (!result) {
-        throw new Error('First result is null/undefined')
-      }
-      
-      // If multiple results, prefer one that matches the postal code closely
-      const exactMatch = data.find((item: any) => 
-        item && item.display_name?.toUpperCase().includes(cleanPostalCode.replace(/\s+/g, ''))
-      )
-      if (exactMatch) {
-        result = exactMatch
-        console.log('✅ Using exact match')
-      } else {
-        console.log('ℹ️ Using first result:', result?.display_name || 'Unknown')
-      }
-      
-    } else {
-      // For cities, use standard search
-      searchQuery = `city=${encodeURIComponent(input)}&countrycodes=ca`
-      url = `https://nominatim.openstreetmap.org/search?${searchQuery}&format=json&limit=1&polygon_geojson=1&addressdetails=1`
-      
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Pinz Map App - pinz.app'
-        }
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Nominatim error: ${response.status}`)
-      }
-      
-      const data = await response.json()
-      
-      if (data.length === 0) {
-        console.log('❌ City not found')
-        return {
-          success: false,
-          type,
-          name: input,
-          coordinates: [],
-          error: 'Location not found'
-        }
-      }
-      
-      result = data[0]
     }
+    
+    // This function is now only for cities - use Nominatim directly
+    const searchQuery = `city=${encodeURIComponent(input)}&countrycodes=ca`
+    const url = `https://nominatim.openstreetmap.org/search?${searchQuery}&format=json&limit=1&polygon_geojson=1&addressdetails=1`
+    
+    console.log('🔍 Searching city with Nominatim:', input)
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Pinz Map App - pinz.app'
+      }
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Nominatim error: ${response.status}`)
+    }
+    
+    const data = await response.json()
+    
+    if (data.length === 0) {
+      console.log('❌ City not found')
+      return {
+        success: false,
+        type,
+        name: input,
+        coordinates: [],
+        error: 'Location not found'
+      }
+    }
+    
+    result = data[0]
     
     if (!result) {
       console.error('❌ Result is null after processing')
