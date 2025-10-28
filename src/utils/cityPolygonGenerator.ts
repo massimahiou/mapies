@@ -379,6 +379,171 @@ const generateCirclePoints = (centerLat: number, centerLng: number, radiusMeters
   return points
 }
 
+// Calculate a point at a given distance and bearing from a center point
+const calculatePointAtDistance = (center: {lat: number, lng: number}, distanceMeters: number, bearingDegrees: number): {lat: number, lng: number} => {
+  const R = 6371000 // Earth's radius in meters
+  const lat1 = center.lat * Math.PI / 180
+  const lng1 = center.lng * Math.PI / 180
+  const bearing = bearingDegrees * Math.PI / 180
+  
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(distanceMeters / R) +
+    Math.cos(lat1) * Math.sin(distanceMeters / R) * Math.cos(bearing)
+  )
+  
+  const lng2 = lng1 + Math.atan2(
+    Math.sin(bearing) * Math.sin(distanceMeters / R) * Math.cos(lat1),
+    Math.cos(distanceMeters / R) - Math.sin(lat1) * Math.sin(lat2)
+  )
+  
+  return {
+    lat: lat2 * 180 / Math.PI,
+    lng: lng2 * 180 / Math.PI
+  }
+}
+
+// Reverse geocode a point to get its postal code
+const reverseGeocodeWithNominatim = async (point: {lat: number, lng: number}): Promise<string | null> => {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${point.lat}&lon=${point.lng}&format=json&zoom=18&addressdetails=1`
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Pinz Map App - pinz.app'
+      }
+    })
+    
+    if (!response.ok) return null
+    
+    const data = await response.json()
+    return data.address?.postcode || null
+  } catch (error) {
+    console.warn('Reverse geocoding failed:', error)
+    return null
+  }
+}
+
+// Find boundary points by testing postal codes at different distances
+export const findBoundaryWithReverseGeocoding = async (
+  input: string,
+  type: 'city' | 'postal_code',
+  onProgress?: (current: number, total: number, message: string) => void
+): Promise<BoundaryResult> => {
+  try {
+    console.log(`🔍 Finding boundary for ${type}:`, input)
+    
+    // Step 1: Get center point
+    const searchQuery = type === 'city' 
+      ? `city=${encodeURIComponent(input)}&countrycodes=ca`
+      : `postalcode=${encodeURIComponent(input)}&countrycodes=ca`
+    
+    const url = `https://nominatim.openstreetmap.org/search?${searchQuery}&format=json&limit=1`
+    
+    onProgress?.(1, 10, 'Locating center point...')
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Pinz Map App - pinz.app'
+      }
+    })
+    
+    if (!response.ok) {
+      throw new Error('Failed to locate postal code')
+    }
+    
+    const data = await response.json()
+    if (data.length === 0) {
+      return {
+        success: false,
+        type,
+        name: input,
+        coordinates: [],
+        error: 'Location not found'
+      }
+    }
+    
+    const center = {
+      lat: parseFloat(data[0].lat),
+      lng: parseFloat(data[0].lon)
+    }
+    
+    const placeName = data[0].display_name
+    console.log('✅ Center point found:', center)
+    
+    onProgress?.(2, 10, 'Detecting boundaries...')
+    
+    // Step 2: Find boundary points in multiple directions
+    const numDirections = type === 'postal_code' ? 12 : 8 // More directions for postal codes
+    const stepDegrees = 360 / numDirections
+    const boundaryPoints: Array<{lat: number, lng: number}> = []
+    
+    for (let i = 0; i < numDirections; i++) {
+      const bearing = i * stepDegrees
+      let boundaryFound = false
+      
+      // Test distances from 200m to 5000m in 200m steps
+      for (let distance = 200; distance <= 5000; distance += 200) {
+        const testPoint = calculatePointAtDistance(center, distance, bearing)
+        const postalCode = await reverseGeocodeWithNominatim(testPoint)
+        
+        // Check if postal code matches (for postal codes) or if we're still in the area (for cities)
+        const stillInBounds = type === 'postal_code' 
+          ? postalCode && postalCode.toUpperCase().replace(/\s+/g, '') === input.toUpperCase().replace(/\s+/g, '')
+          : postalCode // For cities, just check if there's data
+        
+        if (!stillInBounds && distance > 400) {
+          // Found boundary! Use the previous point
+          const boundaryPoint = calculatePointAtDistance(center, distance - 200, bearing)
+          boundaryPoints.push(boundaryPoint)
+          console.log(`✅ Boundary point ${i + 1}/${numDirections} found at ${distance - 200}m`)
+          boundaryFound = true
+          break
+        }
+        
+        // Add small delay to respect rate limits
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      
+      // If no boundary found in reasonable distance, use max distance
+      if (!boundaryFound) {
+        const boundaryPoint = calculatePointAtDistance(center, 5000, bearing)
+        boundaryPoints.push(boundaryPoint)
+      }
+      
+      // Report progress
+      if ((i + 1) % Math.ceil(numDirections / 8) === 0) {
+        const progress = 2 + Math.floor((i + 1) / numDirections * 7)
+        onProgress?.(progress, 10, `Checked ${i + 1}/${numDirections} directions`)
+      }
+    }
+    
+    console.log('✅ Found', boundaryPoints.length, 'boundary points')
+    
+    // Step 3: Close the polygon
+    if (boundaryPoints.length > 0) {
+      boundaryPoints.push(boundaryPoints[0]) // Close the polygon
+    }
+    
+    onProgress?.(10, 10, 'Complete!')
+    
+    return {
+      success: true,
+      type,
+      name: placeName,
+      coordinates: boundaryPoints
+    }
+    
+  } catch (error) {
+    console.error('Error finding boundary:', error)
+    return {
+      success: false,
+      type,
+      name: input,
+      coordinates: [],
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+}
+
 // Optimized simplified version - tries Mapbox first, falls back to Nominatim
 export const generateSimplifiedPolygon = async (
   input: string,

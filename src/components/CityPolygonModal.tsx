@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { X, Loader2 } from 'lucide-react'
-import { generateSimplifiedPolygon } from '../utils/cityPolygonGenerator'
+import { generateSimplifiedPolygon, findBoundaryWithReverseGeocoding } from '../utils/cityPolygonGenerator'
 
 interface CityPolygonModalProps {
   isOpen: boolean
@@ -13,6 +13,7 @@ const CityPolygonModal: React.FC<CityPolygonModalProps> = ({ isOpen, onClose, on
   const [type, setType] = useState<'city' | 'postal_code'>('city')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>('')
+  const [progress, setProgress] = useState({ current: 0, total: 10, message: '' })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -24,9 +25,15 @@ const CityPolygonModal: React.FC<CityPolygonModalProps> = ({ isOpen, onClose, on
     }
 
     setLoading(true)
+    setProgress({ current: 0, total: 10, message: 'Starting...' })
     
     try {
-      const result = await generateSimplifiedPolygon(input.trim(), type)
+      // Use advanced boundary detection for postal codes
+      const result = type === 'postal_code'
+        ? await findBoundaryWithReverseGeocoding(input.trim(), type, (current, total, message) => {
+            setProgress({ current, total, message })
+          })
+        : await generateSimplifiedPolygon(input.trim(), type)
       
       if (!result.success) {
         setError(result.error || 'Failed to generate polygon')
@@ -44,6 +51,7 @@ const CityPolygonModal: React.FC<CityPolygonModalProps> = ({ isOpen, onClose, on
         }
         onClose()
         setInput('')
+        setProgress({ current: 0, total: 10, message: '' })
       } else {
         setError('No boundary found for this location')
       }
@@ -52,6 +60,7 @@ const CityPolygonModal: React.FC<CityPolygonModalProps> = ({ isOpen, onClose, on
       setError('An error occurred. Please try again.')
     } finally {
       setLoading(false)
+      setProgress({ current: 0, total: 10, message: '' })
     }
   }
 
@@ -126,6 +135,22 @@ const CityPolygonModal: React.FC<CityPolygonModalProps> = ({ isOpen, onClose, on
               </div>
             )}
 
+            {/* Progress Bar */}
+            {loading && progress.message && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">{progress.message}</span>
+                  <span className="text-gray-500">{progress.current}/{progress.total}</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Buttons */}
             <div className="flex gap-3 pt-4">
               <button
@@ -156,7 +181,10 @@ const CityPolygonModal: React.FC<CityPolygonModalProps> = ({ isOpen, onClose, on
           {/* Info */}
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-xs text-blue-700">
-              This will automatically create a polygon boundary for the specified location using OpenStreetMap data.
+              {type === 'postal_code' 
+                ? 'Postal codes: Boundary is detected by testing postal codes at different distances (may take 20-30 seconds).'
+                : 'This will automatically create a polygon boundary for the specified location using OpenStreetMap data.'
+              }
             </p>
           </div>
         </div>
