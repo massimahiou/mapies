@@ -402,41 +402,23 @@ const calculatePointAtDistance = (center: {lat: number, lng: number}, distanceMe
   }
 }
 
-// Reverse geocode a point to get its postal code using Mapbox
-const reverseGeocodeWithMapbox = async (point: {lat: number, lng: number}): Promise<string | null> => {
+// Reverse geocode a point to get its postal code
+const reverseGeocodeWithNominatim = async (point: {lat: number, lng: number}): Promise<string | null> => {
   try {
-    const token = MAPBOX_CONFIG.ACCESS_TOKEN
-    // Mapbox reverse geocoding uses lng,lat format
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${point.lng},${point.lat}.json?access_token=${token}&country=ca&limit=1`
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${point.lat}&lon=${point.lng}&format=json&zoom=18&addressdetails=1`
     
-    const response = await fetch(url)
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Pinz Map App - pinz.app'
+      }
+    })
     
-    if (!response.ok) {
-      console.warn(`Mapbox reverse geocoding failed: ${response.status}`)
-      return null
-    }
+    if (!response.ok) return null
     
     const data = await response.json()
-    
-    if (data.features && data.features.length > 0) {
-      const feature = data.features[0]
-      // Extract postal code from context
-      const context = feature.context || []
-      for (const ctx of context) {
-        if (ctx.id && ctx.id.includes('postcode')) {
-          return ctx.text || null
-        }
-      }
-      
-      // Fallback: check in address components
-      if (feature.properties && feature.properties.address) {
-        return feature.properties.address
-      }
-    }
-    
-    return null
+    return data.address?.postcode || null
   } catch (error) {
-    console.warn('Mapbox reverse geocoding failed:', error)
+    console.warn('Reverse geocoding failed:', error)
     return null
   }
 }
@@ -493,141 +475,63 @@ export const findBoundaryWithReverseGeocoding = async (
     onProgress?.(2, 10, 'Detecting boundaries...')
     
     // Step 2: Find boundary points in multiple directions
-    const numDirections = 5 // 5 directions creates a 5-point polygon
+    const numDirections = 5 // 5 directions for efficient boundary detection
     const stepDegrees = 360 / numDirections
     const boundaryPoints: Array<{lat: number, lng: number}> = []
     
     for (let i = 0; i < numDirections; i++) {
       const bearing = i * stepDegrees
       let boundaryFound = false
-      let lastInBoundsDistance = 0
       
-      // Adaptive incremental search: start small, increase step size as we go further
-      const smallSteps = [200, 500] // Initial small steps
-      const mediumSteps = [1000, 1500, 2000] // Medium steps
-      const largeSteps = [3000, 5000, 7500, 10000] // Large steps
+      // Exponential distance increments: 50m, 100m, 200m, 400m, 800m, 1600m, 3200m, 6400m
+      // This catches both small urban postal codes and large rural ones
+      const distances: number[] = []
       
-      let currentIndex = 0
+      // Start at 50m, then 100m, then exponential growth
+      distances.push(50)
+      distances.push(100)
+      for (let d = 200; d <= 6400; d *= 2) {
+        distances.push(d)
+      }
       
-      // Start with small steps
-      while (currentIndex < smallSteps.length) {
-        const distance = smallSteps[currentIndex]
+      for (let j = 0; j < distances.length; j++) {
+        const distance = distances[j]
         const testPoint = calculatePointAtDistance(center, distance, bearing)
-        console.log(`🔍 Testing point at ${(distance/1000).toFixed(1)}km in direction ${i + 1}`)
-        const postalCode = await reverseGeocodeWithMapbox(testPoint)
-        console.log(`📍 Postal code at ${(distance/1000).toFixed(1)}km: ${postalCode || 'none'}`)
+        const postalCode = await reverseGeocodeWithNominatim(testPoint)
         
+        // Check if postal code matches
         const stillInBounds = type === 'postal_code' 
           ? postalCode && postalCode.toUpperCase().replace(/\s+/g, '') === input.toUpperCase().replace(/\s+/g, '')
           : postalCode
         
-        if (stillInBounds) {
-          lastInBoundsDistance = distance
-          currentIndex++
-        } else {
-          // Found difference! Record boundary
-          console.log(`❌ Different postal code found at ${(distance/1000).toFixed(1)}km: ${postalCode} vs ${input}`)
-          
-          let boundaryDistance: number
-          if (lastInBoundsDistance > 0) {
-            // We had at least one in-bounds point, use that distance
-            boundaryDistance = lastInBoundsDistance
-          } else {
-            // First test was already out of bounds - postal code area is smaller than our first test
-            // Use a reasonable default (500m) for very dense urban postal codes
-            boundaryDistance = 500
-            console.log(`⚠️ Postal code area is very small, using 500m boundary`)
-          }
-          
+        // If we find a different postal code, boundary is between previous and current distance
+        if (!stillInBounds && j > 0) {
+          // Found boundary! Use a point between the last in-bounds and first out-of-bounds
+          const prevDistance = distances[j - 1]
+          const boundaryDistance = prevDistance + (distance - prevDistance) / 2
           const boundaryPoint = calculatePointAtDistance(center, boundaryDistance, bearing)
           boundaryPoints.push(boundaryPoint)
-          const km = (boundaryDistance / 1000).toFixed(2)
-          console.log(`✅ Boundary found at ${km}km in direction ${i + 1}`)
-          const progress = 2 + Math.floor((i + 1) / numDirections * 7)
-          onProgress?.(progress, 10, `Direction ${i + 1}/5: Boundary at ${km}km`)
+          console.log(`✅ Boundary point ${i + 1}/${numDirections} found between ${prevDistance}m and ${distance}m`)
           boundaryFound = true
           break
         }
         
+        // Add delay to respect rate limits
         await new Promise(resolve => setTimeout(resolve, 100))
       }
       
-      // If still in bounds after small steps, try medium steps
+      // If no boundary found in reasonable distance, estimate based on urban/suburban density
       if (!boundaryFound) {
-        for (let j = 0; j < mediumSteps.length; j++) {
-          const distance = mediumSteps[j]
-          const testPoint = calculatePointAtDistance(center, distance, bearing)
-          const postalCode = await reverseGeocodeWithMapbox(testPoint)
-          
-          const stillInBounds = type === 'postal_code' 
-            ? postalCode && postalCode.toUpperCase().replace(/\s+/g, '') === input.toUpperCase().replace(/\s+/g, '')
-            : postalCode
-          
-          if (stillInBounds) {
-            lastInBoundsDistance = distance
-          } else {
-            // Found difference!
-            console.log(`❌ Different postal code found at ${(distance/1000).toFixed(1)}km: ${postalCode} vs ${input}`)
-            
-            const boundaryDistance = lastInBoundsDistance > 0 ? lastInBoundsDistance : 500
-            const boundaryPoint = calculatePointAtDistance(center, boundaryDistance, bearing)
-            boundaryPoints.push(boundaryPoint)
-            const km = (boundaryDistance / 1000).toFixed(2)
-            console.log(`✅ Boundary found at ${km}km in direction ${i + 1}`)
-            const progress = 2 + Math.floor((i + 1) / numDirections * 7)
-            onProgress?.(progress, 10, `Direction ${i + 1}/5: Boundary at ${km}km`)
-            boundaryFound = true
-            break
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-      }
-      
-      // If still in bounds, try large steps
-      if (!boundaryFound) {
-        for (let j = 0; j < largeSteps.length; j++) {
-          const distance = largeSteps[j]
-          const testPoint = calculatePointAtDistance(center, distance, bearing)
-          const postalCode = await reverseGeocodeWithMapbox(testPoint)
-          
-          const stillInBounds = type === 'postal_code' 
-            ? postalCode && postalCode.toUpperCase().replace(/\s+/g, '') === input.toUpperCase().replace(/\s+/g, '')
-            : postalCode
-          
-          if (stillInBounds) {
-            lastInBoundsDistance = distance
-          } else {
-            // Found difference!
-            console.log(`❌ Different postal code found at ${(distance/1000).toFixed(1)}km: ${postalCode} vs ${input}`)
-            
-            const boundaryDistance = lastInBoundsDistance > 0 ? lastInBoundsDistance : 1000
-            const boundaryPoint = calculatePointAtDistance(center, boundaryDistance, bearing)
-            boundaryPoints.push(boundaryPoint)
-            const km = (boundaryDistance / 1000).toFixed(2)
-            console.log(`✅ Boundary found at ${km}km in direction ${i + 1}`)
-            const progress = 2 + Math.floor((i + 1) / numDirections * 7)
-            onProgress?.(progress, 10, `Direction ${i + 1}/5: Boundary at ${km}km`)
-            boundaryFound = true
-            break
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-      }
-      
-      // If no boundary found after all steps, use max distance
-      if (!boundaryFound) {
-        const boundaryPoint = calculatePointAtDistance(center, 10000, bearing)
+        // Use a default distance based on postal code type
+        const defaultDistance = type === 'postal_code' ? 2000 : 5000
+        const boundaryPoint = calculatePointAtDistance(center, defaultDistance, bearing)
         boundaryPoints.push(boundaryPoint)
-        console.log(`ℹ️ Using max distance 10km for direction ${i + 1}`)
-        const progress = 2 + Math.floor((i + 1) / numDirections * 7)
-        onProgress?.(progress, 10, `Direction ${i + 1}/5: Using max distance`)
+        console.log(`ℹ️ No boundary found in direction ${i + 1}, using default distance ${defaultDistance}m`)
       }
       
-      // Report progress for each direction
+      // Report progress every direction
       const progress = 2 + Math.floor((i + 1) / numDirections * 7)
-      onProgress?.(progress, 10, `Direction ${i + 1}/5 complete`)
+      onProgress?.(progress, 10, `Checked ${i + 1}/${numDirections} directions`)
     }
     
     console.log('✅ Found', boundaryPoints.length, 'boundary points')
