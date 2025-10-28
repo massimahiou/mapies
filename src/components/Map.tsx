@@ -78,7 +78,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   const tileLayerRef = useRef<L.TileLayer | null>(null)
   const drawControlRef = useRef<L.Control.Draw | null>(null)
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null)
-  // polygonLayersRef removed - now managed by usePolygonLoader hook
+  const polygonLayersRef = useRef<L.Layer[]>([])
   const [mapLoaded, setMapLoaded] = useState(false)
   const [showPolygonModal, setShowPolygonModal] = useState(false)
   const [pendingPolygonData, setPendingPolygonData] = useState<{type: string, coords: any} | null>(null)
@@ -305,20 +305,28 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   }
 
 
-  // Initialize map - only once, but check container
+  // Initialize map
   useEffect(() => {
-    if (!mapRef.current) {
-      console.log('Map ref not ready yet')
-      return
-    }
-    
-    // Don't recreate if already exists and container matches
-    if (mapInstance.current && mapInstance.current.getContainer() === mapRef.current) {
-      console.log('Map already initialized on correct container')
-      return
+    if (!mapRef.current) return
+
+    // Clean up existing map instance if it exists
+    if (mapInstance.current) {
+      console.log('Cleaning up existing map instance')
+      
+      // Clear polygon layers
+      polygonLayersRef.current.forEach(layer => {
+        if (mapInstance.current && mapInstance.current.hasLayer(layer)) {
+          mapInstance.current.removeLayer(layer)
+        }
+      })
+      polygonLayersRef.current = []
+      
+      mapInstance.current.remove()
+      mapInstance.current = null
+      setMapLoaded(false)
     }
 
-    console.log('Initializing Leaflet map')
+    console.log('Initializing Leaflet map...', 'isPublishMode:', isPublishMode)
     
     mapInstance.current = L.map(mapRef.current, {
       center: [45.5017, -73.5673],
@@ -433,7 +441,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
         }
       }
     })
-  }, []) // Only initialize once on mount, don't recreate on tab switches
+  }, [isPublishMode])
 
   // Update cluster group when mapSettings change
   useEffect(() => {
@@ -925,15 +933,6 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
 
   console.log('Map component rendering, markers:', markers, 'mapLoaded:', mapLoaded, 'userLocation:', userLocation)
   console.log('Debug - isMobile:', isMobile, 'showEmbedMobileResults:', showEmbedMobileResults)
-  
-  // Force map resize when switching modes
-  useEffect(() => {
-    if (mapInstance.current && mapLoaded) {
-      setTimeout(() => {
-        mapInstance.current?.invalidateSize()
-      }, 100)
-    }
-  }, [isPublishMode, mapLoaded])
 
   // Handle polygon modal submission
   const handlePolygonSubmit = async (polygonProps: any) => {
@@ -1038,28 +1037,6 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
           onUpgrade={onOpenSubscription}
         />
       )}
-      
-      {/* Map container - always rendered */}
-      <div className="relative" style={{ height: '100%', width: '100%' }}>
-        <div 
-          ref={mapRef} 
-          style={{ height: '100%', width: '100%', zIndex: 1 }} 
-          className="relative"
-        />
-        
-        {/* Interactive Watermark - Only show if required by subscription */}
-        {showWatermark && !isPublishMode && (
-          <InteractiveWatermark 
-            mode="dashboard"
-            onUpgrade={onOpenSubscription}
-          />
-        )}
-        {showWatermark && isPublishMode && (
-          <InteractiveWatermark 
-            mode="static"
-          />
-        )}
-      </div>
       
       {isPublishMode ? (
         // Embed preview mode - full page resizable container
@@ -1247,9 +1224,26 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                   />
                 </div>
                 
-                {/* Map - container already rendered above */}
+                {/* Map */}
                 <div className="flex-1 relative">
-                  {/* Mobile Search Bar - Always show in embed preview */}
+                  <div 
+                    ref={mapRef} 
+                    style={{ 
+                      height: '100%', 
+                      width: '100%', 
+                      zIndex: 1 
+                    }} 
+                    className="relative"
+                  >
+                    {/* Interactive Watermark - Only show if required by subscription */}
+                    {showWatermark && (
+                      <InteractiveWatermark 
+                        mode="static"
+                      />
+                    )}
+                  </div>
+                  
+              {/* Mobile Search Bar - Always show in embed preview */}
               <div className="absolute top-2 left-2 right-2 z-[1000]">
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -1298,7 +1292,15 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       ) : (
         // Regular dashboard mode - use existing layout
         <>
-          {/* Map container already rendered above */}
+          <div ref={mapRef} style={{ height: '100%', width: '100%', zIndex: 1 }} className="relative">
+            {/* Interactive Watermark - Only show if required by subscription */}
+            {showWatermark && (
+              <InteractiveWatermark 
+                mode="dashboard"
+                onUpgrade={onOpenSubscription}
+              />
+            )}
+          </div>
           {isLoadingTiles && (
             <div className="absolute top-4 right-4 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center gap-2 z-10">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>

@@ -72,11 +72,11 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     smartGrouping: true,
     customizationLevel: 'premium',
     maxStorageMB: 500,
-    price: 36,
+    price: 32,
     name: 'Professional',
     description: 'Most popular choice',
     popular: true,
-    stripePriceId: 'price_1SMJpQQ5zKkScSt2Eiyl95Pq',
+    stripePriceId: 'price_1SNFHCQ5zKkScSt2TXqfUckW',
     trialDays: 14
   },
   enterprise: {

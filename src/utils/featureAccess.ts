@@ -104,6 +104,14 @@ export const getFeatureAccess = (userDocument: UserDocument | null) => {
 }
 
 /**
+ * Check if user is on enterprise plan
+ */
+export const isEnterprisePlan = (userDocument: UserDocument | null): boolean => {
+  const plan = userDocument?.subscription?.plan || 'freemium'
+  return plan === 'enterprise'
+}
+
+/**
  * Debug function to log user's actual limits vs plan defaults
  */
 export const debugUserLimits = (userDocument: UserDocument | null) => {

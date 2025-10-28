@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react'
-import { Plus, Upload, Maximize2, Shapes } from 'lucide-react'
+import { Plus, Upload, Maximize2, Shapes, MapPin } from 'lucide-react'
 import { useFeatureAccess } from '../../hooks/useFeatureAccess'
-import { canUserPerformAction, debugUserLimits } from '../../utils/featureAccess'
+import { canUserPerformAction, debugUserLimits, isEnterprisePlan } from '../../utils/featureAccess'
 import { useAuth } from '../../contexts/AuthContext'
 import CityPolygonModal from '../CityPolygonModal'
 
@@ -9,7 +9,8 @@ interface DataTabContentProps {
   onShowAddMarkerModal: () => void
   onShowCsvModal: () => void
   onShowPolygonModal?: () => void
-  onGenerateCityPolygon?: (coordinates: Array<{lat: number, lng: number}>, name: string) => void
+  onGenerateCityPolygon?: (postalCodes: string[]) => void
+  onSavePolygon?: (coordinates: Array<{lat: number, lng: number}>, name: string) => void
   isUploading?: boolean
   uploadProgress?: { processed: number; total: number; currentAddress: string }
   onOpenModal?: () => void
@@ -21,7 +22,7 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
   onShowAddMarkerModal,
   onShowCsvModal,
   onShowPolygonModal,
-  onGenerateCityPolygon,
+  onSavePolygon,
   isUploading = false,
   uploadProgress = { processed: 0, total: 0, currentAddress: '' },
   onOpenModal,
@@ -40,6 +41,18 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
   
   // Check specific feature access
   const canUseGeocoding = canUserPerformAction(userDocument, 'useGeocoding')
+  
+  // Check if user is on enterprise plan
+  const isEnterprise = isEnterprisePlan(userDocument)
+  
+  // Handle city polygon generation - save polygon directly from modal
+  const handleCityPolygonSubmit = async (coordinates: Array<{lat: number, lng: number}>, name: string) => {
+    console.log('🔷 Received polygon data from modal:', { name, coordCount: coordinates.length })
+    
+    if (onSavePolygon && coordinates.length > 0) {
+      await onSavePolygon(coordinates, name)
+    }
+  }
   
   // Calculate markers remaining
   const markersRemaining = Math.max(0, planLimits.maxMarkersPerMap - currentMarkerCount)
@@ -137,26 +150,63 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
         </button>
         <button
           onClick={() => {
-            console.log('🔷 Draw Region button clicked, calling onShowPolygonModal')
-            onShowPolygonModal?.()
-            console.log('🔷 onShowPolygonModal called, handler exists:', !!onShowPolygonModal)
+            if (isEnterprise) {
+              console.log('🔷 Draw Region button clicked, calling onShowPolygonModal')
+              onShowPolygonModal?.()
+              console.log('🔷 onShowPolygonModal called, handler exists:', !!onShowPolygonModal)
+            }
           }}
-          className="w-full flex items-center gap-2 btn-secondary"
-          title="Draw regions/zones on your map"
+          className={`w-full flex items-center gap-2 ${
+            isEnterprise
+              ? 'btn-secondary'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200'
+          }`}
+          title={
+            isEnterprise
+              ? 'Draw regions/zones on your map'
+              : 'Upgrade to Enterprise plan to access this feature'
+          }
         >
           <Shapes className="w-4 h-4" />
           Draw a Region
+          {!isEnterprise && (
+            <span className="ml-auto text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
+              Enterprise
+            </span>
+          )}
         </button>
         <button
-          onClick={() => setShowCityPolygonModal(true)}
-          className="w-full flex items-center gap-2 btn-secondary"
-          title="Generate polygon from city or postal code automatically"
+          onClick={() => {
+            if (isEnterprise) {
+              setShowCityPolygonModal(true)
+            }
+          }}
+          className={`w-full flex items-center gap-2 ${
+            isEnterprise 
+              ? 'btn-secondary' 
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200'
+          }`}
+          title={
+            isEnterprise 
+              ? 'Generate city polygons from postal codes (Enterprise only)' 
+              : 'Upgrade to Enterprise plan to access this feature'
+          }
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Generate by City/Postal Code
+          <MapPin className="w-4 h-4" />
+          Generate City Polygon
+          {!isEnterprise && (
+            <span className="ml-auto text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
+              Enterprise
+            </span>
+          )}
         </button>
+        
+        {/* City Polygon Modal */}
+        <CityPolygonModal
+          isOpen={showCityPolygonModal}
+          onClose={() => setShowCityPolygonModal(false)}
+          onSubmit={handleCityPolygonSubmit}
+        />
         
         {/* Upload Progress Bar */}
         {isUploading && (
@@ -196,7 +246,7 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
         </p>
         
         {/* Drawing Tools */}
-        {onShowPolygonModal && (
+        {onShowPolygonModal && isEnterprise && (
           <div className="space-y-2">
             <p className="text-sm font-medium text-gray-700">Drawing Tools:</p>
             <div className="space-y-2">
@@ -260,39 +310,11 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
                   </svg>
                   Line
                 </button>
-                <button
-                  onClick={() => {
-                    console.log('Generate from City/Postal Code button clicked')
-                    alert('City/Postal code polygon generation coming soon!')
-                  }}
-                  className="flex items-center gap-2 px-3 py-2 text-xs bg-blue-50 border border-blue-300 text-blue-700 rounded hover:bg-blue-100 transition-colors col-span-2"
-                  title="Generate polygon from city or postal code automatically"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Generate by City/Postal Code
-                </button>
               </div>
             </div>
           </div>
         )}
       </div>
-      
-      {/* City/Postal Code Polygon Modal */}
-      <CityPolygonModal
-        isOpen={showCityPolygonModal}
-        onClose={() => setShowCityPolygonModal(false)}
-        onSubmit={(coordinates, name) => {
-          console.log('🔷 DataTabContent onSubmit wrapper called:', { coordsCount: coordinates.length, name, hasHandler: !!onGenerateCityPolygon })
-          if (onGenerateCityPolygon) {
-            console.log('🔷 Calling onGenerateCityPolygon from DataTabContent')
-            onGenerateCityPolygon(coordinates, name)
-          } else {
-            console.error('❌ onGenerateCityPolygon is undefined in DataTabContent!')
-          }
-        }}
-      />
     </div>
   )
 }

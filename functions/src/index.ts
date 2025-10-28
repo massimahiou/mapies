@@ -7,6 +7,7 @@ import { SubscriptionManager } from './stripe/subscriptionManager';
 import { CustomerManager } from './stripe/customerManager';
 import { createCheckoutSession, createCustomerPortalSession, testCustomerPortal } from './checkout';
 import { fixUserLimits } from './fixUserLimits';
+import { syncUserSubscription } from './syncSubscription';
 
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
@@ -332,3 +333,4 @@ export { createCheckoutSession, createCustomerPortalSession, testCustomerPortal 
 export { fixUserLimits };
 export { listPrices } from './listPrices';
 export { cancelSubscription } from './cancelSubscription';
+export { syncUserSubscription };

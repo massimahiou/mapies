@@ -21,9 +21,9 @@ import { debugFirebase, testFirebaseConnection } from './firebase/debug'
 import { validateCoordinates, logSecurityViolation } from './utils/coordinateValidation'
 import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from './utils/freemiumDefaults'
 import { useBeforeUnload } from './hooks/useBeforeUnload'
-import Toast from './components/Toast'
 import { testFirebaseAuth } from './firebase/test-auth'
-import { addMarkerToMap, MapDocument, getMapMarkers, deleteMapMarker, updateMapMarker, updateMap, subscribeToMapMarkers, subscribeToUserMaps, subscribeToMapDocument, getSharedMaps } from './firebase/maps'
+import { addMarkerToMap, MapDocument, getMapMarkers, deleteMapMarker, updateMapMarker, updateMap, subscribeToMapMarkers, subscribeToUserMaps, subscribeToMapDocument, getSharedMaps, addPolygonToMap } from './firebase/maps'
+import { useToast } from './contexts/ToastContext'
 import { checkForDuplicates, checkForInternalDuplicates, AddressData } from './utils/duplicateDetection'
 import DuplicateNotification from './components/DuplicateNotification'
 import SubscriptionManagementModal from './components/SubscriptionManagementModal'
@@ -45,6 +45,7 @@ const mockMarkers: Marker[] = []
 
 const AppContent: React.FC = () => {
   const { user, loading, signOut, userDocument } = useAuth()
+  const { showToast } = useToast()
 
   // Handle sign out
   const handleSignOut = async () => {
@@ -62,10 +63,11 @@ const AppContent: React.FC = () => {
   
   // Warning for page leave during upload
   const showWarningToast = () => {
-    setToastType('warning')
-    setToastTitle('Upload in Progress')
-    setToastMessage('Please wait for the upload to complete before leaving the page.')
-    setShowToast(true)
+    showToast({
+      type: 'warning',
+      title: 'Upload in Progress',
+      message: 'Please wait for the upload to complete before leaving the page.'
+    })
   }
 
   useBeforeUnload({ 
@@ -77,10 +79,6 @@ const AppContent: React.FC = () => {
   const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 })
   const [uploadProgress, setUploadProgress] = useState({ processed: 0, total: 0, currentAddress: '' })
   const [showAddMarkerModal, setShowAddMarkerModal] = useState(false)
-  const [showToast, setShowToast] = useState(false)
-  const [toastType, setToastType] = useState<'warning' | 'success' | 'error' | 'info'>('warning')
-  const [toastTitle, setToastTitle] = useState('')
-  const [toastMessage, setToastMessage] = useState('')
   const [showPublishModal, setShowPublishModal] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showMarkerManagementModal, setShowMarkerManagementModal] = useState(false)
@@ -191,50 +189,6 @@ const AppContent: React.FC = () => {
     }
   }
 
-  const handleGenerateCityPolygon = async (coordinates: Array<{lat: number, lng: number}>, name: string) => {
-    console.log('🔷 handleGenerateCityPolygon called:', { name, coordinatesCount: coordinates.length, user: !!user, currentMapId })
-    
-    if (!user || !currentMapId) {
-      console.error('❌ Missing user or mapId')
-      alert('Please select a map first')
-      return
-    }
-    
-    if (coordinates.length === 0) {
-      console.error('❌ No coordinates generated')
-      alert('Failed to generate boundary. Please try again.')
-      return
-    }
-    
-    setShowDataManagementModal(false)
-    console.log('Generated polygon:', name, coordinates.length, 'points')
-    
-    try {
-      // Save polygon to Firestore
-      const { addPolygonToMap } = await import('./firebase/maps')
-      const polygonData = {
-        name: name,
-        description: `Boundary for ${name}`,
-        type: 'polygon' as const,
-        coordinates: coordinates,
-        fillColor: '#3B82F6',
-        fillOpacity: 0.3,
-        strokeColor: '#3B82F6',
-        strokeWeight: 2,
-        strokeOpacity: 1.0,
-        visible: true
-      }
-      
-      console.log('🔷 Saving polygon to Firestore:', polygonData)
-      const polygonId = await addPolygonToMap(user.uid, currentMapId, polygonData)
-      console.log('✅ Polygon saved successfully with ID:', polygonId)
-      alert(`✅ Successfully created boundary for ${name}!`)
-    } catch (error) {
-      console.error('❌ Error saving polygon:', error)
-      alert(`Error saving polygon: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    }
-  }
-
   const handleMarkersAdded = (newMarkers: Marker[]) => {
     setMarkers(prev => {
       // Filter out any markers that already exist (by ID or by coordinates)
@@ -264,6 +218,137 @@ const AppContent: React.FC = () => {
       
       return [...prev, ...uniqueNewMarkers]
     })
+  }
+
+  // Generate city polygons from postal codes (Enterprise only)
+  const handleGenerateCityPolygon = async (postalCodes: string[]) => {
+    if (!user || !currentMapId) {
+      console.error('No user or map selected')
+      return
+    }
+
+    try {
+      console.log('🗺️ Generating city polygons for postal codes:', postalCodes)
+      
+      // For each postal code, get coordinates using OpenStreetMap Nominatim
+      for (const postalCode of postalCodes) {
+        const cleanedCode = postalCode.trim()
+        console.log(`🌍 Processing postal code: ${cleanedCode}`)
+        
+        try {
+          // Use Nominatim to get boundary for postal code
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(cleanedCode)}&format=json&polygon_geojson=1&limit=1&addressdetails=1`
+          )
+          
+          if (!response.ok) {
+            console.error(`Failed to fetch boundary for ${cleanedCode}`)
+            continue
+          }
+          
+          const data = await response.json()
+          
+          if (data && data.length > 0) {
+            const item = data[0]
+            const geoJson = item.geojson
+            const cityName = item.address?.city || item.address?.town || item.address?.village || cleanedCode
+            
+            console.log(`✅ Found boundary for ${cleanedCode} (${cityName})`, geoJson)
+            
+            // Extract coordinates from GeoJSON
+            let coordinates: Array<{lat: number, lng: number}> = []
+            
+            if (geoJson && geoJson.type === 'Polygon' && geoJson.coordinates) {
+              coordinates = geoJson.coordinates[0].map((coord: [number, number]) => ({
+                lat: coord[1],
+                lng: coord[0]
+              }))
+            } else if (item.boundingbox) {
+              // Fallback to bounding box if no polygon
+              const [south, north, west, east] = item.boundingbox.map(parseFloat)
+              coordinates = [
+                { lat: south, lng: west },
+                { lat: north, lng: west },
+                { lat: north, lng: east },
+                { lat: south, lng: east },
+                { lat: south, lng: west }
+              ]
+            }
+            
+            if (coordinates.length > 0) {
+              // Save as polygon to Firestore
+              await addPolygonToMap(user.uid, currentMapId, {
+                name: cityName,
+                description: `Auto-generated boundary for postal code ${cleanedCode}`,
+                type: 'polygon',
+                coordinates,
+                fillColor: '#3B82F6',
+                fillOpacity: 0.2,
+                strokeColor: '#2563EB',
+                strokeWeight: 2,
+                strokeOpacity: 1,
+                visible: true
+              })
+              
+              console.log(`✅ Saved polygon for ${cleanedCode}`)
+            }
+          }
+        } catch (error) {
+          console.error(`Error processing postal code ${cleanedCode}:`, error)
+        }
+        
+        // Small delay to respect Nominatim usage policy
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+      
+      console.log('✅ City polygon generation complete')
+    } catch (error) {
+      console.error('Error generating city polygons:', error)
+    }
+  }
+
+  // Save polygon directly from CityPolygonModal
+  const handleSavePolygon = async (coordinates: Array<{lat: number, lng: number}>, name: string) => {
+    if (!user || !currentMapId) {
+      console.error('No user or map selected')
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'No user or map selected'
+      })
+      return
+    }
+
+    try {
+      console.log('🔷 Saving polygon:', { name, coordCount: coordinates.length })
+      
+      await addPolygonToMap(user.uid, currentMapId, {
+        name,
+        description: `Auto-generated boundary for ${name}`,
+        type: 'polygon',
+        coordinates,
+        fillColor: '#3B82F6',
+        fillOpacity: 0.2,
+        strokeColor: '#2563EB',
+        strokeWeight: 2,
+        strokeOpacity: 1,
+        visible: true
+      })
+      
+      console.log('✅ Polygon saved successfully')
+      showToast({
+        type: 'success',
+        title: 'Success!',
+        message: `Region "${name}" added to your map successfully`
+      })
+    } catch (error) {
+      console.error('Error saving polygon:', error)
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to add region to map'
+      })
+    }
   }
 
   const handleShowDuplicateNotification = (duplicateCount: number, totalProcessed: number) => {
@@ -1226,12 +1311,13 @@ const AppContent: React.FC = () => {
         }}
         onShowAddMarkerModal={() => setShowAddMarkerModal(true)}
         onShowPolygonModal={() => setShowPolygonDrawing(true)}
+        onGenerateCityPolygon={handleGenerateCityPolygon}
+        onSavePolygon={handleSavePolygon}
         onShowPublishModal={() => setShowPublishModal(true)}
         onOpenMarkerManagementModal={() => setShowMarkerManagementModal(true)}
         onOpenDataManagementModal={() => setShowDataManagementModal(true)}
         onOpenEditManagementModal={() => setShowEditManagementModal(true)}
         onOpenPublishManagementModal={() => setShowPublishManagementModal(true)}
-        onGenerateCityPolygon={handleGenerateCityPolygon}
         mapSettings={mapSettings}
         onMapSettingsChange={handleMapSettingsChange}
         currentMapId={currentMapId}
@@ -1336,7 +1422,6 @@ const AppContent: React.FC = () => {
          onShowAddMarkerModal={() => setShowAddMarkerModal(true)}
          onShowCsvModal={() => setCsvModalOpen(true)}
          onShowPolygonModal={() => setShowPolygonDrawing(true)}
-         onGenerateCityPolygon={handleGenerateCityPolygon}
          isUploading={isUploading}
          uploadProgress={uploadProgress}
        />
@@ -1366,15 +1451,6 @@ const AppContent: React.FC = () => {
          type={notificationType}
        />
 
-       {/* Toast Notification */}
-       <Toast
-         isVisible={showToast}
-         onClose={() => setShowToast(false)}
-         type={toastType}
-         title={toastTitle}
-         message={toastMessage}
-         duration={5000}
-       />
 
        {/* Subscription Management Modal */}
        {showSubscriptionModal && (

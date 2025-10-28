@@ -33,12 +33,13 @@ interface SidebarProps {
   onShowCsvModal: () => void
   onShowAddMarkerModal: () => void
   onShowPolygonModal?: () => void
+  onGenerateCityPolygon?: (postalCodes: string[]) => void
+  onSavePolygon?: (coordinates: Array<{lat: number, lng: number}>, name: string) => void
   onShowPublishModal: () => void
   onOpenMarkerManagementModal: () => void
   onOpenDataManagementModal: () => void
   onOpenEditManagementModal: () => void
   onOpenPublishManagementModal: () => void
-  onGenerateCityPolygon?: (coordinates: Array<{lat: number, lng: number}>, name: string) => void
   mapSettings: any
   onMapSettingsChange: (settings: any) => void
   currentMapId: string | null
@@ -62,12 +63,13 @@ const Sidebar: React.FC<SidebarProps> = ({
   onShowCsvModal,
   onShowAddMarkerModal,
   onShowPolygonModal,
+  onGenerateCityPolygon,
+  onSavePolygon,
   onShowPublishModal,
   onOpenMarkerManagementModal,
   onOpenDataManagementModal,
   onOpenEditManagementModal,
   onOpenPublishManagementModal,
-  onGenerateCityPolygon,
   mapSettings,
   onMapSettingsChange,
   currentMapId,
@@ -827,6 +829,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             onShowCsvModal={onShowCsvModal}
             onShowPolygonModal={onShowPolygonModal}
             onGenerateCityPolygon={onGenerateCityPolygon}
+            onSavePolygon={onSavePolygon}
             isUploading={isUploading}
             uploadProgress={uploadProgress}
             onOpenModal={onOpenDataManagementModal}

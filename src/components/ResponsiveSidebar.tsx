@@ -32,12 +32,13 @@ interface ResponsiveSidebarProps {
   onShowCsvModal: () => void
   onShowAddMarkerModal: () => void
   onShowPolygonModal?: () => void
+  onGenerateCityPolygon?: (postalCodes: string[]) => void
+  onSavePolygon?: (coordinates: Array<{lat: number, lng: number}>, name: string) => void
   onShowPublishModal: () => void
   onOpenMarkerManagementModal: () => void
   onOpenDataManagementModal: () => void
   onOpenEditManagementModal: () => void
   onOpenPublishManagementModal: () => void
-  onGenerateCityPolygon?: (coordinates: Array<{lat: number, lng: number}>, name: string) => void
   mapSettings: any
   onMapSettingsChange: (settings: any) => void
   currentMapId: string | null
@@ -93,6 +94,8 @@ const ResponsiveSidebar: React.FC<ResponsiveSidebarProps> = (props) => {
             <DataTabContent
               onShowAddMarkerModal={props.onShowAddMarkerModal}
               onShowCsvModal={props.onShowCsvModal}
+              onGenerateCityPolygon={props.onGenerateCityPolygon}
+              onSavePolygon={props.onSavePolygon}
               isUploading={props.isUploading}
               uploadProgress={props.uploadProgress}
               onOpenModal={props.onOpenDataManagementModal}

@@ -53,9 +53,9 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       hasPolygons: polygonLayersRef.current.size > 0
     })
 
-    // ALWAYS reload when instance or tab changes
-    if (instanceChanged || tabChanged || mapIdChanged) {
-      console.log('🔷 Force reload - clearing polygons')
+    // ALWAYS reload if instance changed (tab switch recreated map) or tab changed
+    if (instanceChanged || tabChanged) {
+      console.log('🔷 Force reload - instance or tab changed')
       polygonLayersRef.current.clear()
     }
 
@@ -66,30 +66,25 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
         console.log('🔷 Loaded polygons:', polygons.length, 'for map:', mapId)
 
         // If switching maps (not just tabs), remove old polygon layers
-        if (mapIdChanged && lastLoadedMapIdRef.current) {
+        if (mapIdChanged && lastLoadedMapIdRef.current && lastMapInstanceRef.current !== null) {
           console.log('🔷 Clearing old polygon layers from previous map')
-          const prevInstance = lastMapInstanceRef.current
-          if (prevInstance) {
-            polygonLayersRef.current.forEach((layer: L.Layer) => {
-              if (prevInstance.hasLayer(layer)) {
-                prevInstance.removeLayer(layer)
-              }
-            })
-          }
+          const previousInstance = lastMapInstanceRef.current
+          polygonLayersRef.current.forEach((layer: L.Layer) => {
+            if (previousInstance.hasLayer(layer)) {
+              previousInstance.removeLayer(layer)
+            }
+          })
         }
 
         // Render each polygon
         polygons.forEach((polygon: PolygonDocument) => {
           if (!polygon.visible || !mapInstance) return
 
-          // If instance or tab changed, always render new polygons
-          // Skip only if SAME instance/tab and polygon already rendered
-          if (!instanceChanged && !tabChanged) {
-            const existingLayer = polygonLayersRef.current.get(polygon.id || '')
-            if (existingLayer && mapInstance.hasLayer(existingLayer)) {
-              console.log('🔷 Polygon already on map:', polygon.id)
-              return  // Skip this polygon in forEach
-            }
+          // Check if already rendered on current map instance
+          const existingLayer = polygonLayersRef.current.get(polygon.id || '')
+          if (existingLayer && mapInstance.hasLayer(existingLayer)) {
+            console.log('🔷 Polygon already on map:', polygon.id)
+            return
           }
 
           let layer: L.Layer | null = null
@@ -144,10 +139,15 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       }
     }
 
-    // Only load if we have all required data - load immediately, no delay
+    // Only load if we have all required data
     if (mapInstance && userId && mapId) {
-      console.log('🔷 Loading polygons immediately')
-      loadPolygons()
+      // Add a small delay when instance changes to ensure map is fully initialized
+      if (instanceChanged) {
+        console.log('🔷 Delaying polygon load to ensure map is ready')
+        setTimeout(() => loadPolygons(), 100)
+      } else {
+        loadPolygons()
+      }
     }
   }, [mapLoaded, mapId, userId, mapInstance, activeTab])
   

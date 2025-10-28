@@ -93,11 +93,11 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
       prioritySupport: true      // Has priority support
     },
     customizationLevel: 'premium',
-    price: 36,
+    price: 32,
     name: 'Professional',
     description: 'Most popular choice',
     popular: true,
-    stripePriceId: 'price_1SLn1mQ5zKkScSt2ptUM9Lr0',
+    stripePriceId: 'price_1SNFHCQ5zKkScSt2TXqfUckW',
     trialDays: 14
   },
   enterprise: {
