@@ -526,14 +526,25 @@ export const findBoundaryWithReverseGeocoding = async (
           currentIndex++
         } else {
           // Found difference! Record boundary
+          console.log(`❌ Different postal code found at ${(distance/1000).toFixed(1)}km: ${postalCode} vs ${input}`)
+          
+          let boundaryDistance: number
           if (lastInBoundsDistance > 0) {
-            const boundaryPoint = calculatePointAtDistance(center, lastInBoundsDistance, bearing)
-            boundaryPoints.push(boundaryPoint)
-            const km = (lastInBoundsDistance / 1000).toFixed(1)
-            console.log(`✅ Boundary found at ${km}km in direction ${i + 1}`)
-            const progress = 2 + Math.floor((i + 1) / numDirections * 7)
-            onProgress?.(progress, 10, `Direction ${i + 1}/5: Boundary at ${km}km`)
+            // We had at least one in-bounds point, use that distance
+            boundaryDistance = lastInBoundsDistance
+          } else {
+            // First test was already out of bounds - postal code area is smaller than our first test
+            // Use a reasonable default (500m) for very dense urban postal codes
+            boundaryDistance = 500
+            console.log(`⚠️ Postal code area is very small, using 500m boundary`)
           }
+          
+          const boundaryPoint = calculatePointAtDistance(center, boundaryDistance, bearing)
+          boundaryPoints.push(boundaryPoint)
+          const km = (boundaryDistance / 1000).toFixed(2)
+          console.log(`✅ Boundary found at ${km}km in direction ${i + 1}`)
+          const progress = 2 + Math.floor((i + 1) / numDirections * 7)
+          onProgress?.(progress, 10, `Direction ${i + 1}/5: Boundary at ${km}km`)
           boundaryFound = true
           break
         }
@@ -556,9 +567,12 @@ export const findBoundaryWithReverseGeocoding = async (
             lastInBoundsDistance = distance
           } else {
             // Found difference!
-            const boundaryPoint = calculatePointAtDistance(center, lastInBoundsDistance, bearing)
+            console.log(`❌ Different postal code found at ${(distance/1000).toFixed(1)}km: ${postalCode} vs ${input}`)
+            
+            const boundaryDistance = lastInBoundsDistance > 0 ? lastInBoundsDistance : 500
+            const boundaryPoint = calculatePointAtDistance(center, boundaryDistance, bearing)
             boundaryPoints.push(boundaryPoint)
-            const km = (lastInBoundsDistance / 1000).toFixed(1)
+            const km = (boundaryDistance / 1000).toFixed(2)
             console.log(`✅ Boundary found at ${km}km in direction ${i + 1}`)
             const progress = 2 + Math.floor((i + 1) / numDirections * 7)
             onProgress?.(progress, 10, `Direction ${i + 1}/5: Boundary at ${km}km`)
@@ -585,9 +599,12 @@ export const findBoundaryWithReverseGeocoding = async (
             lastInBoundsDistance = distance
           } else {
             // Found difference!
-            const boundaryPoint = calculatePointAtDistance(center, lastInBoundsDistance, bearing)
+            console.log(`❌ Different postal code found at ${(distance/1000).toFixed(1)}km: ${postalCode} vs ${input}`)
+            
+            const boundaryDistance = lastInBoundsDistance > 0 ? lastInBoundsDistance : 1000
+            const boundaryPoint = calculatePointAtDistance(center, boundaryDistance, bearing)
             boundaryPoints.push(boundaryPoint)
-            const km = (lastInBoundsDistance / 1000).toFixed(1)
+            const km = (boundaryDistance / 1000).toFixed(2)
             console.log(`✅ Boundary found at ${km}km in direction ${i + 1}`)
             const progress = 2 + Math.floor((i + 1) / numDirections * 7)
             onProgress?.(progress, 10, `Direction ${i + 1}/5: Boundary at ${km}km`)
