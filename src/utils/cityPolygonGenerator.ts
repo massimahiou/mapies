@@ -432,26 +432,27 @@ export const findBoundaryWithReverseGeocoding = async (
   try {
     console.log(`🔍 Finding boundary for ${type}:`, input)
     
-    // Step 1: Get center point
-    const searchQuery = type === 'city' 
-      ? `city=${encodeURIComponent(input)}&countrycodes=ca`
-      : `postalcode=${encodeURIComponent(input)}&countrycodes=ca`
+    // Step 1: Get center point using Mapbox (better geocoding)
+    onProgress?.(1, 10, 'Locating center point with Mapbox...')
     
-    const url = `https://nominatim.openstreetmap.org/search?${searchQuery}&format=json&limit=1`
+    const token = MAPBOX_CONFIG.ACCESS_TOKEN
+    const searchQuery = type === 'postal_code'
+      ? input.replace(/\s+/g, '') // Remove space for Mapbox
+      : input
     
-    onProgress?.(1, 10, 'Locating center point...')
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Pinz Map App - pinz.app'
-      }
-    })
+    const geocodeUrl = `${MAPBOX_CONFIG.GEOCODING_API_URL}/${encodeURIComponent(searchQuery)}.json?access_token=${token}&country=ca&limit=1`
     
-    if (!response.ok) {
-      throw new Error('Failed to locate postal code')
+    console.log('🗺️ Searching with Mapbox for:', searchQuery)
+    const geocodeResponse = await fetch(geocodeUrl)
+    
+    if (!geocodeResponse.ok) {
+      throw new Error('Mapbox geocoding failed')
     }
     
-    const data = await response.json()
-    if (data.length === 0) {
+    const geocodeData = await geocodeResponse.json()
+    console.log('📍 Mapbox results:', geocodeData)
+    
+    if (!geocodeData.features || geocodeData.features.length === 0) {
       return {
         success: false,
         type,
@@ -461,13 +462,15 @@ export const findBoundaryWithReverseGeocoding = async (
       }
     }
     
+    const feature = geocodeData.features[0]
     const center = {
-      lat: parseFloat(data[0].lat),
-      lng: parseFloat(data[0].lon)
+      lat: feature.geometry.coordinates[1],
+      lng: feature.geometry.coordinates[0]
     }
     
-    const placeName = data[0].display_name
-    console.log('✅ Center point found:', center)
+    const placeName = feature.place_name
+    console.log('✅ Center point found with Mapbox:', center)
+    console.log('📍 Place name:', placeName)
     
     onProgress?.(2, 10, 'Detecting boundaries...')
     
