@@ -3,7 +3,9 @@ import L from 'leaflet'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
-import { Navigation, MapPin, Search, X, List } from 'lucide-react'
+import 'leaflet-draw'
+import 'leaflet-draw/dist/leaflet.draw.css'
+import { Navigation, MapPin, Search, X, List, Shapes } from 'lucide-react'
 import { Rnd } from 'react-rnd'
 import PublicMapSidebar from './PublicMapSidebar'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
@@ -15,6 +17,8 @@ import { useAuth } from '../contexts/AuthContext'
 import InteractiveWatermark from './InteractiveWatermark'
 import { validateMapAgainstPlan, getPremiumFeatureDescription } from '../utils/mapValidation'
 import { isMapOwnedByUser } from '../firebase/maps'
+import PolygonPropertiesModal from './PolygonPropertiesModal'
+import { usePolygonLoader } from '../hooks/usePolygonLoader'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -56,9 +60,11 @@ interface MapProps {
   folderIcons?: Record<string, string>
   onOpenSubscription?: () => void // New prop for opening subscription modal
   currentMap?: any // Add current map data to determine ownership
+  showPolygonDrawing?: boolean // Enable polygon drawing mode
 }
 
-const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMode, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {}, onOpenSubscription, currentMap }) => {
+const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMode, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {}, onOpenSubscription, currentMap, showPolygonDrawing: _showPolygonDrawing }) => {
+  console.log('🔷 Map component rendered, showPolygonDrawing:', _showPolygonDrawing)
   const { isMobile } = useResponsive()
   const { showWatermark, planLimits, currentPlan, mapInheritance } = useSharedMapFeatureAccess(currentMap)
   const { user } = useAuth()
@@ -70,7 +76,12 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   const userLocationCircleRef = useRef<L.Circle | null>(null)
   const userLocationPulseRef = useRef<L.Circle | null>(null)
   const tileLayerRef = useRef<L.TileLayer | null>(null)
+  const drawControlRef = useRef<L.Control.Draw | null>(null)
+  const drawnItemsRef = useRef<L.FeatureGroup | null>(null)
+  // polygonLayersRef removed - now managed by usePolygonLoader hook
   const [mapLoaded, setMapLoaded] = useState(false)
+  const [showPolygonModal, setShowPolygonModal] = useState(false)
+  const [pendingPolygonData, setPendingPolygonData] = useState<{type: string, coords: any} | null>(null)
   const [isLoadingTiles, setIsLoadingTiles] = useState(false)
   const [showEmbedMobileResults, setShowEmbedMobileResults] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
@@ -79,6 +90,15 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   const [locationModeActive, setLocationModeActive] = useState(false)
   const [searchResults, setSearchResults] = useState<Marker[]>([])
   const [renamedMarkers] = useState<Record<string, string>>({})
+  
+  // Use the polygon loader hook for consistent polygon loading
+  usePolygonLoader({
+    mapInstance: mapInstance.current,
+    mapLoaded,
+    userId: user?.uid || '',
+    mapId: currentMap?.id || '',
+    activeTab
+  })
   
   const visibleMarkers = useMemo(() => 
     markers.filter(marker => marker.visible), 
@@ -285,19 +305,20 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   }
 
 
-  // Initialize map
+  // Initialize map - only once, but check container
   useEffect(() => {
-    if (!mapRef.current) return
-
-    // Clean up existing map instance if it exists
-    if (mapInstance.current) {
-      console.log('Cleaning up existing map instance')
-      mapInstance.current.remove()
-      mapInstance.current = null
-      setMapLoaded(false)
+    if (!mapRef.current) {
+      console.log('Map ref not ready yet')
+      return
+    }
+    
+    // Don't recreate if already exists and container matches
+    if (mapInstance.current && mapInstance.current.getContainer() === mapRef.current) {
+      console.log('Map already initialized on correct container')
+      return
     }
 
-    console.log('Initializing Leaflet map...', 'isPublishMode:', isPublishMode)
+    console.log('Initializing Leaflet map')
     
     mapInstance.current = L.map(mapRef.current, {
       center: [45.5017, -73.5673],
@@ -412,7 +433,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
         }
       }
     })
-  }, [isPublishMode])
+  }, []) // Only initialize once on mount, don't recreate on tab switches
 
   // Update cluster group when mapSettings change
   useEffect(() => {
@@ -742,6 +763,149 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     }
   }, [userLocation, mapLoaded])
 
+  // Polygon loading is now handled by the usePolygonLoader hook above
+
+  // Initialize Leaflet Draw for polygon drawing
+  useEffect(() => {
+    console.log('🔷 Polygon drawing useEffect:', {
+      mapInstance: !!mapInstance.current,
+      mapLoaded,
+      showPolygonDrawing: _showPolygonDrawing,
+      shouldInit: !!mapInstance.current && mapLoaded && _showPolygonDrawing
+    })
+    
+    if (!mapInstance.current || !mapLoaded || !_showPolygonDrawing) return
+    
+    console.log('🔷 Initializing Leaflet Draw controls...')
+
+    // Initialize draw control
+    if (!drawControlRef.current) {
+      drawnItemsRef.current = new L.FeatureGroup()
+      mapInstance.current.addLayer(drawnItemsRef.current)
+
+      const drawOptions: L.Control.DrawConstructorOptions = {
+        draw: {
+          polygon: {
+            allowIntersection: false,
+            showArea: true
+          },
+          rectangle: {},
+          circle: {},
+          marker: false,
+          polyline: false,
+          circlemarker: false
+        },
+        edit: {
+          featureGroup: drawnItemsRef.current!,
+          remove: false
+        }
+      }
+
+      drawControlRef.current = new L.Control.Draw(drawOptions)
+      mapInstance.current.addControl(drawControlRef.current)
+      console.log('🔷 Leaflet Draw control added to map')
+      
+      // Check and style the toolbar
+      setTimeout(function() {
+        const toolbar = document.querySelector('.leaflet-draw-toolbar')
+        if (toolbar) {
+          console.log('🔷 Draw toolbar found in DOM:', toolbar)
+          console.log('🔷 Draw toolbar classes:', toolbar.className)
+          console.log('🔷 Draw toolbar computed styles:', window.getComputedStyle(toolbar as Element))
+          
+          const htmlEl = toolbar as HTMLElement
+          htmlEl.style.display = 'block'
+          htmlEl.style.visibility = 'visible'
+          htmlEl.style.opacity = '1'
+          htmlEl.style.zIndex = '10000'
+          htmlEl.style.position = 'absolute'
+          htmlEl.style.top = '10px'
+          htmlEl.style.left = '20px'
+          console.log('🔷 Draw toolbar styled and should be visible')
+        } else {
+          console.log('⚠️ Draw toolbar NOT found in DOM')
+        }
+        
+        // Check for collapsed toolbar
+        const collapsed = document.querySelector('.leaflet-draw-toolbar.collapsed')
+        if (collapsed) {
+          console.log('🔷 Found collapsed toolbar, removing collapsed class')
+          collapsed.classList.remove('collapsed')
+        } else {
+          console.log('🔷 No collapsed class found on toolbar')
+        }
+        
+        // Force expand all sections and show all buttons
+        const sections = document.querySelectorAll('.leaflet-draw-toolbar')
+        console.log('🔷 Found', sections.length, 'toolbar sections')
+        sections.forEach((section: any) => {
+          section.classList.remove('leaflet-draw-toolbar-collapsed')
+          section.style.height = 'auto'
+          section.style.display = 'block'
+        })
+        
+        // Show ALL the action buttons
+        const allButtons = document.querySelectorAll('.leaflet-draw-toolbar a')
+        console.log('🔷 Found', allButtons.length, 'drawing buttons')
+        allButtons.forEach((button: any) => {
+          button.style.display = 'block'
+          button.style.visibility = 'visible'
+          button.style.opacity = '1'
+          button.style.pointerEvents = 'auto'
+        })
+        
+        console.log('🔷 All buttons should now be visible')
+      }, 500)
+    }
+
+    // Handle draw:created event
+    const handleDrawCreated = (e: any) => {
+      const { layerType, layer } = e
+
+      // Extract coordinates based on layer type
+      let coords: any = null
+      let type = 'polygon'
+
+      if (layerType === 'circle') {
+        const circle = layer as L.Circle
+        coords = circle
+        type = 'circle'
+      } else if (layerType === 'rectangle') {
+        const rect = layer as L.Rectangle
+        coords = rect
+        type = 'rectangle'
+      } else if (layerType === 'polygon') {
+        const polygon = layer as L.Polygon
+        coords = (polygon.getLatLngs()[0] as L.LatLng[])
+        type = 'polygon'
+      }
+
+      // Store the drawn layer and type
+      setPendingPolygonData({ type, coords })
+      setShowPolygonModal(true)
+
+      // Remove the drawn layer from the map (we'll add it back with saved styles)
+      if (drawnItemsRef.current) {
+        drawnItemsRef.current.removeLayer(layer)
+      }
+    }
+
+    mapInstance.current.on('draw:created', handleDrawCreated)
+
+    // Cleanup
+    return () => {
+      if (mapInstance.current && drawControlRef.current) {
+        mapInstance.current.off('draw:created', handleDrawCreated)
+        mapInstance.current.removeControl(drawControlRef.current)
+        drawControlRef.current = null
+        if (drawnItemsRef.current) {
+          mapInstance.current.removeLayer(drawnItemsRef.current)
+          drawnItemsRef.current = null
+        }
+      }
+    }
+  }, [mapLoaded, _showPolygonDrawing])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -761,9 +925,112 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
 
   console.log('Map component rendering, markers:', markers, 'mapLoaded:', mapLoaded, 'userLocation:', userLocation)
   console.log('Debug - isMobile:', isMobile, 'showEmbedMobileResults:', showEmbedMobileResults)
+  
+  // Force map resize when switching modes
+  useEffect(() => {
+    if (mapInstance.current && mapLoaded) {
+      setTimeout(() => {
+        mapInstance.current?.invalidateSize()
+      }, 100)
+    }
+  }, [isPublishMode, mapLoaded])
+
+  // Handle polygon modal submission
+  const handlePolygonSubmit = async (polygonProps: any) => {
+    if (!user || !currentMap || !pendingPolygonData) return
+
+    try {
+      // Extract coordinates based on the drawn layer type
+      let coordinates: number[][] = []
+      let center: { lat: number, lng: number } | undefined
+      let radius: number | undefined
+
+      if (pendingPolygonData.type === 'circle') {
+        const circle = pendingPolygonData.coords as L.Circle
+        center = { lat: circle.getLatLng().lat, lng: circle.getLatLng().lng }
+        radius = circle.getRadius()
+      } else if (pendingPolygonData.type === 'polygon') {
+        const latlngs = pendingPolygonData.coords as L.LatLng[]
+        coordinates = latlngs.map(latlng => [latlng.lat, latlng.lng])
+      } else if (pendingPolygonData.type === 'rectangle') {
+        const bounds = (pendingPolygonData.coords as L.Rectangle).getBounds()
+        coordinates = [
+          [bounds.getSouth(), bounds.getWest()],
+          [bounds.getNorth(), bounds.getWest()],
+          [bounds.getNorth(), bounds.getEast()],
+          [bounds.getSouth(), bounds.getEast()],
+          [bounds.getSouth(), bounds.getWest()]
+        ]
+      }
+
+      const polygonData: any = {
+        name: polygonProps.name,
+        description: polygonProps.description,
+        type: pendingPolygonData.type as 'polygon' | 'rectangle' | 'circle',
+        fillColor: polygonProps.fillColor,
+        fillOpacity: polygonProps.fillOpacity,
+        strokeColor: polygonProps.strokeColor,
+        strokeWeight: polygonProps.strokeWeight,
+        strokeOpacity: polygonProps.strokeOpacity,
+        visible: true,
+        category: polygonProps.category,
+        properties: polygonProps.properties
+      }
+      
+      // Only add coordinates if not empty (for polygons/rectangles)
+      // Convert nested array to array of objects for Firestore compatibility
+      if (coordinates.length > 0) {
+        polygonData.coordinates = coordinates.map((coord: number[]) => ({
+          lat: coord[0],
+          lng: coord[1]
+        }))
+      }
+      
+      // Only add center and radius for circles
+      if (center) {
+        polygonData.center = center
+      }
+      if (radius !== undefined) {
+        polygonData.radius = radius
+      }
+
+      // Import and call the save function
+      const { addPolygonToMap } = await import('../firebase/maps')
+      await addPolygonToMap(user.uid, currentMap.id, polygonData)
+      
+      setShowPolygonModal(false)
+      setPendingPolygonData(null)
+    } catch (error) {
+      console.error('Error saving polygon:', error)
+    }
+  }
 
   return (
     <div className={`flex-1 bg-gray-100 relative ${isPublishMode ? 'publish-mode overflow-visible' : ''}`}>
+      {/* Drawing Mode Banner */}
+      {_showPolygonDrawing && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-[10001] bg-pinz-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
+          <Shapes className="w-5 h-5" />
+          <div>
+            <p className="font-semibold text-sm">Drawing Mode Active</p>
+            <p className="text-xs opacity-90">Use the tools in the top-left corner to draw</p>
+          </div>
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              console.log('🔷 Canceling drawing mode from banner')
+              // Emit event or callback to parent to turn off drawing mode
+              window.dispatchEvent(new CustomEvent('cancelDrawingMode'))
+            }}
+            className="ml-4 text-white hover:text-pinz-200 transition-colors"
+            title="Cancel drawing"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+      
       {/* Map Feature Level Header - Only show for shared maps */}
       {mapInheritance && !isPublishMode && (
         <MapFeatureLevelHeader 
@@ -771,6 +1038,28 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
           onUpgrade={onOpenSubscription}
         />
       )}
+      
+      {/* Map container - always rendered */}
+      <div className="relative" style={{ height: '100%', width: '100%' }}>
+        <div 
+          ref={mapRef} 
+          style={{ height: '100%', width: '100%', zIndex: 1 }} 
+          className="relative"
+        />
+        
+        {/* Interactive Watermark - Only show if required by subscription */}
+        {showWatermark && !isPublishMode && (
+          <InteractiveWatermark 
+            mode="dashboard"
+            onUpgrade={onOpenSubscription}
+          />
+        )}
+        {showWatermark && isPublishMode && (
+          <InteractiveWatermark 
+            mode="static"
+          />
+        )}
+      </div>
       
       {isPublishMode ? (
         // Embed preview mode - full page resizable container
@@ -958,26 +1247,9 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                   />
                 </div>
                 
-                {/* Map */}
+                {/* Map - container already rendered above */}
                 <div className="flex-1 relative">
-                  <div 
-                    ref={mapRef} 
-                    style={{ 
-                      height: '100%', 
-                      width: '100%', 
-                      zIndex: 1 
-                    }} 
-                    className="relative"
-                  >
-                    {/* Interactive Watermark - Only show if required by subscription */}
-                    {showWatermark && (
-                      <InteractiveWatermark 
-                        mode="static"
-                      />
-                    )}
-                  </div>
-                  
-              {/* Mobile Search Bar - Always show in embed preview */}
+                  {/* Mobile Search Bar - Always show in embed preview */}
               <div className="absolute top-2 left-2 right-2 z-[1000]">
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -1026,15 +1298,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       ) : (
         // Regular dashboard mode - use existing layout
         <>
-          <div ref={mapRef} style={{ height: '100%', width: '100%', zIndex: 1 }} className="relative">
-            {/* Interactive Watermark - Only show if required by subscription */}
-            {showWatermark && (
-              <InteractiveWatermark 
-                mode="dashboard"
-                onUpgrade={onOpenSubscription}
-              />
-            )}
-          </div>
+          {/* Map container already rendered above */}
           {isLoadingTiles && (
             <div className="absolute top-4 right-4 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center gap-2 z-10">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
@@ -1217,6 +1481,16 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
              </div>
            </>
         )}
+
+        {/* Polygon Properties Modal */}
+        <PolygonPropertiesModal
+          isOpen={showPolygonModal}
+          onClose={() => {
+            setShowPolygonModal(false)
+            setPendingPolygonData(null)
+          }}
+          onSubmit={handlePolygonSubmit}
+        />
     </div>
   )
 }

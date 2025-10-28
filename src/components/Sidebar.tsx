@@ -32,11 +32,13 @@ interface SidebarProps {
   onDeleteMarker: (id: string) => void
   onShowCsvModal: () => void
   onShowAddMarkerModal: () => void
+  onShowPolygonModal?: () => void
   onShowPublishModal: () => void
   onOpenMarkerManagementModal: () => void
   onOpenDataManagementModal: () => void
   onOpenEditManagementModal: () => void
   onOpenPublishManagementModal: () => void
+  onGenerateCityPolygon?: (coordinates: Array<{lat: number, lng: number}>, name: string) => void
   mapSettings: any
   onMapSettingsChange: (settings: any) => void
   currentMapId: string | null
@@ -59,11 +61,13 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteMarker,
   onShowCsvModal,
   onShowAddMarkerModal,
+  onShowPolygonModal,
   onShowPublishModal,
   onOpenMarkerManagementModal,
   onOpenDataManagementModal,
   onOpenEditManagementModal,
   onOpenPublishManagementModal,
+  onGenerateCityPolygon,
   mapSettings,
   onMapSettingsChange,
   currentMapId,
@@ -821,6 +825,8 @@ const Sidebar: React.FC<SidebarProps> = ({
           <DataTabContent
             onShowAddMarkerModal={onShowAddMarkerModal}
             onShowCsvModal={onShowCsvModal}
+            onShowPolygonModal={onShowPolygonModal}
+            onGenerateCityPolygon={onGenerateCityPolygon}
             isUploading={isUploading}
             uploadProgress={uploadProgress}
             onOpenModal={onOpenDataManagementModal}

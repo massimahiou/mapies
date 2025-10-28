@@ -97,6 +97,49 @@ export interface MarkerDocument {
   }
 }
 
+// Polygon/Region interface for drawing areas on maps
+export interface PolygonDocument {
+  id?: string
+  name: string
+  description?: string
+  type: 'polygon' | 'rectangle' | 'circle'
+  
+  // Geometric data
+  coordinates?: Array<{lat: number, lng: number}>  // For polygon/rectangle: [{lat, lng}, {lat, lng}, ...]
+  center?: { lat: number, lng: number }  // For circle center
+  radius?: number  // For circle radius (in meters)
+  
+  // Styling
+  fillColor: string
+  fillOpacity: number
+  strokeColor: string
+  strokeWeight: number
+  strokeOpacity: number
+  
+  // Metadata
+  userId: string
+  mapId: string
+  visible: boolean
+  createdAt: Date
+  updatedAt: Date
+  
+  // Category/grouping (for government districts, zones)
+  category?: {
+    id: string
+    name: string  // e.g., "Downtown", "Zone A", "Service Area"
+    color: string
+  }
+  
+  // Properties for cities/governments
+  properties?: {
+    district?: string
+    zone?: string
+    administrativeLevel?: string  // e.g., "Borough", "Ward", "Precinct"
+    population?: number
+    notes?: string
+  }
+}
+
 // Create a new map
 export const createMap = async (userId: string, mapData: Omit<MapDocument, 'id' | 'createdAt' | 'updatedAt' | 'userId'>): Promise<string> => {
   try {
@@ -895,5 +938,95 @@ export const leaveSharedMap = async (
 // Get map's owner ID from shared maps
 export const getMapOwnerId = (map: MapDocument): string => {
   return map.userId
+}
+
+// POLYGON FUNCTIONS - Regions/Areas on Maps
+
+// Get all polygons for a map
+export const getMapPolygons = async (userId: string, mapId: string): Promise<PolygonDocument[]> => {
+  try {
+    const polygonsRef = collection(db, 'users', userId, 'maps', mapId, 'polygons')
+    const q = query(polygonsRef, orderBy('createdAt', 'desc'))
+    const querySnapshot = await getDocs(q)
+    
+    const polygons: PolygonDocument[] = []
+    querySnapshot.forEach((doc) => {
+      const data = doc.data()
+      polygons.push({
+        id: doc.id,
+        ...data,
+        createdAt: data.createdAt?.toDate() || new Date(),
+        updatedAt: data.updatedAt?.toDate() || new Date()
+      } as PolygonDocument)
+    })
+    
+    console.log('Retrieved polygons:', polygons.length)
+    return polygons
+  } catch (error) {
+    console.error('Error getting map polygons:', error)
+    throw error
+  }
+}
+
+// Add polygon to map
+export const addPolygonToMap = async (
+  userId: string, 
+  mapId: string, 
+  polygonData: Omit<PolygonDocument, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'mapId'>
+): Promise<string> => {
+  try {
+    const polygonsRef = collection(db, 'users', userId, 'maps', mapId, 'polygons')
+    const docRef = await addDoc(polygonsRef, {
+      ...polygonData,
+      userId,
+      mapId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    })
+    
+    console.log('Polygon added to map successfully:', docRef.id)
+    return docRef.id
+  } catch (error) {
+    console.error('Error adding polygon to map:', error)
+    throw error
+  }
+}
+
+// Update polygon in map
+export const updateMapPolygon = async (
+  userId: string, 
+  mapId: string, 
+  polygonId: string, 
+  updates: Partial<PolygonDocument>
+): Promise<void> => {
+  try {
+    const polygonRef = doc(db, 'users', userId, 'maps', mapId, 'polygons', polygonId)
+    await updateDoc(polygonRef, {
+      ...updates,
+      updatedAt: serverTimestamp()
+    })
+    
+    console.log('Polygon updated successfully')
+  } catch (error) {
+    console.error('Error updating polygon:', error)
+    throw error
+  }
+}
+
+// Delete polygon from map
+export const deleteMapPolygon = async (
+  userId: string, 
+  mapId: string, 
+  polygonId: string
+): Promise<void> => {
+  try {
+    const polygonRef = doc(db, 'users', userId, 'maps', mapId, 'polygons', polygonId)
+    await deleteDoc(polygonRef)
+    
+    console.log('Polygon deleted successfully')
+  } catch (error) {
+    console.error('Error deleting polygon:', error)
+    throw error
+  }
 }
 

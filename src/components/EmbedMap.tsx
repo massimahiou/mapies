@@ -8,6 +8,7 @@ import { Navigation, MapPin, X } from 'lucide-react'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
 import { formatAddressForPopup } from '../utils/addressUtils'
 import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from '../utils/freemiumDefaults'
+import { usePolygonLoader } from '../hooks/usePolygonLoader'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -63,9 +64,18 @@ const EmbedMap: React.FC = () => {
   const [showNearbyPlaces, setShowNearbyPlaces] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [mapDataUserId, setMapDataUserId] = useState<string>('')
 
   // Get map ID from URL parameters
   const mapId = searchParams.get('mapId')
+  
+  // Load polygons for embedded maps
+  usePolygonLoader({
+    mapInstance: mapInstance.current,
+    mapLoaded,
+    userId: mapDataUserId,
+    mapId: mapId || ''
+  })
 
   // Mobile detection and responsive behavior - Force mobile detection
   useEffect(() => {
@@ -271,6 +281,7 @@ const EmbedMap: React.FC = () => {
         // Get the map owner's ID for loading folder icons
         const mapOwnerId = mapData.userId
         console.log('📁 Map owner ID for folder icons:', mapOwnerId)
+        setMapDataUserId(mapOwnerId)
 
         if (mapData.settings) {
           console.log('🔍 EmbedMap: Loading map settings from Firestore:', mapData.settings)

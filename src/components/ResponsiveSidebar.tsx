@@ -31,11 +31,13 @@ interface ResponsiveSidebarProps {
   onDeleteMarker: (id: string) => void
   onShowCsvModal: () => void
   onShowAddMarkerModal: () => void
+  onShowPolygonModal?: () => void
   onShowPublishModal: () => void
   onOpenMarkerManagementModal: () => void
   onOpenDataManagementModal: () => void
   onOpenEditManagementModal: () => void
   onOpenPublishManagementModal: () => void
+  onGenerateCityPolygon?: (coordinates: Array<{lat: number, lng: number}>, name: string) => void
   mapSettings: any
   onMapSettingsChange: (settings: any) => void
   currentMapId: string | null

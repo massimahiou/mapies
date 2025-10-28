@@ -7,6 +7,8 @@ interface DataManagementModalProps {
   onClose: () => void
   onShowAddMarkerModal: () => void
   onShowCsvModal: () => void
+  onShowPolygonModal?: () => void
+  onGenerateCityPolygon?: (coordinates: Array<{lat: number, lng: number}>, name: string) => void
   isUploading?: boolean
   uploadProgress?: { processed: number; total: number; currentAddress: string }
 }
@@ -16,6 +18,8 @@ const DataManagementModal: React.FC<DataManagementModalProps> = ({
   onClose,
   onShowAddMarkerModal,
   onShowCsvModal,
+  onShowPolygonModal,
+  onGenerateCityPolygon,
   isUploading = false,
   uploadProgress = { processed: 0, total: 0, currentAddress: '' }
 }) => {
@@ -41,6 +45,8 @@ const DataManagementModal: React.FC<DataManagementModalProps> = ({
           <DataTabContent
             onShowAddMarkerModal={onShowAddMarkerModal}
             onShowCsvModal={onShowCsvModal}
+            onShowPolygonModal={onShowPolygonModal}
+            onGenerateCityPolygon={onGenerateCityPolygon}
             isUploading={isUploading}
             uploadProgress={uploadProgress}
             // Don't pass onOpenModal to avoid recursive modal opening

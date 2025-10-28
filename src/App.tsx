@@ -88,8 +88,22 @@ const AppContent: React.FC = () => {
   const [showEditManagementModal, setShowEditManagementModal] = useState(false)
   const [showPublishManagementModal, setShowPublishManagementModal] = useState(false)
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
+  const [showPolygonDrawing, setShowPolygonDrawing] = useState(false)
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null)
   const [locationError, setLocationError] = useState('')
+  
+  // Listen for drawing mode cancellation
+  useEffect(() => {
+    const handleCancelDrawing = () => {
+      console.log('🔷 Canceling polygon drawing mode from App')
+      setShowPolygonDrawing(false)
+    }
+    
+    window.addEventListener('cancelDrawingMode', handleCancelDrawing)
+    return () => {
+      window.removeEventListener('cancelDrawingMode', handleCancelDrawing)
+    }
+  }, [])
   
   // Iframe dimensions for publish mode
   const [iframeDimensions, setIframeDimensions] = useState({ width: 800, height: 600 })
@@ -174,6 +188,50 @@ const AppContent: React.FC = () => {
     } catch (error) {
       console.error('Error deleting marker:', error)
       alert('Failed to delete marker. Please try again.')
+    }
+  }
+
+  const handleGenerateCityPolygon = async (coordinates: Array<{lat: number, lng: number}>, name: string) => {
+    console.log('🔷 handleGenerateCityPolygon called:', { name, coordinatesCount: coordinates.length, user: !!user, currentMapId })
+    
+    if (!user || !currentMapId) {
+      console.error('❌ Missing user or mapId')
+      alert('Please select a map first')
+      return
+    }
+    
+    if (coordinates.length === 0) {
+      console.error('❌ No coordinates generated')
+      alert('Failed to generate boundary. Please try again.')
+      return
+    }
+    
+    setShowDataManagementModal(false)
+    console.log('Generated polygon:', name, coordinates.length, 'points')
+    
+    try {
+      // Save polygon to Firestore
+      const { addPolygonToMap } = await import('./firebase/maps')
+      const polygonData = {
+        name: name,
+        description: `Boundary for ${name}`,
+        type: 'polygon' as const,
+        coordinates: coordinates,
+        fillColor: '#3B82F6',
+        fillOpacity: 0.3,
+        strokeColor: '#3B82F6',
+        strokeWeight: 2,
+        strokeOpacity: 1.0,
+        visible: true
+      }
+      
+      console.log('🔷 Saving polygon to Firestore:', polygonData)
+      const polygonId = await addPolygonToMap(user.uid, currentMapId, polygonData)
+      console.log('✅ Polygon saved successfully with ID:', polygonId)
+      alert(`✅ Successfully created boundary for ${name}!`)
+    } catch (error) {
+      console.error('❌ Error saving polygon:', error)
+      alert(`Error saving polygon: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -1167,11 +1225,13 @@ const AppContent: React.FC = () => {
           console.log('🚀 Set csvModalOpen to true')
         }}
         onShowAddMarkerModal={() => setShowAddMarkerModal(true)}
+        onShowPolygonModal={() => setShowPolygonDrawing(true)}
         onShowPublishModal={() => setShowPublishModal(true)}
         onOpenMarkerManagementModal={() => setShowMarkerManagementModal(true)}
         onOpenDataManagementModal={() => setShowDataManagementModal(true)}
         onOpenEditManagementModal={() => setShowEditManagementModal(true)}
         onOpenPublishManagementModal={() => setShowPublishManagementModal(true)}
+        onGenerateCityPolygon={handleGenerateCityPolygon}
         mapSettings={mapSettings}
         onMapSettingsChange={handleMapSettingsChange}
         currentMapId={currentMapId}
@@ -1205,6 +1265,7 @@ const AppContent: React.FC = () => {
           folderIcons={folderIcons}
           onOpenSubscription={() => setShowSubscriptionModal(true)}
           currentMap={maps.find(m => m.id === currentMapId)}
+          showPolygonDrawing={showPolygonDrawing}
         />
       </div>
 
@@ -1274,6 +1335,8 @@ const AppContent: React.FC = () => {
          onClose={() => setShowDataManagementModal(false)}
          onShowAddMarkerModal={() => setShowAddMarkerModal(true)}
          onShowCsvModal={() => setCsvModalOpen(true)}
+         onShowPolygonModal={() => setShowPolygonDrawing(true)}
+         onGenerateCityPolygon={handleGenerateCityPolygon}
          isUploading={isUploading}
          uploadProgress={uploadProgress}
        />

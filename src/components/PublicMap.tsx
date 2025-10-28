@@ -14,6 +14,7 @@ import { usePublicFeatureAccess } from '../hooks/useFeatureAccess'
 import InteractiveWatermark from './InteractiveWatermark'
 import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from '../utils/freemiumDefaults'
 import { validateMapAgainstPlan } from '../utils/mapValidation'
+import { usePolygonLoader } from '../hooks/usePolygonLoader'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -121,6 +122,14 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   const [locationModeActive, setLocationModeActive] = useState(false)
   const [renamedMarkers] = useState<Record<string, string>>({})
   const [showMobileResults, setShowMobileResults] = useState(false)
+  
+  // Load polygons for public maps
+  usePolygonLoader({
+    mapInstance: mapInstance.current,
+    mapLoaded,
+    userId: mapData?.userId || '',
+    mapId: mapData?.id || mapId || ''
+  })
   
   // Validate map against owner's plan for public viewing
   const mapValidation = mapData ? validateMapAgainstPlan(markers, mapSettings, mapData.ownerPlan || 'freemium', folderIcons) : { isValid: true, premiumFeaturesUsed: [] }

@@ -3,7 +3,7 @@ import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, Fo
 import { applyNameRules } from '../../utils/markerUtils'
 import { createMarkerGroup, updateMarkerGroup, deleteMarkerGroup, getMarkerGroupByName, uploadFolderIconBase64, updateMarkerGroupIcon, removeMarkerGroupIcon } from '../../firebase/firestore'
 import { useToast } from '../../contexts/ToastContext'
-import { getUserMaps } from '../../firebase/maps'
+import { getUserMaps, getMapPolygons, deleteMapPolygon, updateMapPolygon, PolygonDocument } from '../../firebase/maps'
 import { useUsageWarning } from '../../hooks/useFeatureAccess'
 import { useSharedMapFeatureAccess } from '../../hooks/useSharedMapFeatureAccess'
 
@@ -73,6 +73,10 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const [selectedRules, setSelectedRules] = useState<Set<string>>(new Set())
   const [availableMaps, setAvailableMaps] = useState<any[]>([])
   const [selectedSourceMap, setSelectedSourceMap] = useState('')
+
+  // Polygon state
+  const [polygons, setPolygons] = useState<PolygonDocument[]>([])
+  const [loadingPolygons, setLoadingPolygons] = useState(false)
 
   // Load user document for usage limits
   // useEffect(() => {
@@ -823,6 +827,66 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     return icons[type] || '📍'
   }
 
+  // Fetch polygons
+  useEffect(() => {
+    const loadPolygons = async () => {
+      if (!mapId || !userId) return
+      
+      setLoadingPolygons(true)
+      try {
+        // For shared maps, use the map owner's ID
+        const polygonOwnerId = currentMap?.userId || userId
+        const loadedPolygons = await getMapPolygons(polygonOwnerId, mapId)
+        setPolygons(loadedPolygons)
+      } catch (error) {
+        console.error('Error loading polygons:', error)
+      } finally {
+        setLoadingPolygons(false)
+      }
+    }
+
+    loadPolygons()
+  }, [mapId, userId, currentMap])
+
+  // Toggle polygon visibility
+  const handleTogglePolygonVisibility = async (polygonId: string, currentVisibility: boolean) => {
+    if (!mapId || !userId) return
+    
+    try {
+      const polygonOwnerId = currentMap?.userId || userId
+      await updateMapPolygon(polygonOwnerId, mapId, polygonId, {
+        visible: !currentVisibility
+      })
+      
+      setPolygons(prev => prev.map(p => 
+        p.id === polygonId ? { ...p, visible: !currentVisibility } : p
+      ))
+      
+      showToast({ type: 'success', title: 'Success', message: 'Polygon visibility updated' })
+    } catch (error) {
+      console.error('Error toggling polygon visibility:', error)
+      showToast({ type: 'error', title: 'Error', message: 'Failed to update polygon visibility' })
+    }
+  }
+
+  // Delete polygon
+  const handleDeletePolygon = async (polygonId: string) => {
+    if (!mapId || !userId) return
+    if (!confirm('Are you sure you want to delete this polygon?')) return
+    
+    try {
+      const polygonOwnerId = currentMap?.userId || userId
+      await deleteMapPolygon(polygonOwnerId, mapId, polygonId)
+      
+      setPolygons(prev => prev.filter(p => p.id !== polygonId))
+      
+      showToast({ type: 'success', title: 'Success', message: 'Polygon deleted successfully' })
+    } catch (error) {
+      console.error('Error deleting polygon:', error)
+      showToast({ type: 'error', title: 'Error', message: 'Failed to delete polygon' })
+    }
+  }
+
   return (
     <div className="p-4">
       {/* Usage Warning */}
@@ -1544,6 +1608,79 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
               }
             })}
           </>
+        )}
+      </div>
+
+      {/* Polygons Section */}
+      <div className="mt-6">
+        <h3 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          {polygons.length} {polygons.length === 1 ? 'region' : 'regions'}
+        </h3>
+        
+        {loadingPolygons ? (
+          <div className="text-center py-4 text-gray-500">
+            <p className="text-sm">Loading regions...</p>
+          </div>
+        ) : polygons.length === 0 ? (
+          <div className="text-center py-4 text-gray-500">
+            <p className="text-sm">No regions added yet</p>
+            <p className="text-xs mt-1">Add regions using the Data tab</p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {polygons.map((polygon) => (
+              <div
+                key={polygon.id}
+                className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+              >
+                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">
+                    {polygon.name || 'Unnamed Region'}
+                  </p>
+                  {polygon.description && (
+                    <p className="text-xs text-gray-500 truncate">
+                      {polygon.description}
+                    </p>
+                  )}
+                  {polygon.type && (
+                    <p className="text-xs text-gray-400">
+                      Type: {polygon.type}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleTogglePolygonVisibility(polygon.id || '', polygon.visible)}
+                    className={`p-1 rounded transition-colors ${
+                      polygon.visible
+                        ? 'text-green-600 hover:bg-green-100'
+                        : 'text-gray-400 hover:bg-gray-200'
+                    }`}
+                    title={polygon.visible ? 'Hide region' : 'Show region'}
+                  >
+                    {polygon.visible ? (
+                      <Eye className="w-4 h-4" />
+                    ) : (
+                      <EyeOff className="w-4 h-4" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleDeletePolygon(polygon.id || '')}
+                    className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors"
+                    title="Delete region"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

@@ -502,3 +502,42 @@ body[style*="--mobile-mode: 1"] .mobile-search-container {
     line-height: 40px !important;
   }
 }
+
+/* Leaflet Draw Toolbar - Ensure it's visible */
+.leaflet-draw-toolbar {
+  margin-top: 10px !important;
+  z-index: 10000 !important;
+  position: relative !important;
+  display: block !important;
+}
+
+/* Force toolbar to always be visible, not collapsed */
+.leaflet-draw-toolbar a {
+  display: block !important;
+  background-color: #fff !important;
+  border: 1px solid #ccc !important;
+  border-radius: 4px !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2) !important;
+  width: 34px !important;
+  height: 34px !important;
+  margin-bottom: 4px !important;
+  cursor: pointer !important;
+}
+
+.leaflet-draw-toolbar a:hover {
+  background-color: #f4f4f4 !important;
+}
+
+.leaflet-draw-actions {
+  z-index: 10001 !important;
+}
+
+/* Make sure the entire draw control container is visible */
+.leaflet-top.leaflet-right {
+  z-index: 10000 !important;
+}
+
+/* Ensure all Leaflet controls are visible */
+.leaflet-control {
+  z-index: 10000 !important;
+}
