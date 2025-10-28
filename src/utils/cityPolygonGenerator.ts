@@ -57,33 +57,43 @@ export const generatePolygonWithMapbox = async (
     
     // Look for boundary metadata in feature properties
     const props = feature.properties
+    const context = feature.context || []
+    
+    console.log('🔍 Feature properties:', props)
+    console.log('🔍 Feature context:', context)
+    
     if (props && (props.wikidata || props.maki === 'border' || props.category === 'administrative')) {
       // Try to use the OSM ID or other identifier
       boundaryId = props.osm_id || props.mapbox_id
+      console.log('✅ Found boundary ID from properties:', boundaryId)
     }
     
     // If no boundary ID, check for admin hierarchy
-    const context = feature.context || []
     for (const ctx of context) {
+      console.log('🔍 Checking context:', ctx)
       if (ctx.short_code && (ctx.id.includes('place') || ctx.id.includes('postcode'))) {
         boundaryId = ctx.id
+        console.log('✅ Found boundary ID from context:', boundaryId)
         break
       }
     }
     
-    console.log('🗺️ Boundary ID:', boundaryId)
+    console.log('🗺️ Final Boundary ID:', boundaryId)
+    console.log('🔍 Checking if boundary ID is usable:', boundaryId && (boundaryId.includes('place') || boundaryId.includes('postcode')))
     
     // Step 2: Get boundary polygon if available
-    if (boundaryId && boundaryId.includes('place') || boundaryId && boundaryId.includes('postcode')) {
+    if (boundaryId && (boundaryId.includes('place') || boundaryId.includes('postcode'))) {
+      console.log('✅ Attempting to fetch boundary polygon with ID:', boundaryId)
       try {
         const boundaryUrl = `https://api.mapbox.com/v4/${boundaryId}.json?access_token=${token}`
         console.log('🔍 Step 2: Fetching boundary polygon...')
         
         const boundaryResponse = await fetch(boundaryUrl)
         
+        console.log('📡 Boundary fetch response status:', boundaryResponse.status)
         if (boundaryResponse.ok) {
           const boundaryData = await boundaryResponse.json()
-          console.log('✅ Got boundary data')
+          console.log('✅ Got boundary data:', boundaryData)
           
           // Extract coordinates from boundary geometry
           if (boundaryData && boundaryData.geometry && boundaryData.geometry.coordinates) {
@@ -91,6 +101,7 @@ export const generatePolygonWithMapbox = async (
             
             // Handle different geometry types
             const geom = boundaryData.geometry
+            console.log('🔍 Boundary geometry type:', geom.type)
             if (geom.type === 'Polygon' && Array.isArray(geom.coordinates[0])) {
               geom.coordinates[0].forEach((point: [number, number]) => {
                 coords.push({ lat: point[1], lng: point[0] })
@@ -110,16 +121,27 @@ export const generatePolygonWithMapbox = async (
                 name: placeName,
                 coordinates: coords
               }
+            } else {
+              console.warn('⚠️ No coordinates extracted from boundary geometry')
             }
+          } else {
+            console.warn('⚠️ Boundary data has no valid geometry')
           }
+        } else {
+          console.warn('⚠️ Boundary fetch failed with status:', boundaryResponse.status)
+          const errorText = await boundaryResponse.text()
+          console.warn('⚠️ Boundary fetch error:', errorText)
         }
       } catch (boundaryError) {
         console.warn('⚠️ Could not fetch boundary, using point with radius:', boundaryError)
       }
+    } else {
+      console.log('⚠️ No boundary ID available or ID format not supported')
+      console.log('ℹ️ Creating circular boundary as fallback')
     }
     
     // Step 3: Fallback - create circular boundary around point
-    console.log('ℹ️ No boundary found, creating circular area')
+    console.log('ℹ️ No boundary polygon available, creating circular area')
     const [lng, lat] = coordinates
     const coords = generateCirclePoints(lat, lng, type === 'postal_code' ? 1000 : 5000)
     
