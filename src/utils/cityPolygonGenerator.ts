@@ -483,33 +483,58 @@ export const findBoundaryWithReverseGeocoding = async (
       const bearing = i * stepDegrees
       let boundaryFound = false
       
-      // Test distances from 200m to 5000m in 200m steps
-      for (let distance = 200; distance <= 5000; distance += 200) {
+      // Use variable distance increments to catch irregular boundaries
+      // Start small (100m increments near center), then larger (500m increments further out)
+      const distances: number[] = []
+      
+      // Small steps near center (100m up to 800m)
+      for (let d = 100; d <= 800; d += 100) {
+        distances.push(d)
+      }
+      
+      // Medium steps (1000m to 3000m in 200m steps)
+      for (let d = 1000; d <= 3000; d += 200) {
+        distances.push(d)
+      }
+      
+      // Larger steps further out (3500m to 6000m in 500m steps)
+      for (let d = 3500; d <= 6000; d += 500) {
+        distances.push(d)
+      }
+      
+      for (let j = 0; j < distances.length; j++) {
+        const distance = distances[j]
         const testPoint = calculatePointAtDistance(center, distance, bearing)
         const postalCode = await reverseGeocodeWithNominatim(testPoint)
         
-        // Check if postal code matches (for postal codes) or if we're still in the area (for cities)
+        // Check if postal code matches
         const stillInBounds = type === 'postal_code' 
           ? postalCode && postalCode.toUpperCase().replace(/\s+/g, '') === input.toUpperCase().replace(/\s+/g, '')
-          : postalCode // For cities, just check if there's data
+          : postalCode
         
-        if (!stillInBounds && distance > 400) {
-          // Found boundary! Use the previous point
-          const boundaryPoint = calculatePointAtDistance(center, distance - 200, bearing)
+        // If we find a different postal code, boundary is between previous and current distance
+        if (!stillInBounds && j > 0) {
+          // Found boundary! Use a point between the last in-bounds and first out-of-bounds
+          const prevDistance = distances[j - 1]
+          const boundaryDistance = prevDistance + (distance - prevDistance) / 2
+          const boundaryPoint = calculatePointAtDistance(center, boundaryDistance, bearing)
           boundaryPoints.push(boundaryPoint)
-          console.log(`✅ Boundary point ${i + 1}/${numDirections} found at ${distance - 200}m`)
+          console.log(`✅ Boundary point ${i + 1}/${numDirections} found between ${prevDistance}m and ${distance}m`)
           boundaryFound = true
           break
         }
         
-        // Add small delay to respect rate limits
+        // Add delay to respect rate limits
         await new Promise(resolve => setTimeout(resolve, 100))
       }
       
-      // If no boundary found in reasonable distance, use max distance
+      // If no boundary found in reasonable distance, estimate based on urban/suburban density
       if (!boundaryFound) {
-        const boundaryPoint = calculatePointAtDistance(center, 5000, bearing)
+        // Use a default distance based on postal code type
+        const defaultDistance = type === 'postal_code' ? 3000 : 8000
+        const boundaryPoint = calculatePointAtDistance(center, defaultDistance, bearing)
         boundaryPoints.push(boundaryPoint)
+        console.log(`ℹ️ No boundary found in direction ${i + 1}, using default distance ${defaultDistance}m`)
       }
       
       // Report progress
