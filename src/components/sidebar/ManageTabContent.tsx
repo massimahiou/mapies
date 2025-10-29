@@ -1624,7 +1624,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
           <div className="flex items-center gap-2">
             {polygonEditMode && (
               <div className="text-xs text-gray-600">
-                <span className="hidden sm:inline">Shift+Click to select multiple • Drag to move</span>
+                <span className="hidden sm:inline">Hold Shift + drag rectangle to select • Drag to move</span>
               </div>
             )}
             <button
@@ -1637,7 +1637,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                   type: 'info', 
                   title: newMode ? 'Edit Mode ON' : 'Edit Mode OFF', 
                   message: newMode 
-                    ? 'Click vertices to select. Shift+Click for multi-select. Drag to move vertices.' 
+                    ? 'Hold Shift + drag rectangle to select vertices. Then drag to move them together.' 
                     : 'Map dragging enabled.' 
                 })
               }}

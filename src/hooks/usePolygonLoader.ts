@@ -36,6 +36,9 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
   const editModeEnabledRef = useRef(false)
   const selectedVerticesRef = useRef(new Set<L.Marker>()) // Set of selected vertex markers
   const dragOffsetRef = useRef<L.LatLng | null>(null) // Offset when dragging multiple vertices
+  const boxSelectRectRef = useRef<L.Rectangle | null>(null) // Rectangle for box selection
+  const boxSelectStartRef = useRef<L.LatLng | null>(null) // Start position for box selection
+  const isBoxSelectingRef = useRef(false) // Whether currently box selecting
 
   useEffect(() => {
     if (!mapLoaded || !mapInstance || !userId || !mapId) {
@@ -254,12 +257,117 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       } else {
         // Hide all vertex markers
         hideAllVertexMarkers(mapInstance)
+        // Clear selection rectangle
+        if (boxSelectRectRef.current) {
+          mapInstance.removeLayer(boxSelectRectRef.current)
+          boxSelectRectRef.current = null
+        }
       }
     }
     
     window.addEventListener('polygonEditModeToggle', handleEditModeToggle as EventListener)
     return () => {
       window.removeEventListener('polygonEditModeToggle', handleEditModeToggle as EventListener)
+    }
+  }, [mapInstance, mapLoaded])
+  
+  // Box selection handler
+  useEffect(() => {
+    if (!mapInstance || !mapLoaded || !editModeEnabledRef.current) return
+    
+    let startPoint: L.LatLng | null = null
+    
+    const handleMouseDown = (e: L.LeafletMouseEvent) => {
+      // Only start box selection if Shift is held and clicking on map (not on a marker)
+      if (!e.originalEvent.shiftKey) return
+      
+      // Check if click was on a vertex marker
+      const target = e.originalEvent.target as HTMLElement
+      if (target.closest('.pink-vertex-marker')) {
+        return // Don't start box selection if clicking on a vertex
+      }
+      
+      startPoint = e.latlng
+      boxSelectStartRef.current = e.latlng
+      isBoxSelectingRef.current = true
+      
+      // Create selection rectangle
+      if (boxSelectRectRef.current) {
+        mapInstance.removeLayer(boxSelectRectRef.current)
+      }
+      
+      boxSelectRectRef.current = L.rectangle([[e.latlng.lat, e.latlng.lng], [e.latlng.lat, e.latlng.lng]], {
+        color: '#0066ff',
+        weight: 2,
+        fillColor: '#0066ff',
+        fillOpacity: 0.2,
+        dashArray: '5, 5'
+      }).addTo(mapInstance)
+    }
+    
+    const handleMouseMove = (e: L.LeafletMouseEvent) => {
+      if (!isBoxSelectingRef.current || !startPoint || !boxSelectRectRef.current) return
+      
+      // Update rectangle bounds
+      const bounds = L.latLngBounds([startPoint, e.latlng])
+      boxSelectRectRef.current.setBounds(bounds)
+    }
+    
+    const handleMouseUp = () => {
+      if (!isBoxSelectingRef.current || !startPoint || !boxSelectRectRef.current) return
+      
+      isBoxSelectingRef.current = false
+      
+      // Get bounds of selection rectangle
+      const bounds = boxSelectRectRef.current.getBounds()
+      
+      // Select all vertices within the rectangle
+      const createIcon = (isSelected: boolean) => {
+        const color = isSelected ? '#0066ff' : '#ff1493'
+        const size = isSelected ? 14 : 12
+        return L.divIcon({
+          className: 'pink-vertex-marker',
+          html: `<div style="width: ${size}px; height: ${size}px; background-color: ${color}; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer; transition: all 0.2s;"></div>`,
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2]
+        })
+      }
+      
+      let selectedCount = 0
+      vertexMarkersRef.current.forEach((markers) => {
+        markers.forEach((marker) => {
+          if (bounds.contains(marker.getLatLng())) {
+            if (!selectedVerticesRef.current.has(marker)) {
+              selectedVerticesRef.current.add(marker)
+              marker.setIcon(createIcon(true))
+              selectedCount++
+            }
+          }
+        })
+      })
+      
+      // Remove selection rectangle
+      mapInstance.removeLayer(boxSelectRectRef.current!)
+      boxSelectRectRef.current = null
+      startPoint = null
+      
+      console.log('🔷 Box selection: selected', selectedCount, 'vertices')
+    }
+    
+    mapInstance.on('mousedown', handleMouseDown)
+    mapInstance.on('mousemove', handleMouseMove)
+    mapInstance.on('mouseup', handleMouseUp)
+    
+    return () => {
+      mapInstance.off('mousedown', handleMouseDown)
+      mapInstance.off('mousemove', handleMouseMove)
+      mapInstance.off('mouseup', handleMouseUp)
+      
+      // Cleanup rectangle if exists
+      if (boxSelectRectRef.current && mapInstance.hasLayer(boxSelectRectRef.current)) {
+        mapInstance.removeLayer(boxSelectRectRef.current)
+        boxSelectRectRef.current = null
+      }
     }
   }, [mapInstance, mapLoaded])
   
