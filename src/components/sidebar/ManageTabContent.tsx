@@ -4,6 +4,7 @@ import { applyNameRules } from '../../utils/markerUtils'
 import { createMarkerGroup, updateMarkerGroup, deleteMarkerGroup, getMarkerGroupByName, uploadFolderIconBase64, updateMarkerGroupIcon, removeMarkerGroupIcon } from '../../firebase/firestore'
 import { useToast } from '../../contexts/ToastContext'
 import { getUserMaps, getMapPolygons, deleteMapPolygon, updateMapPolygon, PolygonDocument } from '../../firebase/maps'
+import PolygonEditModal from '../PolygonEditModal'
 import { useUsageWarning } from '../../hooks/useFeatureAccess'
 import { useSharedMapFeatureAccess } from '../../hooks/useSharedMapFeatureAccess'
 
@@ -81,6 +82,8 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const [boxSelectMode, setBoxSelectMode] = useState(false)
   const [hasUnsavedPolygonChanges, setHasUnsavedPolygonChanges] = useState(false)
   const [unsavedPolygonCount, setUnsavedPolygonCount] = useState(0)
+  const [editingPolygon, setEditingPolygon] = useState<PolygonDocument | null>(null)
+  const [showPolygonEditModal, setShowPolygonEditModal] = useState(false)
 
   // Load user document for usage limits
   // useEffect(() => {
@@ -875,6 +878,31 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     })
     setHasUnsavedPolygonChanges(false)
     setUnsavedPolygonCount(0)
+  }
+  
+  // Handle opening polygon edit modal
+  const handleEditPolygon = (polygon: PolygonDocument) => {
+    setEditingPolygon(polygon)
+    setShowPolygonEditModal(true)
+  }
+  
+  // Handle saving polygon edit
+  const handlePolygonEditSave = async () => {
+    // Reload polygons to reflect changes
+    if (mapId && userId) {
+      try {
+        const polygonOwnerId = currentMap?.userId || userId
+        const loadedPolygons = await getMapPolygons(polygonOwnerId, mapId)
+        setPolygons(loadedPolygons)
+        showToast({
+          type: 'success',
+          title: 'Success',
+          message: 'Polygon updated successfully'
+        })
+      } catch (error) {
+        console.error('Error reloading polygons:', error)
+      }
+    }
   }
 
   // Toggle polygon visibility
@@ -1752,6 +1780,13 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                 </div>
                 <div className="flex items-center gap-1">
                   <button
+                    onClick={() => handleEditPolygon(polygon)}
+                    className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                    title="Edit region properties"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={() => handleTogglePolygonVisibility(polygon.id || '', polygon.visible)}
                     className={`p-1 rounded transition-colors ${
                       polygon.visible
@@ -1779,6 +1814,20 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
           </div>
         )}
       </div>
+
+      {/* Polygon Edit Modal */}
+      <PolygonEditModal
+        isOpen={showPolygonEditModal}
+        onClose={() => {
+          setShowPolygonEditModal(false)
+          setEditingPolygon(null)
+        }}
+        polygon={editingPolygon}
+        userId={userId}
+        mapId={mapId || ''}
+        currentMap={currentMap}
+        onSave={handlePolygonEditSave}
+      />
     </div>
   )
 }
