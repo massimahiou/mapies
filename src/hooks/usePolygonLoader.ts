@@ -34,6 +34,8 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null)
   const vertexMarkersRef = useRef(new globalThis.Map<string, L.Marker[]>()) // polygonId -> array of vertex markers
   const editModeEnabledRef = useRef(false)
+  const selectedVerticesRef = useRef(new Set<L.Marker>()) // Set of selected vertex markers
+  const dragOffsetRef = useRef<L.LatLng | null>(null) // Offset when dragging multiple vertices
 
   useEffect(() => {
     if (!mapLoaded || !mapInstance || !userId || !mapId) {
@@ -278,19 +280,91 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     const vertexMarkers: L.Marker[] = []
     
     latlngs.forEach((latlng: L.LatLng, index: number) => {
-      // Create pink circular marker
-      const pinkIcon = L.divIcon({
-        className: 'pink-vertex-marker',
-        html: `<div style="width: 12px; height: 12px; background-color: #ff1493; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer;"></div>`,
-        iconSize: [12, 12],
-        iconAnchor: [6, 6]
-      })
+      // Create pink circular marker (selected state will be blue)
+      const createIcon = (isSelected: boolean) => {
+        const color = isSelected ? '#0066ff' : '#ff1493'
+        const size = isSelected ? 14 : 12
+        return L.divIcon({
+          className: 'pink-vertex-marker',
+          html: `<div style="width: ${size}px; height: ${size}px; background-color: ${color}; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer; transition: all 0.2s;"></div>`,
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2]
+        })
+      }
       
       const marker = L.marker(latlng, {
-        icon: pinkIcon,
+        icon: createIcon(false),
         draggable: true,
         zIndexOffset: 1000
       }).addTo(map)
+      
+      // Store index on marker for reference
+      ;(marker as any).vertexIndex = index
+      ;(marker as any).polygonId = polygonId
+      ;(marker as any).polygon = polygon
+      
+      // Click to select/deselect (with Shift for multi-select)
+      marker.on('click', (e: L.LeafletMouseEvent) => {
+        e.originalEvent.stopPropagation()
+        
+        if (e.originalEvent.shiftKey || e.originalEvent.metaKey || e.originalEvent.ctrlKey) {
+          // Multi-select: toggle this marker
+          if (selectedVerticesRef.current.has(marker)) {
+            selectedVerticesRef.current.delete(marker)
+            marker.setIcon(createIcon(false))
+          } else {
+            selectedVerticesRef.current.add(marker)
+            marker.setIcon(createIcon(true))
+          }
+        } else {
+          // Single select: clear others and select this one
+          selectedVerticesRef.current.forEach((m) => {
+            if (m !== marker) {
+              m.setIcon(L.divIcon({
+                className: 'pink-vertex-marker',
+                html: `<div style="width: 12px; height: 12px; background-color: #ff1493; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer;"></div>`,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+              }))
+            }
+          })
+          selectedVerticesRef.current.clear()
+          selectedVerticesRef.current.add(marker)
+          marker.setIcon(createIcon(true))
+        }
+        
+        console.log('🔷 Selected vertices:', selectedVerticesRef.current.size)
+      })
+      
+      // Store original position when drag starts
+      let startPosition: L.LatLng | null = null
+      marker.on('dragstart', () => {
+        startPosition = marker.getLatLng()
+        
+        // If this marker is selected, drag all selected markers together
+        if (selectedVerticesRef.current.has(marker) && selectedVerticesRef.current.size > 1) {
+          // Calculate offset for all selected markers
+          const allSelected = Array.from(selectedVerticesRef.current)
+          const allStartPositions = new Map<L.Marker, L.LatLng>()
+          allSelected.forEach((m) => {
+            allStartPositions.set(m, m.getLatLng())
+          })
+          
+          // When dragging, update all selected markers
+          marker.on('drag', () => {
+            const currentPos = marker.getLatLng()
+            const offsetLat = currentPos.lat - startPosition!.lat
+            const offsetLng = currentPos.lng - startPosition!.lng
+            
+            allSelected.forEach((m) => {
+              if (m !== marker) {
+                const origPos = allStartPositions.get(m)!
+                m.setLatLng(L.latLng(origPos.lat + offsetLat, origPos.lng + offsetLng))
+              }
+            })
+          }, { once: false })
+        }
+      })
       
       // Make marker draggable and update polygon on drag
       marker.on('drag', () => {
@@ -301,6 +375,17 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
         // Update the vertex at this index
         const updatedLatlngs = [...currentLatlngs]
         updatedLatlngs[index] = newLatlng
+        
+        // Also update any other selected vertices that are being dragged together
+        if (selectedVerticesRef.current.has(marker) && selectedVerticesRef.current.size > 1) {
+          selectedVerticesRef.current.forEach((m) => {
+            if (m !== marker && (m as any).polygonId === polygonId) {
+              const otherIndex = (m as any).vertexIndex
+              const otherPos = m.getLatLng()
+              updatedLatlngs[otherIndex] = otherPos
+            }
+          })
+        }
         
         // Update polygon shape
         polygon.setLatLngs([updatedLatlngs])
@@ -321,6 +406,8 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
             vertexMarkers[idx].setLatLng(ll)
           }
         })
+        
+        dragOffsetRef.current = null
       })
       
       vertexMarkers.push(marker)

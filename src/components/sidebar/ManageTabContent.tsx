@@ -1621,29 +1621,36 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
             </svg>
             {polygons.length} {polygons.length === 1 ? 'region' : 'regions'}
           </h3>
-          <button
-            onClick={() => {
-              const newMode = !polygonEditMode
-              setPolygonEditMode(newMode)
-              // Emit custom event to inform Map component
-              window.dispatchEvent(new CustomEvent('polygonEditModeToggle', { detail: { enabled: newMode } }))
-              showToast({ 
-                type: 'info', 
-                title: newMode ? 'Edit Mode ON' : 'Edit Mode OFF', 
-                message: newMode 
-                  ? 'Click polygons to edit vertices. Map dragging disabled.' 
-                  : 'Map dragging enabled.' 
-              })
-            }}
-            className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-              polygonEditMode
-                ? 'bg-blue-500 text-white hover:bg-blue-600'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-            title={polygonEditMode ? 'Disable edit mode' : 'Enable edit mode'}
-          >
-            {polygonEditMode ? '✏️ Edit ON' : '✏️ Edit OFF'}
-          </button>
+          <div className="flex items-center gap-2">
+            {polygonEditMode && (
+              <div className="text-xs text-gray-600">
+                <span className="hidden sm:inline">Shift+Click to select multiple • Drag to move</span>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                const newMode = !polygonEditMode
+                setPolygonEditMode(newMode)
+                // Emit custom event to inform Map component
+                window.dispatchEvent(new CustomEvent('polygonEditModeToggle', { detail: { enabled: newMode } }))
+                showToast({ 
+                  type: 'info', 
+                  title: newMode ? 'Edit Mode ON' : 'Edit Mode OFF', 
+                  message: newMode 
+                    ? 'Click vertices to select. Shift+Click for multi-select. Drag to move vertices.' 
+                    : 'Map dragging enabled.' 
+                })
+              }}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                polygonEditMode
+                  ? 'bg-blue-500 text-white hover:bg-blue-600'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+              title={polygonEditMode ? 'Disable edit mode' : 'Enable edit mode'}
+            >
+              {polygonEditMode ? '✏️ Edit ON' : '✏️ Edit OFF'}
+            </button>
+          </div>
         </div>
         
         {loadingPolygons ? (
