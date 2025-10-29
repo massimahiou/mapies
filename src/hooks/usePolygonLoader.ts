@@ -39,6 +39,7 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
   const boxSelectRectRef = useRef<L.Rectangle | null>(null) // Rectangle for box selection
   const boxSelectStartRef = useRef<L.LatLng | null>(null) // Start position for box selection
   const isBoxSelectingRef = useRef(false) // Whether currently box selecting
+  const boxSelectModeEnabledRef = useRef(false) // Whether box select mode is enabled
 
   useEffect(() => {
     if (!mapLoaded || !mapInstance || !userId || !mapId) {
@@ -262,6 +263,7 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
           mapInstance.removeLayer(boxSelectRectRef.current)
           boxSelectRectRef.current = null
         }
+        boxSelectModeEnabledRef.current = false
       }
     }
     
@@ -271,29 +273,49 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     }
   }, [mapInstance, mapLoaded])
   
-  // Box selection handler
+  // Listen for box select mode toggle
+  useEffect(() => {
+    const handleBoxSelectModeToggle = (e: CustomEvent) => {
+      const enabled = e.detail.enabled
+      boxSelectModeEnabledRef.current = enabled
+      console.log('🔷 Box select mode toggled:', enabled)
+      
+      // Clear any existing selection rectangle
+      if (!enabled && mapInstance && boxSelectRectRef.current) {
+        mapInstance.removeLayer(boxSelectRectRef.current)
+        boxSelectRectRef.current = null
+        isBoxSelectingRef.current = false
+      }
+    }
+    
+    window.addEventListener('boxSelectModeToggle', handleBoxSelectModeToggle as EventListener)
+    return () => {
+      window.removeEventListener('boxSelectModeToggle', handleBoxSelectModeToggle as EventListener)
+    }
+  }, [mapInstance])
+  
+  // Box selection handler - works when box select mode is enabled
   useEffect(() => {
     if (!mapInstance || !mapLoaded) return
     
-    // This effect should always be active, but only work when edit mode is enabled
     let startPoint: L.LatLng | null = null
     
     const handleMouseDown = (e: L.LeafletMouseEvent) => {
-      // Only start box selection if Shift is held and edit mode is enabled
-      if (!e.originalEvent.shiftKey || !editModeEnabledRef.current) {
+      // Only work if box select mode is enabled and edit mode is enabled
+      if (!boxSelectModeEnabledRef.current || !editModeEnabledRef.current) {
         return
       }
       
-      console.log('🔷 Box selection: mousedown with Shift key')
+      console.log('🔷 Box selection: mousedown in box select mode')
       
-      // Check if click was on a vertex marker
+      // Check if click was on a vertex marker - if so, don't start box selection
       const target = e.originalEvent.target as HTMLElement
       if (target.closest('.pink-vertex-marker')) {
-        console.log('🔷 Box selection: clicked on vertex, ignoring')
-        return // Don't start box selection if clicking on a vertex
+        console.log('🔷 Box selection: clicked on vertex, allowing normal drag')
+        return // Allow vertex dragging instead
       }
       
-      // Prevent Leaflet's box zoom from interfering
+      // Stop event from triggering other handlers
       e.originalEvent.stopPropagation()
       e.originalEvent.preventDefault()
       
@@ -322,11 +344,9 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     const handleMouseMove = (e: L.LeafletMouseEvent) => {
       if (!isBoxSelectingRef.current || !startPoint || !boxSelectRectRef.current) return
       
-      // Prevent Leaflet's box zoom from interfering
-      if (e.originalEvent.shiftKey) {
-        e.originalEvent.stopPropagation()
-        e.originalEvent.preventDefault()
-      }
+      // Stop event propagation during box selection
+      e.originalEvent.stopPropagation()
+      e.originalEvent.preventDefault()
       
       // Update rectangle bounds
       const bounds = L.latLngBounds([startPoint, e.latlng])
@@ -339,11 +359,9 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
         return
       }
       
-      // Prevent Leaflet's box zoom from interfering
-      if (e.originalEvent.shiftKey) {
-        e.originalEvent.stopPropagation()
-        e.originalEvent.preventDefault()
-      }
+      // Stop event propagation
+      e.originalEvent.stopPropagation()
+      e.originalEvent.preventDefault()
       
       console.log('🔷 Box selection: mouseup, finalizing selection')
       

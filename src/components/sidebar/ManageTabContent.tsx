@@ -78,6 +78,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const [polygons, setPolygons] = useState<PolygonDocument[]>([])
   const [loadingPolygons, setLoadingPolygons] = useState(false)
   const [polygonEditMode, setPolygonEditMode] = useState(false)
+  const [boxSelectMode, setBoxSelectMode] = useState(false)
 
   // Load user document for usage limits
   // useEffect(() => {
@@ -1621,23 +1622,25 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
             </svg>
             {polygons.length} {polygons.length === 1 ? 'region' : 'regions'}
           </h3>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {polygonEditMode && (
               <div className="text-xs text-gray-600">
-                <span className="hidden sm:inline">Hold Shift + drag rectangle to select • Drag to move</span>
+                <span className="hidden sm:inline">Click Box Select, then drag to select vertices</span>
               </div>
             )}
             <button
               onClick={() => {
                 const newMode = !polygonEditMode
                 setPolygonEditMode(newMode)
+                setBoxSelectMode(false) // Turn off box select when toggling edit mode
                 // Emit custom event to inform Map component
                 window.dispatchEvent(new CustomEvent('polygonEditModeToggle', { detail: { enabled: newMode } }))
+                window.dispatchEvent(new CustomEvent('boxSelectModeToggle', { detail: { enabled: false } }))
                 showToast({ 
                   type: 'info', 
                   title: newMode ? 'Edit Mode ON' : 'Edit Mode OFF', 
                   message: newMode 
-                    ? 'Hold Shift + drag rectangle to select vertices. Then drag to move them together.' 
+                    ? 'Enable Box Select mode, then drag to select vertices. Then drag to move them together.' 
                     : 'Map dragging enabled.' 
                 })
               }}
@@ -1650,6 +1653,30 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
             >
               {polygonEditMode ? '✏️ Edit ON' : '✏️ Edit OFF'}
             </button>
+            {polygonEditMode && (
+              <button
+                onClick={() => {
+                  const newBoxMode = !boxSelectMode
+                  setBoxSelectMode(newBoxMode)
+                  window.dispatchEvent(new CustomEvent('boxSelectModeToggle', { detail: { enabled: newBoxMode } }))
+                  showToast({ 
+                    type: 'info', 
+                    title: newBoxMode ? 'Box Select ON' : 'Box Select OFF', 
+                    message: newBoxMode 
+                      ? 'Click and drag on the map to select multiple vertices' 
+                      : 'Click and drag to move individual vertices.' 
+                  })
+                }}
+                className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                  boxSelectMode
+                    ? 'bg-green-500 text-white hover:bg-green-600'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+                title={boxSelectMode ? 'Disable box select mode' : 'Enable box select mode'}
+              >
+                {boxSelectMode ? '📦 Box Select ON' : '📦 Box Select OFF'}
+              </button>
+            )}
           </div>
         </div>
         
