@@ -44,6 +44,27 @@ const PolygonEditModal: React.FC<PolygonEditModalProps> = ({
       })
     }
   }, [polygon])
+  
+  // Emit real-time updates to map when form data changes
+  useEffect(() => {
+    if (!polygon?.id) return
+    
+    // Debounce updates to avoid too many events
+    const timeoutId = setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('polygonStyleUpdate', {
+        detail: {
+          polygonId: polygon.id,
+          fillColor: formData.fillColor,
+          fillOpacity: formData.fillOpacity,
+          strokeColor: formData.strokeColor,
+          strokeWeight: formData.strokeWeight,
+          strokeOpacity: formData.strokeOpacity
+        }
+      }))
+    }, 100) // 100ms debounce
+    
+    return () => clearTimeout(timeoutId)
+  }, [formData.fillColor, formData.fillOpacity, formData.strokeColor, formData.strokeWeight, formData.strokeOpacity, polygon?.id])
 
   if (!isOpen || !polygon) return null
 

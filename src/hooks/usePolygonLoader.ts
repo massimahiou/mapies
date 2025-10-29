@@ -326,6 +326,44 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     }
   }, [mapInstance])
   
+  // Listen for real-time polygon style updates
+  useEffect(() => {
+    if (!mapInstance || !mapLoaded) return
+    
+    const handleStyleUpdate = (e: CustomEvent) => {
+      const { polygonId, fillColor, fillOpacity, strokeColor, strokeWeight, strokeOpacity } = e.detail
+      
+      const layer = polygonLayersRef.current.get(polygonId)
+      if (!layer) return
+      
+      // Update polygon styling in real-time
+      if (layer instanceof L.Polygon) {
+        layer.setStyle({
+          fillColor,
+          fillOpacity,
+          color: strokeColor,
+          weight: strokeWeight,
+          opacity: strokeOpacity
+        })
+        console.log('🔷 Updated polygon styling in real-time:', polygonId)
+      } else if (layer instanceof L.Circle) {
+        layer.setStyle({
+          fillColor,
+          fillOpacity,
+          color: strokeColor,
+          weight: strokeWeight,
+          opacity: strokeOpacity
+        })
+        console.log('🔷 Updated circle styling in real-time:', polygonId)
+      }
+    }
+    
+    window.addEventListener('polygonStyleUpdate', handleStyleUpdate as EventListener)
+    return () => {
+      window.removeEventListener('polygonStyleUpdate', handleStyleUpdate as EventListener)
+    }
+  }, [mapInstance, mapLoaded])
+  
   // Box selection handler - works when box select mode is enabled
   useEffect(() => {
     if (!mapInstance || !mapLoaded) return
