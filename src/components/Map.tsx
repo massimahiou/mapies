@@ -91,6 +91,33 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   const [searchResults, setSearchResults] = useState<Marker[]>([])
   const [renamedMarkers] = useState<Record<string, string>>({})
   
+  // Listen for polygon edit mode toggle from ManageTabContent
+  useEffect(() => {
+    const handleEditModeToggle = (e: CustomEvent) => {
+      const enabled = e.detail.enabled
+      
+      // Disable map dragging when edit mode is on
+      if (mapInstance.current) {
+        if (enabled) {
+          // Disable map dragging
+          mapInstance.current.dragging.disable()
+          mapInstance.current.doubleClickZoom.disable()
+          console.log('🔷 Edit Mode ON - Map dragging disabled')
+        } else {
+          // Re-enable map dragging
+          mapInstance.current.dragging.enable()
+          mapInstance.current.doubleClickZoom.enable()
+          console.log('🔷 Edit Mode OFF - Map dragging enabled')
+        }
+      }
+    }
+    
+    window.addEventListener('polygonEditModeToggle', handleEditModeToggle as EventListener)
+    return () => {
+      window.removeEventListener('polygonEditModeToggle', handleEditModeToggle as EventListener)
+    }
+  }, [mapInstance])
+  
   // Handle polygon edit callback
   const handlePolygonEdit = async (polygonId: string, coordinates: Array<{lat: number, lng: number}>) => {
     if (!user || !currentMap) return
