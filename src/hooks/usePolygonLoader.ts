@@ -154,39 +154,51 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
               
               layer.bindPopup(popupContent)
               
-              // Add click handler for edit button
-              layer.on('popupopen', () => {
-                const btn = document.querySelector(`.edit-polygon-btn[data-polygon-id="${polygonId}"]`)
-                if (btn) {
-                  btn.addEventListener('click', () => {
-                    console.log('Edit polygon clicked:', polygonId)
-                    
-                    // Add to FeatureGroup for editing if not already added
-                    if (drawnItemsRef.current && layer && !drawnItemsRef.current.hasLayer(layer)) {
-                      drawnItemsRef.current.addLayer(layer)
-                    }
-                    
-                    // Close popup and enable editing
-                    (layer as any).closePopup()
-                    
-                    // Enable Leaflet.draw editing
-                    if ((L as any).Draw && (L as any).Draw.PolyEdit && (layer as any).enableEdit) {
-                      (layer as any).enableEdit()
-                    }
-                    
-                    // Show editing hint
-                    if (mapInstance) {
-                      (mapInstance as any)._container.style.cursor = 'crosshair'
-                      setTimeout(() => {
-                        (mapInstance as any)._container.style.cursor = ''
-                      }, 2000)
-                    }
-                  })
-                }
-              })
+              // Add click handler for edit button - enable Leaflet.draw editing
+              if (layer instanceof L.Polygon && mapInstance && layer !== null) {
+                const polygonLayer = layer
+                polygonLayer.on('popupopen', () => {
+                  // Remove any existing listeners to avoid duplicates
+                  const existingBtn = document.querySelector(`.edit-polygon-btn[data-polygon-id="${polygonId}"]`)
+                  
+                  if (existingBtn) {
+                    existingBtn.addEventListener('click', (e) => {
+                      e.stopPropagation()
+                      e.preventDefault()
+                      console.log('🔷 Edit button clicked for polygon:', polygonId)
+                      
+                      // Close popup
+                      polygonLayer.closePopup()
+                      
+                      // Add to FeatureGroup and trigger edit mode
+                      if (drawnItemsRef.current && mapInstance && polygonLayer) {
+                        // Ensure layer is in FeatureGroup
+                        if (!drawnItemsRef.current.hasLayer(polygonLayer)) {
+                          drawnItemsRef.current.addLayer(polygonLayer)
+                        }
+                        
+                        // Trigger Leaflet.draw edit handler directly
+                        // Find the edit toolbar button and click it
+                        setTimeout(() => {
+                          // Use Leaflet.Draw's edit handler directly
+                          try {
+                            const editHandler = new (L as any).Draw.PolyEdit(mapInstance, polygonLayer, {
+                              allowIntersection: false
+                            })
+                            editHandler.enable()
+                            console.log('🔷 Enabled edit handler for polygon')
+                          } catch (err) {
+                            console.error('Error enabling edit handler:', err)
+                          }
+                        }, 200)
+                      }
+                    })
+                  }
+                })
+              }
               
-              // Add to FeatureGroup for editing capability
-              if (drawnItemsRef.current && !drawnItemsRef.current.hasLayer(layer)) {
+              // Add to FeatureGroup for editing capability (Leaflet.draw requirement)
+              if (drawnItemsRef.current && layer && !drawnItemsRef.current.hasLayer(layer)) {
                 drawnItemsRef.current.addLayer(layer)
               }
               
