@@ -850,7 +850,13 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
         },
         edit: {
           featureGroup: drawnItemsRef.current!,
-          remove: false
+          remove: false,
+          edit: {
+            selectedPathOptions: {
+              color: '#ff0000',
+              weight: 3
+            }
+          }
         }
       }
       
@@ -862,6 +868,15 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       drawControlRef.current = new L.Control.Draw(drawOptions)
       mapInstance.current.addControl(drawControlRef.current)
       console.log('🔷 Leaflet Draw control added to map')
+      
+      // Listen for draw:editstart event to know when edit mode is triggered
+      mapInstance.current.on('draw:editstart', () => {
+        console.log('🔷 Leaflet.draw edit started')
+      })
+      
+      mapInstance.current.on('draw:editstop', () => {
+        console.log('🔷 Leaflet.draw edit stopped')
+      })
       
       // Check and style the toolbar
       setTimeout(function() {
