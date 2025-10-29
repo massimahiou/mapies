@@ -142,7 +142,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   }
 
   // Use the polygon loader hook for consistent polygon loading
-  usePolygonLoader({
+  const polygonLoaderResult = usePolygonLoader({
     mapInstance: mapInstance.current,
     mapLoaded,
     userId: user?.uid || '',
@@ -150,6 +150,22 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     activeTab,
     onPolygonEdit: handlePolygonEdit
   })
+  
+  // Expose save function via custom event for ManageTabContent
+  useEffect(() => {
+    if (polygonLoaderResult?.saveAllUnsavedPolygons) {
+      const handleSaveAll = () => {
+        const savedCount = polygonLoaderResult.saveAllUnsavedPolygons()
+        if (savedCount > 0) {
+          console.log('✅ Saved', savedCount, 'polygon(s) to Firestore')
+        }
+      }
+      window.addEventListener('saveAllPolygons', handleSaveAll)
+      return () => {
+        window.removeEventListener('saveAllPolygons', handleSaveAll)
+      }
+    }
+  }, [polygonLoaderResult])
   
   const visibleMarkers = useMemo(() => 
     markers.filter(marker => marker.visible), 

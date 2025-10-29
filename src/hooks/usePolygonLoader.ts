@@ -26,6 +26,40 @@ interface UsePolygonLoaderProps {
   onPolygonEdit?: (polygonId: string, coordinates: Array<{lat: number, lng: number}>) => void
 }
 
+// Export function to save all unsaved polygons
+export const saveAllUnsavedPolygons = (
+  mapInstance: L.Map | null,
+  _vertexMarkersRef: React.MutableRefObject<globalThis.Map<string, L.Marker[]>>, // Keep for future use
+  polygonLayersRef: React.MutableRefObject<globalThis.Map<string, L.Layer>>,
+  unsavedPolygonsRef: React.MutableRefObject<Set<string>>,
+  onPolygonEdit?: (polygonId: string, coordinates: Array<{lat: number, lng: number}>) => void
+): number => {
+  if (!mapInstance || !onPolygonEdit) return 0
+  
+  let savedCount = 0
+  
+  unsavedPolygonsRef.current.forEach((polygonId) => {
+    const layer = polygonLayersRef.current.get(polygonId)
+    if (layer instanceof L.Polygon) {
+      const latlngs = layer.getLatLngs()[0] as L.LatLng[]
+      const coordinates = latlngs.map((ll: L.LatLng) => ({ lat: ll.lat, lng: ll.lng }))
+      onPolygonEdit(polygonId, coordinates)
+      savedCount++
+    }
+  })
+  
+  // Clear unsaved changes
+  unsavedPolygonsRef.current.clear()
+  window.dispatchEvent(new CustomEvent('polygonUnsavedChanges', { 
+    detail: { 
+      hasUnsaved: false,
+      polygonCount: 0 
+    } 
+  }))
+  
+  return savedCount
+}
+
 export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, activeTab, onPolygonEdit }: UsePolygonLoaderProps) => {
   const polygonLayersRef = useRef(new globalThis.Map<string, L.Layer>())
   const lastLoadedMapIdRef = useRef<string>('')
@@ -40,6 +74,7 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
   const boxSelectStartRef = useRef<L.LatLng | null>(null) // Start position for box selection
   const isBoxSelectingRef = useRef(false) // Whether currently box selecting
   const boxSelectModeEnabledRef = useRef(false) // Whether box select mode is enabled
+  const unsavedPolygonsRef = useRef(new Set<string>()) // Track polygons with unsaved changes
 
   useEffect(() => {
     if (!mapLoaded || !mapInstance || !userId || !mapId) {
@@ -161,10 +196,7 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
                 <div class="text-sm">
                   <h3 class="font-semibold mb-1">${polygon.name}</h3>
                   ${polygon.description ? `<p class="text-gray-600">${polygon.description}</p>` : ''}
-                  <button class="edit-polygon-btn mt-2 px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600" data-polygon-id="${polygonId}">
-                    ✏️ Edit Shape
-                  </button>
-                  <p class="text-xs text-gray-400 mt-1">Drag vertices to adjust</p>
+                  <p class="text-xs text-gray-400 mt-1">Use Edit Mode to modify vertices</p>
                 </div>
               `
               
@@ -570,13 +602,20 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
         polygon.setLatLngs([updatedLatlngs])
       })
       
-      // Save polygon when drag ends
+      // Track unsaved changes when drag ends (don't auto-save)
       marker.on('dragend', () => {
         const finalLatlngs = polygon.getLatLngs()[0] as L.LatLng[]
-        const coordinates = finalLatlngs.map((ll: L.LatLng) => ({ lat: ll.lat, lng: ll.lng }))
         
-        if (polygonId && onPolygonEdit) {
-          onPolygonEdit(polygonId, coordinates)
+        // Mark polygon as having unsaved changes
+        if (polygonId) {
+          unsavedPolygonsRef.current.add(polygonId)
+          // Notify that there are unsaved changes
+          window.dispatchEvent(new CustomEvent('polygonUnsavedChanges', { 
+            detail: { 
+              hasUnsaved: true,
+              polygonCount: unsavedPolygonsRef.current.size 
+            } 
+          }))
         }
         
         // Update all vertex markers to reflect new positions (ensures they're synced)
@@ -610,6 +649,16 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     console.log('🔷 usePolygonLoader dependencies changed:', { mapLoaded, mapId, userId, hasInstance: !!mapInstance })
   }, [mapLoaded, mapId, userId, mapInstance])
   
-  return polygonLayersRef
+  return { 
+    polygonLayersRef,
+    unsavedPolygonsRef,
+    saveAllUnsavedPolygons: () => saveAllUnsavedPolygons(
+      mapInstance, 
+      vertexMarkersRef, 
+      polygonLayersRef, 
+      unsavedPolygonsRef, 
+      onPolygonEdit
+    )
+  }
 }
 

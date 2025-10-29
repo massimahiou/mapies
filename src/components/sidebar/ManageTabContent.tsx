@@ -79,6 +79,8 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const [loadingPolygons, setLoadingPolygons] = useState(false)
   const [polygonEditMode, setPolygonEditMode] = useState(false)
   const [boxSelectMode, setBoxSelectMode] = useState(false)
+  const [hasUnsavedPolygonChanges, setHasUnsavedPolygonChanges] = useState(false)
+  const [unsavedPolygonCount, setUnsavedPolygonCount] = useState(0)
 
   // Load user document for usage limits
   // useEffect(() => {
@@ -829,6 +831,19 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     return icons[type] || '📍'
   }
 
+  // Listen for unsaved polygon changes
+  useEffect(() => {
+    const handleUnsavedChanges = (e: CustomEvent) => {
+      setHasUnsavedPolygonChanges(e.detail.hasUnsaved)
+      setUnsavedPolygonCount(e.detail.polygonCount)
+    }
+    
+    window.addEventListener('polygonUnsavedChanges', handleUnsavedChanges as EventListener)
+    return () => {
+      window.removeEventListener('polygonUnsavedChanges', handleUnsavedChanges as EventListener)
+    }
+  }, [])
+
   // Fetch polygons
   useEffect(() => {
     const loadPolygons = async () => {
@@ -849,6 +864,18 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
 
     loadPolygons()
   }, [mapId, userId, currentMap])
+  
+  // Handle saving all polygon changes
+  const handleSaveAllPolygons = () => {
+    window.dispatchEvent(new CustomEvent('saveAllPolygons'))
+    showToast({
+      type: 'success',
+      title: 'Saved',
+      message: `Saved ${unsavedPolygonCount} polygon(s) to Firestore`
+    })
+    setHasUnsavedPolygonChanges(false)
+    setUnsavedPolygonCount(0)
+  }
 
   // Toggle polygon visibility
   const handleTogglePolygonVisibility = async (polygonId: string, currentVisibility: boolean) => {
@@ -1627,6 +1654,15 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
               <div className="text-xs text-gray-600">
                 <span className="hidden sm:inline">Click Box Select, then drag to select vertices</span>
               </div>
+            )}
+            {hasUnsavedPolygonChanges && (
+              <button
+                onClick={handleSaveAllPolygons}
+                className="px-3 py-1 text-xs rounded-lg bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-1"
+                title={`Save ${unsavedPolygonCount} polygon(s) to Firestore`}
+              >
+                💾 Save {unsavedPolygonCount > 0 ? `(${unsavedPolygonCount})` : ''}
+              </button>
             )}
             <button
               onClick={() => {
