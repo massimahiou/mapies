@@ -91,13 +91,31 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   const [searchResults, setSearchResults] = useState<Marker[]>([])
   const [renamedMarkers] = useState<Record<string, string>>({})
   
+  // Handle polygon edit callback
+  const handlePolygonEdit = async (polygonId: string, coordinates: Array<{lat: number, lng: number}>) => {
+    if (!user || !currentMap) return
+    
+    try {
+      console.log('🔷 Saving edited polygon:', polygonId, coordinates.length)
+      const { updateMapPolygon } = await import('../firebase/maps')
+      await updateMapPolygon(user.uid, currentMap.id, polygonId, {
+        coordinates
+      })
+      
+      console.log('✅ Polygon edited successfully')
+    } catch (error) {
+      console.error('Error editing polygon:', error)
+    }
+  }
+
   // Use the polygon loader hook for consistent polygon loading
   usePolygonLoader({
     mapInstance: mapInstance.current,
     mapLoaded,
     userId: user?.uid || '',
     mapId: currentMap?.id || '',
-    activeTab
+    activeTab,
+    onPolygonEdit: handlePolygonEdit
   })
   
   const visibleMarkers = useMemo(() => 
@@ -807,6 +825,11 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
           featureGroup: drawnItemsRef.current!,
           remove: false
         }
+      }
+      
+      // Enable snapping if available
+      if ((window as any).L && (window as any).L.handler && (window as any).L.handler.PolylineSnap) {
+        console.log('🔷 Leaflet Snap plugin detected')
       }
 
       drawControlRef.current = new L.Control.Draw(drawOptions)

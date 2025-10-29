@@ -23,13 +23,15 @@ interface UsePolygonLoaderProps {
   userId: string
   mapId: string
   activeTab?: string
+  onPolygonEdit?: (polygonId: string, coordinates: Array<{lat: number, lng: number}>) => void
 }
 
-export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, activeTab }: UsePolygonLoaderProps) => {
+export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, activeTab, onPolygonEdit }: UsePolygonLoaderProps) => {
   const polygonLayersRef = useRef(new globalThis.Map<string, L.Layer>())
   const lastLoadedMapIdRef = useRef<string>('')
   const lastMapInstanceRef = useRef<L.Map | null>(null)
   const lastActiveTabRef = useRef<string>('')
+  const drawnItemsRef = useRef<L.FeatureGroup | null>(null)
 
   useEffect(() => {
     if (!mapLoaded || !mapInstance || !userId || !mapId) {
@@ -64,6 +66,28 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
         const { getMapPolygons } = await import('../firebase/maps')
         const polygons = await getMapPolygons(userId, mapId)
         console.log('🔷 Loaded polygons:', polygons.length, 'for map:', mapId)
+
+        // Initialize FeatureGroup for editable polygons if it doesn't exist
+        if (!drawnItemsRef.current && mapInstance) {
+          drawnItemsRef.current = new L.FeatureGroup()
+          mapInstance.addLayer(drawnItemsRef.current!)
+          
+          // Listen for edit events to save changes
+          mapInstance.on('draw:edited', (e: any) => {
+            const layers = e.layers as L.FeatureGroup
+            layers.eachLayer((layer: L.Layer) => {
+              if (layer instanceof L.Polygon) {
+                const polygonId = (layer as any).polygonId
+                const latlngs = layer.getLatLngs()[0] as L.LatLng[]
+                const coordinates = latlngs.map((ll: L.LatLng) => ({ lat: ll.lat, lng: ll.lng }))
+                
+                if (polygonId && onPolygonEdit) {
+                  onPolygonEdit(polygonId, coordinates)
+                }
+              }
+            })
+          })
+        }
 
         // If switching maps (not just tabs), remove old polygon layers
         if (mapIdChanged && lastLoadedMapIdRef.current && lastMapInstanceRef.current !== null) {
@@ -112,18 +136,63 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
               })
             }
 
-            // Add popup and render
+            // Add popup with edit button and render
             if (layer && mapInstance) {
-              layer.bindPopup(`
-                <div>
-                  <h3>${polygon.name}</h3>
-                  ${polygon.description ? `<p>${polygon.description}</p>` : ''}
+              const polygonId = polygon.id || ''
+              ;(layer as any).polygonId = polygonId
+              
+              const popupContent = `
+                <div class="text-sm">
+                  <h3 class="font-semibold mb-1">${polygon.name}</h3>
+                  ${polygon.description ? `<p class="text-gray-600">${polygon.description}</p>` : ''}
+                  <button class="edit-polygon-btn mt-2 px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600" data-polygon-id="${polygonId}">
+                    ✏️ Edit Shape
+                  </button>
+                  <p class="text-xs text-gray-400 mt-1">Drag vertices to adjust</p>
                 </div>
-              `)
+              `
+              
+              layer.bindPopup(popupContent)
+              
+              // Add click handler for edit button
+              layer.on('popupopen', () => {
+                const btn = document.querySelector(`.edit-polygon-btn[data-polygon-id="${polygonId}"]`)
+                if (btn) {
+                  btn.addEventListener('click', () => {
+                    console.log('Edit polygon clicked:', polygonId)
+                    
+                    // Add to FeatureGroup for editing if not already added
+                    if (drawnItemsRef.current && layer && !drawnItemsRef.current.hasLayer(layer)) {
+                      drawnItemsRef.current.addLayer(layer)
+                    }
+                    
+                    // Close popup and enable editing
+                    (layer as any).closePopup()
+                    
+                    // Enable Leaflet.draw editing
+                    if ((L as any).Draw && (L as any).Draw.PolyEdit && (layer as any).enableEdit) {
+                      (layer as any).enableEdit()
+                    }
+                    
+                    // Show editing hint
+                    if (mapInstance) {
+                      (mapInstance as any)._container.style.cursor = 'crosshair'
+                      setTimeout(() => {
+                        (mapInstance as any)._container.style.cursor = ''
+                      }, 2000)
+                    }
+                  })
+                }
+              })
+              
+              // Add to FeatureGroup for editing capability
+              if (drawnItemsRef.current && !drawnItemsRef.current.hasLayer(layer)) {
+                drawnItemsRef.current.addLayer(layer)
+              }
               
               layer.addTo(mapInstance)
-              polygonLayersRef.current.set(polygon.id || '', layer)
-              console.log('🔷 Rendered polygon:', polygon.id)
+              polygonLayersRef.current.set(polygonId, layer)
+              console.log('🔷 Rendered polygon:', polygonId)
             }
           } catch (polygonError) {
             console.error('Error rendering polygon:', polygon.id, polygonError)

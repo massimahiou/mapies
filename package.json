@@ -33,6 +33,7 @@
     "framer-motion": "^12.23.24",
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",
+    "leaflet-snap": "^0.0.4",
     "leaflet.markercluster": "^1.5.3",
     "lucide-react": "^0.263.0",
     "mapbox-gl": "^2.15.0",
