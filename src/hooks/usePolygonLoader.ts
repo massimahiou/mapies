@@ -32,6 +32,8 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
   const lastMapInstanceRef = useRef<L.Map | null>(null)
   const lastActiveTabRef = useRef<string>('')
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null)
+  const vertexMarkersRef = useRef(new globalThis.Map<string, L.Marker[]>()) // polygonId -> array of vertex markers
+  const editModeEnabledRef = useRef(false)
 
   useEffect(() => {
     if (!mapLoaded || !mapInstance || !userId || !mapId) {
@@ -89,10 +91,18 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
           })
         }
 
-        // If switching maps (not just tabs), remove old polygon layers
+        // If switching maps (not just tabs), remove old polygon layers and vertex markers
         if (mapIdChanged && lastLoadedMapIdRef.current && lastMapInstanceRef.current !== null) {
           console.log('🔷 Clearing old polygon layers from previous map')
           const previousInstance = lastMapInstanceRef.current
+          
+          // Remove vertex markers for old polygons
+          vertexMarkersRef.current.forEach((markers) => {
+            markers.forEach(marker => previousInstance.removeLayer(marker))
+          })
+          vertexMarkersRef.current.clear()
+          
+          // Remove polygon layers
           polygonLayersRef.current.forEach((layer: L.Layer) => {
             if (previousInstance.hasLayer(layer)) {
               previousInstance.removeLayer(layer)
@@ -163,10 +173,21 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
               polygonLayersRef.current.set(polygonId, layer)
               console.log('🔷 Rendered polygon:', polygonId)
               
+              // If edit mode is already enabled, show vertex markers for this new polygon
+              const polygonLayer = layer instanceof L.Polygon ? layer : null
+              if (editModeEnabledRef.current && polygonLayer) {
+                // Use setTimeout to ensure polygon is fully rendered
+                setTimeout(() => {
+                  if (mapInstance.hasLayer(polygonLayer)) {
+                    showVertexMarkers(mapInstance, polygonLayer, polygonId)
+                  }
+                }, 50)
+              }
+              
               // Add right-click handler for editing (Leaflet.draw standard)
-              if (layer instanceof L.Polygon && mapInstance) {
+              if (polygonLayer && mapInstance) {
                 // Right-click to enter edit mode (Leaflet.draw convention)
-                layer.on('contextmenu', (e: L.LeafletMouseEvent) => {
+                polygonLayer.on('contextmenu', (e: L.LeafletMouseEvent) => {
                   e.originalEvent.preventDefault()
                   console.log('🔷 Right-click on polygon, enabling edit mode')
                   
@@ -210,6 +231,113 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       }
     }
   }, [mapLoaded, mapId, userId, mapInstance, activeTab])
+  
+  // Listen for edit mode toggle
+  useEffect(() => {
+    const handleEditModeToggle = (e: CustomEvent) => {
+      const enabled = e.detail.enabled
+      editModeEnabledRef.current = enabled
+      
+      if (!mapInstance || !mapLoaded) return
+      
+      console.log('🔷 Edit mode toggled:', enabled)
+      
+      if (enabled) {
+        // Show pink vertex dots for all polygons
+        polygonLayersRef.current.forEach((layer, polygonId) => {
+          if (layer instanceof L.Polygon) {
+            showVertexMarkers(mapInstance, layer, polygonId || '')
+          }
+        })
+      } else {
+        // Hide all vertex markers
+        hideAllVertexMarkers(mapInstance)
+      }
+    }
+    
+    window.addEventListener('polygonEditModeToggle', handleEditModeToggle as EventListener)
+    return () => {
+      window.removeEventListener('polygonEditModeToggle', handleEditModeToggle as EventListener)
+    }
+  }, [mapInstance, mapLoaded])
+  
+  // Function to show pink vertex markers for a polygon (must be defined inside hook to access refs)
+  const showVertexMarkers = (map: L.Map, polygon: L.Polygon, polygonId: string) => {
+    if (!onPolygonEdit) {
+      console.warn('🔷 onPolygonEdit callback not available, skipping vertex markers')
+      return
+    }
+    // Remove existing vertex markers if any
+    const existingMarkers = vertexMarkersRef.current.get(polygonId)
+    if (existingMarkers) {
+      existingMarkers.forEach(marker => map.removeLayer(marker))
+    }
+    
+    // Get all vertices from the polygon
+    const latlngs = polygon.getLatLngs()[0] as L.LatLng[]
+    const vertexMarkers: L.Marker[] = []
+    
+    latlngs.forEach((latlng: L.LatLng, index: number) => {
+      // Create pink circular marker
+      const pinkIcon = L.divIcon({
+        className: 'pink-vertex-marker',
+        html: `<div style="width: 12px; height: 12px; background-color: #ff1493; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: pointer;"></div>`,
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+      })
+      
+      const marker = L.marker(latlng, {
+        icon: pinkIcon,
+        draggable: true,
+        zIndexOffset: 1000
+      }).addTo(map)
+      
+      // Make marker draggable and update polygon on drag
+      marker.on('drag', () => {
+        // Get current polygon coordinates
+        const currentLatlngs = polygon.getLatLngs()[0] as L.LatLng[]
+        const newLatlng = marker.getLatLng()
+        
+        // Update the vertex at this index
+        const updatedLatlngs = [...currentLatlngs]
+        updatedLatlngs[index] = newLatlng
+        
+        // Update polygon shape
+        polygon.setLatLngs([updatedLatlngs])
+      })
+      
+      // Save polygon when drag ends
+      marker.on('dragend', () => {
+        const finalLatlngs = polygon.getLatLngs()[0] as L.LatLng[]
+        const coordinates = finalLatlngs.map((ll: L.LatLng) => ({ lat: ll.lat, lng: ll.lng }))
+        
+        if (polygonId && onPolygonEdit) {
+          onPolygonEdit(polygonId, coordinates)
+        }
+        
+        // Update all vertex markers to reflect new positions (ensures they're synced)
+        finalLatlngs.forEach((ll: L.LatLng, idx: number) => {
+          if (vertexMarkers[idx] && idx !== index) {
+            vertexMarkers[idx].setLatLng(ll)
+          }
+        })
+      })
+      
+      vertexMarkers.push(marker)
+    })
+    
+    vertexMarkersRef.current.set(polygonId, vertexMarkers)
+    console.log('🔷 Created', vertexMarkers.length, 'pink vertex markers for polygon:', polygonId)
+  }
+  
+  // Function to hide all vertex markers
+  const hideAllVertexMarkers = (map: L.Map) => {
+    vertexMarkersRef.current.forEach((markers) => {
+      markers.forEach(marker => map.removeLayer(marker))
+    })
+    vertexMarkersRef.current.clear()
+    console.log('🔷 Removed all vertex markers')
+  }
   
   // Debug: log when dependencies change
   useEffect(() => {
