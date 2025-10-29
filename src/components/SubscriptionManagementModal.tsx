@@ -62,7 +62,7 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
   }
 
   const handlePlanSelect = async (planId: 'freemium' | 'starter' | 'professional' | 'enterprise') => {
-    if (!user || !userDoc?.stripeCustomerId) return
+    if (!user) return
     
     // Don't process if this is the current plan
     if (planId === currentPlan) {
@@ -77,24 +77,43 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
       return // Stop here - wait for user to confirm
     }
     
-    // For upgrades, open Stripe Billing Portal
+    // Check if user has a Stripe customer ID
+    const hasStripeCustomer = !!userDoc?.stripeCustomerId
+    
     try {
       setProcessingPlanId(planId)
       
       await stripeService.initializeStripe(STRIPE_CONFIG.PUBLISHABLE_KEY)
       
-      // Create customer portal session
-      const portalUrl = await stripeService.createCustomerPortalSession({
-        customerId: userDoc.stripeCustomerId,
-        returnUrl: `${window.location.origin}/dashboard`
-      })
-      
-      // Redirect to customer portal
-      await stripeService.redirectToCustomerPortal(portalUrl)
+      if (hasStripeCustomer) {
+        // User has existing subscription - open billing portal
+        console.log('User has Stripe customer, opening billing portal')
+        const portalUrl = await stripeService.createCustomerPortalSession({
+          customerId: userDoc.stripeCustomerId!,
+          returnUrl: `${window.location.origin}/dashboard`
+        })
+        await stripeService.redirectToCustomerPortal(portalUrl)
+      } else {
+        // User doesn't have a subscription yet - use checkout flow
+        console.log('User has no Stripe customer, using checkout flow')
+        const baseUrl = window.location.origin
+        const successUrl = `${baseUrl}/auth?subscription=success`
+        const cancelUrl = `${baseUrl}/auth?subscription=cancelled`
+        
+        const checkoutData = await stripeService.createCheckoutSessionForPlan(
+          planId,
+          user.uid,
+          user.email || '',
+          successUrl,
+          cancelUrl
+        )
+        
+        await stripeService.redirectToCheckout(checkoutData.url)
+      }
       
     } catch (error) {
-      console.error('Error opening billing portal:', error)
-      setModalMessage('Failed to open billing portal. Please try again or contact support.')
+      console.error('Error processing plan change:', error)
+      setModalMessage('Failed to process plan change. Please try again or contact support.')
       setShowErrorModal(true)
     } finally {
       setProcessingPlanId(null)
