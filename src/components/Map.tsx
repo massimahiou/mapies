@@ -99,15 +99,21 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       // Disable map dragging when edit mode is on
       if (mapInstance.current) {
         if (enabled) {
-          // Disable map dragging
+          // Disable map dragging and zoom behaviors
           mapInstance.current.dragging.disable()
           mapInstance.current.doubleClickZoom.disable()
-          console.log('🔷 Edit Mode ON - Map dragging disabled')
+          if (mapInstance.current.boxZoom) {
+            mapInstance.current.boxZoom.disable()
+          }
+          console.log('🔷 Edit Mode ON - Map dragging and box zoom disabled')
         } else {
-          // Re-enable map dragging
+          // Re-enable map dragging and zoom behaviors
           mapInstance.current.dragging.enable()
           mapInstance.current.doubleClickZoom.enable()
-          console.log('🔷 Edit Mode OFF - Map dragging enabled')
+          if (mapInstance.current.boxZoom) {
+            mapInstance.current.boxZoom.enable()
+          }
+          console.log('🔷 Edit Mode OFF - Map dragging and box zoom enabled')
         }
       }
     }

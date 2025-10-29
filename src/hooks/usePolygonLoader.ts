@@ -281,6 +281,10 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       // Only start box selection if Shift is held and clicking on map (not on a marker)
       if (!e.originalEvent.shiftKey) return
       
+      // Prevent Leaflet's box zoom from interfering
+      e.originalEvent.stopPropagation()
+      e.originalEvent.preventDefault()
+      
       // Check if click was on a vertex marker
       const target = e.originalEvent.target as HTMLElement
       if (target.closest('.pink-vertex-marker')) {
@@ -308,13 +312,25 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     const handleMouseMove = (e: L.LeafletMouseEvent) => {
       if (!isBoxSelectingRef.current || !startPoint || !boxSelectRectRef.current) return
       
+      // Prevent Leaflet's box zoom from interfering
+      if (e.originalEvent.shiftKey) {
+        e.originalEvent.stopPropagation()
+        e.originalEvent.preventDefault()
+      }
+      
       // Update rectangle bounds
       const bounds = L.latLngBounds([startPoint, e.latlng])
       boxSelectRectRef.current.setBounds(bounds)
     }
     
-    const handleMouseUp = () => {
+    const handleMouseUp = (e: L.LeafletMouseEvent) => {
       if (!isBoxSelectingRef.current || !startPoint || !boxSelectRectRef.current) return
+      
+      // Prevent Leaflet's box zoom from interfering
+      if (e.originalEvent.shiftKey) {
+        e.originalEvent.stopPropagation()
+        e.originalEvent.preventDefault()
+      }
       
       isBoxSelectingRef.current = false
       
@@ -354,14 +370,33 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       console.log('🔷 Box selection: selected', selectedCount, 'vertices')
     }
     
-    mapInstance.on('mousedown', handleMouseDown)
-    mapInstance.on('mousemove', handleMouseMove)
-    mapInstance.on('mouseup', handleMouseUp)
+    // Use capture phase and high priority to intercept before Leaflet's box zoom
+    mapInstance.on('mousedown', handleMouseDown, mapInstance)
+    mapInstance.on('mousemove', handleMouseMove, mapInstance)
+    mapInstance.on('mouseup', handleMouseUp, mapInstance)
+    
+    // Also listen on the map container directly to catch events earlier
+    const container = mapInstance.getContainer()
+    const directMouseDown = (e: MouseEvent) => {
+      if (e.shiftKey && editModeEnabledRef.current) {
+        // Check if click was on a vertex marker
+        const target = e.target as HTMLElement
+        if (!target.closest('.pink-vertex-marker')) {
+          e.stopPropagation()
+          e.stopImmediatePropagation()
+        }
+      }
+    }
+    
+    container.addEventListener('mousedown', directMouseDown, true) // Use capture phase
     
     return () => {
       mapInstance.off('mousedown', handleMouseDown)
       mapInstance.off('mousemove', handleMouseMove)
       mapInstance.off('mouseup', handleMouseUp)
+      
+      const container = mapInstance.getContainer()
+      container.removeEventListener('mousedown', directMouseDown, true)
       
       // Cleanup rectangle if exists
       if (boxSelectRectRef.current && mapInstance.hasLayer(boxSelectRectRef.current)) {
