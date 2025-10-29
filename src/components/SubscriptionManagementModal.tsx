@@ -62,7 +62,7 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
   }
 
   const handlePlanSelect = async (planId: 'freemium' | 'starter' | 'professional' | 'enterprise') => {
-    if (!user) return
+    if (!user || !userDoc?.stripeCustomerId) return
     
     // Don't process if this is the current plan
     if (planId === currentPlan) {
@@ -77,29 +77,24 @@ const SubscriptionManagementModal: React.FC<SubscriptionManagementModalProps> = 
       return // Stop here - wait for user to confirm
     }
     
-    // For upgrades, proceed with Stripe checkout
+    // For upgrades, open Stripe Billing Portal
     try {
       setProcessingPlanId(planId)
       
       await stripeService.initializeStripe(STRIPE_CONFIG.PUBLISHABLE_KEY)
       
-      const baseUrl = window.location.origin
-      const successUrl = `${baseUrl}/auth?subscription=success`
-      const cancelUrl = `${baseUrl}/auth?subscription=cancelled`
+      // Create customer portal session
+      const portalUrl = await stripeService.createCustomerPortalSession({
+        customerId: userDoc.stripeCustomerId,
+        returnUrl: `${window.location.origin}/dashboard`
+      })
       
-      const checkoutData = await stripeService.createCheckoutSessionForPlan(
-        planId,
-        user.uid,
-        user.email || '',
-        successUrl,
-        cancelUrl
-      )
-      
-      await stripeService.redirectToCheckout(checkoutData.url)
+      // Redirect to customer portal
+      await stripeService.redirectToCustomerPortal(portalUrl)
       
     } catch (error) {
-      console.error('Error upgrading plan:', error)
-      setModalMessage('Payment processing failed. Please try again or contact support.')
+      console.error('Error opening billing portal:', error)
+      setModalMessage('Failed to open billing portal. Please try again or contact support.')
       setShowErrorModal(true)
     } finally {
       setProcessingPlanId(null)
