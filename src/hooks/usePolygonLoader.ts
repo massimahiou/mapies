@@ -98,10 +98,35 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       hasPolygons: polygonLayersRef.current.size > 0
     })
 
-    // ALWAYS reload if instance changed (tab switch recreated map) or tab changed
-    if (instanceChanged || tabChanged) {
-      console.log('🔷 Force reload - instance or tab changed')
+    // Remove existing layers from map before reloading
+    // Only reload if instance changed (map recreated) - not just tab changes
+    if (instanceChanged && lastMapInstanceRef.current) {
+      console.log('🔷 Map instance changed, removing old layers')
+      const previousInstance = lastMapInstanceRef.current
+      
+      // Remove all polygon layers from previous instance
+      polygonLayersRef.current.forEach((layer: L.Layer) => {
+        if (previousInstance.hasLayer(layer)) {
+          previousInstance.removeLayer(layer)
+        }
+      })
+      
+      // Remove vertex markers
+      vertexMarkersRef.current.forEach((markers) => {
+        markers.forEach(marker => previousInstance.removeLayer(marker))
+      })
+      vertexMarkersRef.current.clear()
+      
+      // Clear the refs
       polygonLayersRef.current.clear()
+    }
+    
+    // If tab changed but instance is the same, just skip reloading
+    // (polygons should persist across tabs on the same map instance)
+    if (tabChanged && !instanceChanged) {
+      console.log('🔷 Tab changed but map instance same, skipping polygon reload')
+      lastActiveTabRef.current = activeTab || ''
+      return
     }
 
     const loadPolygons = async () => {
@@ -151,15 +176,39 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
           })
         }
 
+        // First, remove any existing layers that are on the map but not in our ref
+        // This handles the case where layers weren't properly cleaned up
+        const currentLayersOnMap: L.Layer[] = []
+        mapInstance.eachLayer((layer: L.Layer) => {
+          if ((layer instanceof L.Polygon || layer instanceof L.Circle) && (layer as any).polygonId) {
+            const polygonId = (layer as any).polygonId
+            if (!polygonLayersRef.current.has(polygonId)) {
+              // Layer exists on map but not in our ref - remove it
+              console.log('🔷 Removing orphaned polygon layer:', polygonId)
+              mapInstance.removeLayer(layer)
+            } else {
+              currentLayersOnMap.push(layer)
+            }
+          }
+        })
+
         // Render each polygon
         polygons.forEach((polygon: PolygonDocument) => {
           if (!polygon.visible || !mapInstance) return
 
+          const polygonId = polygon.id || ''
+          
           // Check if already rendered on current map instance
-          const existingLayer = polygonLayersRef.current.get(polygon.id || '')
+          const existingLayer = polygonLayersRef.current.get(polygonId)
           if (existingLayer && mapInstance.hasLayer(existingLayer)) {
-            console.log('🔷 Polygon already on map:', polygon.id)
+            console.log('🔷 Polygon already on map, skipping:', polygonId)
             return
+          }
+          
+          // If we have an existing layer in ref but it's not on the map, remove from ref
+          if (existingLayer && !mapInstance.hasLayer(existingLayer)) {
+            console.log('🔷 Cleaning up stale layer reference:', polygonId)
+            polygonLayersRef.current.delete(polygonId)
           }
 
           let layer: L.Layer | null = null
@@ -189,7 +238,17 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
 
             // Add popup with edit button and render
             if (layer && mapInstance) {
-              const polygonId = polygon.id || ''
+              // Double-check this polygon isn't already on the map
+              const checkId = polygon.id || ''
+              if (polygonLayersRef.current.has(checkId)) {
+                const existing = polygonLayersRef.current.get(checkId)
+                if (existing && mapInstance.hasLayer(existing)) {
+                  console.log('🔷 Polygon already rendered, skipping duplicate:', checkId)
+                  return // Skip this polygon
+                }
+              }
+              
+              const polygonId = checkId
               ;(layer as any).polygonId = polygonId
               
               const popupContent = `
