@@ -121,12 +121,12 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       polygonLayersRef.current.clear()
     }
     
-    // If tab changed but instance is the same, just skip reloading
-    // (polygons should persist across tabs on the same map instance)
+    // If tab changed but instance is the same, still reload polygons
+    // This ensures polygons show up when switching to publish tab
+    // The duplicate prevention logic below will handle preventing re-rendering
     if (tabChanged && !instanceChanged) {
-      console.log('🔷 Tab changed but map instance same, skipping polygon reload')
-      lastActiveTabRef.current = activeTab || ''
-      return
+      console.log('🔷 Tab changed, will reload polygons to ensure they appear')
+      // Don't return - let it continue to load polygons
     }
 
     const loadPolygons = async () => {
