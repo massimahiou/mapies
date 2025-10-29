@@ -163,42 +163,25 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
               polygonLayersRef.current.set(polygonId, layer)
               console.log('🔷 Rendered polygon:', polygonId)
               
-              // Make polygon click-to-edit: clicking on the polygon enables edit mode
+              // Add right-click handler for editing (Leaflet.draw standard)
               if (layer instanceof L.Polygon && mapInstance) {
-                const polygonLayer = layer
-                
-                // Track if this polygon is in edit mode
-                ;(layer as any).isEditing = false
-                
-                // Click handler: toggle edit mode
-                polygonLayer.on('click', (e: L.LeafletMouseEvent) => {
-                  // If not in edit mode, enable it
-                  if (!(polygonLayer as any).isEditing) {
-                    ;(polygonLayer as any).isEditing = true
-                    
-                    // Initialize edit handler
-                    try {
-                      const editHandler = new (L as any).Draw.PolyEdit(mapInstance, polygonLayer, {
-                        allowIntersection: false
-                      })
-                      ;(polygonLayer as any)._editHandler = editHandler
-                      editHandler.enable()
-                      
-                      console.log('🔷 Enabled edit mode on click for:', polygonId)
-                      
-                      // Listen for when editing is done
-                      polygonLayer.on('draw:editable:vertex:dragend', () => {
-                        console.log('🔷 Vertex dragged, will auto-save when edit complete')
-                      })
-                      
-                    } catch (err) {
-                      console.error('Error enabling edit mode:', err)
-                    }
-                  }
+                // Right-click to enter edit mode (Leaflet.draw convention)
+                layer.on('contextmenu', (e: L.LeafletMouseEvent) => {
+                  e.originalEvent.preventDefault()
+                  console.log('🔷 Right-click on polygon, enabling edit mode')
                   
-                  // Close popup if open
-                  polygonLayer.closePopup()
-                  e.originalEvent.stopPropagation()
+                  try {
+                    // Use Leaflet.draw's edit handler
+                    const editHandler = new (L as any).Draw.PolyEdit(mapInstance, layer, {
+                      allowIntersection: false
+                    })
+                    ;(layer as any)._editHandler = editHandler
+                    editHandler.enable()
+                    
+                    console.log('🔷 Edit handler enabled for polygon:', polygonId)
+                  } catch (err) {
+                    console.error('Error enabling edit mode:', err)
+                  }
                 })
               }
             }
