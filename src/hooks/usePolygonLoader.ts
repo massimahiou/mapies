@@ -205,6 +205,25 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
               layer.addTo(mapInstance)
               polygonLayersRef.current.set(polygonId, layer)
               console.log('🔷 Rendered polygon:', polygonId)
+              
+              // Make polygon immediately editable using Leaflet.draw
+              if (layer instanceof L.Polygon && mapInstance) {
+                // Initialize edit handler for this polygon
+                try {
+                  const editHandler = new (L as any).Draw.PolyEdit(mapInstance, layer, {
+                    allowIntersection: false
+                  })
+                  
+                  // Store the handler on the layer
+                  ;(layer as any)._editHandler = editHandler
+                  
+                  // Enable editing by default
+                  editHandler.enable()
+                  console.log('🔷 Enabled auto-edit for polygon:', polygonId)
+                } catch (err) {
+                  console.error('Error enabling auto-edit for polygon:', err)
+                }
+              }
             }
           } catch (polygonError) {
             console.error('Error rendering polygon:', polygon.id, polygonError)
