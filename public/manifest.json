@@ -1,0 +1,43 @@
+{
+  "name": "PINZ - Interactive Maps",
+  "short_name": "PINZ",
+  "description": "The easiest way to create interactive maps for your business, stores, or markers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ec4899",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_icon_white.png?alt=media&token=00b92319-b212-49b5-b3a2-21d16d7f70e5",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_icon_white.png?alt=media&token=00b92319-b212-49b5-b3a2-21d16d7f70e5",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity", "utilities"],
+  "lang": "en",
+  "dir": "ltr",
+  "scope": "/",
+  "shortcuts": [
+    {
+      "name": "Create Map",
+      "short_name": "New Map",
+      "description": "Create a new interactive map",
+      "url": "/auth",
+      "icons": [
+        {
+          "src": "https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_icon_white.png?alt=media&token=00b92319-b212-49b5-b3a2-21d16d7f70e5",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ]
+}
+

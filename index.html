@@ -2,10 +2,31 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_icon_white.png?alt=media&token=00b92319-b212-49b5-b3a2-21d16d7f70e5" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Preconnect to external domains for performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://firebasestorage.googleapis.com" />
+    <link rel="preconnect" href="https://unpkg.com" />
+    
+    <!-- DNS Prefetch -->
+    <link rel="dns-prefetch" href="https://api.mapbox.com" />
+    <link rel="dns-prefetch" href="https://nominatim.openstreetmap.org" />
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_icon_white.png?alt=media&token=00b92319-b212-49b5-b3a2-21d16d7f70e5" />
+    <link rel="icon" type="image/png" sizes="16x16" href="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_icon_white.png?alt=media&token=00b92319-b212-49b5-b3a2-21d16d7f70e5" />
+    <link rel="apple-touch-icon" sizes="180x180" href="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_icon_white.png?alt=media&token=00b92319-b212-49b5-b3a2-21d16d7f70e5" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#ec4899" />
+    
+    <!-- Stylesheets -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <title>PINZ - Interactive Maps</title>
+    
+    <!-- Default SEO (will be overridden by React Helmet) -->
+    <title>PINZ - Interactive Maps Platform</title>
+    <meta name="description" content="The easiest way to create interactive maps for your business, stores, or markers. Create, customize, and share your maps in minutes." />
   </head>
   <body>
     <div id="root"></div>

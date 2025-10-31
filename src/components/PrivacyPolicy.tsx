@@ -1,12 +1,24 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
+import SEO from './SEO'
 
 const PrivacyPolicy: React.FC = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const language = searchParams.get('lang') === 'fr' ? 'fr' : 'en'
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50">
+    <>
+      <SEO 
+        title={language === 'fr' ? 'PINZ - Politique de Confidentialité' : 'PINZ - Privacy Policy'}
+        description={language === 'fr' 
+          ? 'Politique de confidentialité de PINZ. Découvrez comment nous protégeons vos données personnelles.'
+          : 'PINZ Privacy Policy. Learn how we protect your personal data.'}
+        language={language}
+        canonical={`https://pinzapp.com/privacy${language === 'en' ? '' : '?lang=fr'}`}
+      />
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50">
       {/* Header */}
       <header className="bg-white/95 backdrop-blur-sm shadow-sm border-b border-pink-100">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -223,6 +235,7 @@ const PrivacyPolicy: React.FC = () => {
         </div>
       </main>
     </div>
+    </>
   )
 }
 

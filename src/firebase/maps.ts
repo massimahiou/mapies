@@ -70,7 +70,7 @@ export interface MapDocument {
 export interface SharedUser {
   email: string
   userId?: string
-  role: 'viewer' | 'editor' | 'admin'
+  role: 'viewer' | 'editor'
   invitedAt: Date
   acceptedAt?: Date
   invitedBy: string
@@ -882,7 +882,7 @@ export const shareMapWithUser = async (
   mapId: string,
   ownerId: string,
   email: string,
-  role: 'viewer' | 'editor' | 'admin' = 'viewer'
+  role: 'viewer' | 'editor' = 'viewer'
 ): Promise<void> => {
   try {
     const mapRef = doc(db, 'users', ownerId, 'maps', mapId)
@@ -1030,7 +1030,7 @@ export const updateUserRole = async (
   mapId: string,
   ownerId: string,
   email: string,
-  newRole: 'viewer' | 'editor' | 'admin'
+  newRole: 'viewer' | 'editor'
 ): Promise<void> => {
   try {
     const mapRef = doc(db, 'users', ownerId, 'maps', mapId)

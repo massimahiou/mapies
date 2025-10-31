@@ -4,7 +4,12 @@ import {
   signOut, 
   onAuthStateChanged,
   User,
-  UserCredential
+  UserCredential,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  confirmPasswordReset,
+  applyActionCode,
+  verifyPasswordResetCode
 } from 'firebase/auth'
 import { auth } from './config'
 import { createUserDocument, updateLastLogin, getUserDocument } from './users'
@@ -82,6 +87,70 @@ export const getCurrentUserDocument = async (): Promise<any> => {
   } catch (error) {
     console.error('Error getting user document:', error)
     return null
+  }
+}
+
+// Send email verification
+export const sendVerificationEmail = async (user: User): Promise<void> => {
+  try {
+    const actionCodeSettings = {
+      url: 'https://pinzapp.com/auth/action',
+      handleCodeInApp: true,
+    }
+    await sendEmailVerification(user, actionCodeSettings)
+    console.log('Verification email sent successfully')
+  } catch (error: any) {
+    console.error('Error sending verification email:', error)
+    throw new Error(error.message)
+  }
+}
+
+// Send password reset email
+export const sendPasswordReset = async (email: string): Promise<void> => {
+  try {
+    const actionCodeSettings = {
+      url: 'https://pinzapp.com/auth/action',
+      handleCodeInApp: true,
+    }
+    await sendPasswordResetEmail(auth, email, actionCodeSettings)
+    console.log('Password reset email sent successfully')
+  } catch (error: any) {
+    console.error('Error sending password reset email:', error)
+    throw new Error(error.message)
+  }
+}
+
+// Verify email with action code
+export const verifyEmail = async (actionCode: string): Promise<void> => {
+  try {
+    await applyActionCode(auth, actionCode)
+    console.log('Email verified successfully')
+  } catch (error: any) {
+    console.error('Error verifying email:', error)
+    throw new Error(error.message)
+  }
+}
+
+// Confirm password reset
+export const confirmPasswordResetAction = async (actionCode: string, newPassword: string): Promise<void> => {
+  try {
+    await confirmPasswordReset(auth, actionCode, newPassword)
+    console.log('Password reset confirmed successfully')
+  } catch (error: any) {
+    console.error('Error confirming password reset:', error)
+    throw new Error(error.message)
+  }
+}
+
+// Verify password reset code
+export const verifyPasswordResetCodeAction = async (actionCode: string): Promise<string> => {
+  try {
+    const email = await verifyPasswordResetCode(auth, actionCode)
+    console.log('Password reset code verified for:', email)
+    return email
+  } catch (error: any) {
+    console.error('Error verifying password reset code:', error)
+    throw new Error(error.message)
   }
 }
 

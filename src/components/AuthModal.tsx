@@ -1,19 +1,41 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Mail, Lock, User, Eye, EyeOff, ArrowRight, CheckCircle } from 'lucide-react'
-import { createAccount, signIn } from '../firebase/auth'
+import { createAccount, signIn, sendVerificationEmail, sendPasswordReset } from '../firebase/auth'
 import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
+import { useNavigate } from 'react-router-dom'
 
 interface AuthModalProps {
   isOpen: boolean
   onClose: () => void
   onAuthSuccess: () => void
+  initialMode?: 'login' | 'signup' // Add prop to specify initial mode
 }
 
-const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess }) => {
+const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, initialMode = 'login' }) => {
   const { user } = useAuth()
-  const [isLogin, setIsLogin] = useState(true)
+  const { showToast } = useToast()
+  const navigate = useNavigate()
+  const [isLogin, setIsLogin] = useState(initialMode === 'login')
+  
+  // Update mode when modal opens or initialMode changes
+  useEffect(() => {
+    if (isOpen) {
+      setIsLogin(initialMode === 'login')
+      setError('')
+      setFormData({
+        email: '',
+        password: '',
+        confirmPassword: '',
+        name: ''
+      })
+      setShowForgotPassword(false)
+    }
+  }, [isOpen, initialMode])
   const [showPassword, setShowPassword] = useState(false)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [isSendingReset, setIsSendingReset] = useState(false)
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -123,11 +145,33 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess })
           setError('Passwords do not match')
           return
         }
-        await createAccount(formData.email, formData.password)
+        const userCredential = await createAccount(formData.email, formData.password)
         console.log('User created successfully')
+        
+        // Send verification email after signup
+        try {
+          await sendVerificationEmail(userCredential.user)
+          
+          showToast({
+            type: 'success',
+            title: 'Account Created!',
+            message: 'Please check your email to verify your account.'
+          })
+          
+          // Close modal and redirect to verification page (user stays logged in)
+          onClose()
+          navigate('/verify-email')
+          return
+        } catch (verificationError) {
+          console.error('Error sending verification email:', verificationError)
+          // Still redirect to verification page even if email fails
+          onClose()
+          navigate('/verify-email')
+          return
+        }
       }
       
-      // Close modal and redirect on success
+      // Close modal and redirect on success (for login)
       onAuthSuccess()
     } catch (err: any) {
       console.error('Authentication error:', err)
@@ -325,6 +369,83 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess })
                   )}
                 </motion.button>
               </form>
+
+              {/* Forgot Password */}
+              {isLogin && !showForgotPassword && (
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={() => setShowForgotPassword(true)}
+                    className="text-pink-600 hover:text-pink-700 text-sm font-medium transition-colors"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+              )}
+
+              {/* Forgot Password Form */}
+              {showForgotPassword && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mt-4 space-y-4"
+                >
+                  <p className="text-sm text-gray-600">
+                    Enter your email address and we'll send you a link to reset your password.
+                  </p>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      placeholder="Email Address"
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all duration-200"
+                      required
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForgotPassword(false)
+                        setError('')
+                      }}
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!formData.email) {
+                          setError('Please enter your email address')
+                          return
+                        }
+                        setIsSendingReset(true)
+                        setError('')
+                        try {
+                          await sendPasswordReset(formData.email)
+                          showToast({
+                            type: 'success',
+                            title: 'Email Sent!',
+                            message: 'Check your inbox for password reset instructions.'
+                          })
+                          setShowForgotPassword(false)
+                        } catch (err: any) {
+                          setError(err.message || 'Failed to send reset email')
+                        } finally {
+                          setIsSendingReset(false)
+                        }
+                      }}
+                      disabled={isSendingReset}
+                      className="flex-1 px-4 py-2 bg-pink-600 text-white rounded-xl hover:bg-pink-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isSendingReset ? 'Sending...' : 'Send Reset Link'}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
 
               {/* Switch Mode */}
               <div className="mt-6 text-center">

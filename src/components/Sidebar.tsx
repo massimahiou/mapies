@@ -104,7 +104,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Map sharing state
   const [showSharingModal, setShowSharingModal] = useState(false)
   const [sharingEmail, setSharingEmail] = useState('')
-  const [sharingRole, setSharingRole] = useState<'viewer' | 'editor' | 'admin'>('viewer')
+  const [sharingRole, setSharingRole] = useState<'viewer' | 'editor'>('viewer')
   const [isSharing, setIsSharing] = useState(false)
   
   // Transfer ownership state
@@ -327,13 +327,28 @@ const Sidebar: React.FC<SidebarProps> = ({
     setIsSharing(true)
     try {
       await shareMapWithUser(currentMapId, user.uid, sharingEmail.trim(), sharingRole)
+      
+      // Refresh maps list to show updated sharing data
+      const userMaps = await getUserMaps(user.uid)
+      onMapsChange(userMaps)
+      
       setSharingEmail('')
       setSharingRole('viewer')
       setShowSharingModal(false)
+      
+      showToast({
+        type: 'success',
+        title: 'Map Shared',
+        message: `Map shared with ${sharingEmail.trim()}`
+      })
       console.log('Map shared successfully')
     } catch (error) {
       console.error('Error sharing map:', error)
-      alert('Failed to share map. Please try again.')
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'Failed to share map. Please try again.'
+      })
     } finally {
       setIsSharing(false)
     }
@@ -344,22 +359,50 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     try {
       await removeUserFromMap(currentMapId, user.uid, email)
+      
+      // Refresh maps list to show updated sharing data
+      const userMaps = await getUserMaps(user.uid)
+      onMapsChange(userMaps)
+      
+      showToast({
+        type: 'success',
+        title: 'User Removed',
+        message: `${email} removed from map`
+      })
       console.log('User removed from map')
     } catch (error) {
       console.error('Error removing user:', error)
-      alert('Failed to remove user. Please try again.')
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'Failed to remove user. Please try again.'
+      })
     }
   }
 
-  const handleUpdateUserRole = async (email: string, newRole: 'viewer' | 'editor' | 'admin') => {
+  const handleUpdateUserRole = async (email: string, newRole: 'viewer' | 'editor') => {
     if (!currentMapId || !user) return
 
     try {
       await updateUserRole(currentMapId, user.uid, email, newRole)
+      
+      // Refresh maps list to show updated sharing data
+      const userMaps = await getUserMaps(user.uid)
+      onMapsChange(userMaps)
+      
+      showToast({
+        type: 'success',
+        title: 'Role Updated',
+        message: `${email}'s role updated to ${newRole}`
+      })
       console.log('User role updated')
     } catch (error) {
       console.error('Error updating user role:', error)
-      alert('Failed to update user role. Please try again.')
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'Failed to update user role. Please try again.'
+      })
     }
   }
 
@@ -1526,51 +1569,66 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </label>
                 <select
                   value={sharingRole}
-                  onChange={(e) => setSharingRole(e.target.value as 'viewer' | 'editor' | 'admin')}
+                  onChange={(e) => setSharingRole(e.target.value as 'viewer' | 'editor')}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="viewer">Viewer - Can view map only</option>
-                  <option value="editor">Editor - Can edit markers</option>
-                  <option value="admin">Admin - Full access</option>
+                  <option value="viewer">Viewer - Can view map only (cannot edit anything)</option>
+                  <option value="editor">Editor - Can edit everything they have permission to</option>
                 </select>
               </div>
 
               {/* Current shared users */}
-              {currentMapId && maps.find(m => m.id === currentMapId)?.sharing?.sharedWith && (
+              {currentMapId && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Shared With
                   </label>
-                  <div className="space-y-2 max-h-32 overflow-y-auto">
-                    {maps.find(m => m.id === currentMapId)?.sharing?.sharedWith.map((user: SharedUser, index: number) => (
-                      <div key={index} className="flex items-center justify-between bg-gray-50 rounded-lg p-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-gray-700">{user.email}</span>
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                            {user.role}
-                          </span>
+                  {(() => {
+                    const currentMap = maps.find(m => m.id === currentMapId)
+                    const sharedWith = currentMap?.sharing?.sharedWith || []
+                    
+                    if (sharedWith.length === 0) {
+                      return (
+                        <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-3 text-center">
+                          No users shared yet. Add users above to share this map.
                         </div>
-                        <div className="flex items-center gap-1">
-                          <select
-                            value={user.role}
-                            onChange={(e) => handleUpdateUserRole(user.email, e.target.value as 'viewer' | 'editor' | 'admin')}
-                            className="text-xs border border-gray-300 rounded px-1 py-0.5"
-                          >
-                            <option value="viewer">Viewer</option>
-                            <option value="editor">Editor</option>
-                            <option value="admin">Admin</option>
-                          </select>
-                          <button
-                            onClick={() => handleRemoveUser(user.email)}
-                            className="p-1 text-red-500 hover:text-red-700"
-                            title="Remove user"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
+                      )
+                    }
+                    
+                    return (
+                      <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2">
+                        {sharedWith.map((user: SharedUser, index: number) => (
+                          <div key={index} className="flex items-center justify-between bg-gray-50 rounded-lg p-2 hover:bg-gray-100 transition-colors">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-sm text-gray-900 font-medium truncate" title={user.email}>
+                                {user.email}
+                              </span>
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full whitespace-nowrap">
+                                {user.role}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                              <select
+                                value={user.role}
+                                onChange={(e) => handleUpdateUserRole(user.email, e.target.value as 'viewer' | 'editor')}
+                                className="text-xs border border-gray-300 rounded px-2 py-1 bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <option value="viewer">Viewer</option>
+                                <option value="editor">Editor</option>
+                              </select>
+                              <button
+                                onClick={() => handleRemoveUser(user.email)}
+                                className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                                title="Remove user"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })()}
                 </div>
               )}
 

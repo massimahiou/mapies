@@ -31,7 +31,7 @@ export interface MapFeatureInheritance {
   isOwnedMap: boolean
   
   // User's role in this shared map (if shared)
-  userRole?: 'viewer' | 'editor' | 'admin'
+  userRole?: 'viewer' | 'editor'
   
   // Permissions based on role
   permissions: {
@@ -56,7 +56,7 @@ export const useMapFeatureInheritance = (currentMap?: MapDocument | null): MapFe
   const currentUserFeatures = useFeatureAccess()
   const [mapOwnerPlan, setMapOwnerPlan] = useState<string>('freemium')
   const [mapOwnerPlanLoaded, setMapOwnerPlanLoaded] = useState(false)
-  const [userRole, setUserRole] = useState<'viewer' | 'editor' | 'admin' | undefined>(undefined)
+  const [userRole, setUserRole] = useState<'viewer' | 'editor' | undefined>(undefined)
   
   // Load map owner's subscription plan and user role
   useEffect(() => {
@@ -167,6 +167,8 @@ export const useMapFeatureInheritance = (currentMap?: MapDocument | null): MapFe
     
     // Determine permissions based on role
     // Admin always has full permissions
+    // Viewer: Can do NOTHING (view only)
+    // Editor: Can edit everything they have permission to (add/edit markers, but cannot delete map, share, or modify settings)
     const permissions = userIsAdmin ? {
       canEdit: true,
       canDelete: true,
@@ -174,11 +176,13 @@ export const useMapFeatureInheritance = (currentMap?: MapDocument | null): MapFe
       canAddMarkers: true,
       canModifySettings: true
     } : {
-      canEdit: isOwnedMap || userRole === 'editor' || userRole === 'admin',
-      canDelete: isOwnedMap || userRole === 'admin',
-      canShare: isOwnedMap || userRole === 'admin',
-      canAddMarkers: isOwnedMap || userRole === 'editor' || userRole === 'admin',
-      canModifySettings: isOwnedMap || userRole === 'admin'
+      // Viewer: No permissions at all (can only view)
+      // Editor: Can edit markers and add markers, but cannot delete, share, or modify settings
+      canEdit: isOwnedMap || userRole === 'editor',
+      canDelete: isOwnedMap, // Only owner can delete
+      canShare: isOwnedMap, // Only owner can share
+      canAddMarkers: isOwnedMap || userRole === 'editor',
+      canModifySettings: isOwnedMap // Only owner can modify settings
     }
     
     // Inherit features from map owner

@@ -26,8 +26,8 @@ const UserProfile: React.FC<UserProfileProps> = ({ onSignOut }) => {
           <User className="w-3 h-3 text-white" />
         </div>
         <div className="flex-1 min-w-0 overflow-hidden">
-          <p className="text-xs font-medium text-gray-900 truncate">
-            {user.email?.split('@')[0] || user.email}
+          <p className="text-xs font-medium text-gray-900 truncate" title={user.email || ''}>
+            {user.email || 'Unknown'}
           </p>
           {userDocument && (
             <p className="text-xs text-pinz-600 truncate">

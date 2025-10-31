@@ -18,6 +18,9 @@ import PublicMap from './components/PublicMap'
 import LandingPage from './components/LandingPage'
 import PrivacyPolicy from './components/PrivacyPolicy'
 import TermsOfService from './components/TermsOfService'
+import VerifyEmail from './components/VerifyEmail'
+import ResetPassword from './components/ResetPassword'
+import AuthActionHandler from './components/AuthActionHandler'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { debugFirebase, testFirebaseConnection } from './firebase/debug'
 import { validateCoordinates, logSecurityViolation } from './utils/coordinateValidation'
@@ -1319,13 +1322,18 @@ const AppContent: React.FC = () => {
 
   // Show loading screen while checking authentication
   if (loading) {
-              return (
-      <div className="flex h-screen bg-gray-50 items-center justify-center">
+    return (
+      <div className="flex h-screen bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading MAPIES...</p>
+          <img
+            src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
+            alt="Pinz Logo"
+            className="h-16 mx-auto mb-4"
+          />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pink-600 mx-auto mb-2"></div>
+          <p className="text-gray-600">Loading pinz...</p>
         </div>
-              </div>
+      </div>
     )
   }
 
@@ -1334,10 +1342,33 @@ const AppContent: React.FC = () => {
     // Redirect to landing page instead of showing old login page
     window.location.href = '/'
     return (
-      <div className="flex h-screen bg-gray-50 items-center justify-center">
+      <div className="flex h-screen bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pink-600 mx-auto mb-4"></div>
+          <img
+            src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
+            alt="Pinz Logo"
+            className="h-16 mx-auto mb-4"
+          />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pink-600 mx-auto mb-2"></div>
           <p className="text-gray-600">Redirecting to landing page...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Check if email is verified - redirect to verification page if not
+  if (user && !user.emailVerified) {
+    window.location.href = '/verify-email'
+    return (
+      <div className="flex h-screen bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 items-center justify-center">
+        <div className="text-center">
+          <img
+            src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
+            alt="Pinz Logo"
+            className="h-16 mx-auto mb-4"
+          />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pink-600 mx-auto mb-2"></div>
+          <p className="text-gray-600">Please verify your email address...</p>
         </div>
       </div>
     )
@@ -1545,6 +1576,9 @@ const App: React.FC = () => {
             <Route path="/embed" element={<EmbedMap />} />
             <Route path="/dashboard" element={<DashboardRedirect />} />
             <Route path="/auth" element={<AppContent />} />
+            <Route path="/auth/action" element={<AuthActionHandler />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/:mapId" element={<PublicMap />} />
           </Routes>
         </ToastProvider>

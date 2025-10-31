@@ -1,11 +1,13 @@
 import React, { useState } from 'react'
-import { Settings, Save, X } from 'lucide-react'
+import { Settings, Save, X, Lock } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { updateUserProfile, updateUserPreferences } from '../firebase/users'
+import ChangePassword from './ChangePassword'
 
 const UserSettings: React.FC = () => {
   const { user, userDocument, refreshUserDocument } = useAuth()
   const [isEditing, setIsEditing] = useState(false)
+  const [showChangePassword, setShowChangePassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
     firstName: userDocument?.profile?.firstName || '',
@@ -187,13 +189,27 @@ const UserSettings: React.FC = () => {
         {/* Account Info */}
         <div>
           <h4 className="text-sm font-medium text-gray-700 mb-2">Account Information</h4>
-          <div className="text-xs text-gray-600 space-y-1">
+          <div className="text-xs text-gray-600 space-y-1 mb-3">
             <p>Email: {user.email}</p>
             <p>Plan: {userDocument.subscription?.plan || 'free'}</p>
             <p>Member since: {userDocument.createdAt ? new Date(userDocument.createdAt).toLocaleDateString() : 'Unknown'}</p>
             <p>Last login: {userDocument.lastLoginAt ? new Date(userDocument.lastLoginAt).toLocaleDateString() : 'Unknown'}</p>
           </div>
+          <button
+            onClick={() => setShowChangePassword(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors text-sm font-medium"
+          >
+            <Lock className="w-4 h-4" />
+            Change Password
+          </button>
         </div>
+
+        {/* Change Password Modal */}
+        {showChangePassword && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <ChangePassword onClose={() => setShowChangePassword(false)} />
+          </div>
+        )}
       </div>
     </div>
   )

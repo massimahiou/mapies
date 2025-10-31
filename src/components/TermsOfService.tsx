@@ -1,12 +1,24 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
+import SEO from './SEO'
 
 const TermsOfService: React.FC = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const language = searchParams.get('lang') === 'fr' ? 'fr' : 'en'
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50">
+    <>
+      <SEO 
+        title={language === 'fr' ? 'PINZ - Conditions d\'Utilisation' : 'PINZ - Terms of Service'}
+        description={language === 'fr' 
+          ? 'Conditions d\'utilisation de PINZ. Découvrez les règles et conditions d\'utilisation de notre plateforme.'
+          : 'PINZ Terms of Service. Learn the rules and conditions for using our platform.'}
+        language={language}
+        canonical={`https://pinzapp.com/terms${language === 'en' ? '' : '?lang=fr'}`}
+      />
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50">
       {/* Header */}
       <header className="bg-white/95 backdrop-blur-sm shadow-sm border-b border-pink-100">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -287,6 +299,7 @@ const TermsOfService: React.FC = () => {
         </div>
       </main>
     </div>
+    </>
   )
 }
 

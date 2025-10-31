@@ -16,6 +16,7 @@ import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from '../utils
 import { validateMapAgainstPlan } from '../utils/mapValidation'
 import { usePolygonLoader } from '../hooks/usePolygonLoader'
 import { useResponsive } from '../hooks/useResponsive'
+import SEO from './SEO'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -1721,8 +1722,23 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     )
   }
 
+  // SEO for public map
+  const seoTitle = mapData?.name 
+    ? `${mapData.name} - PINZ Interactive Map`
+    : 'PINZ - Interactive Map'
+  const seoDescription = mapData?.description || 
+    'Explore this interactive map created with PINZ. View markers, search locations, and navigate the map.'
+  
   return (
-    <div className="w-full h-screen flex md:flex-row">
+    <>
+      <SEO 
+        title={seoTitle}
+        description={seoDescription}
+        language="en"
+        canonical={mapId ? `https://pinzapp.com/${mapId}` : undefined}
+        noindex={false}
+      />
+      <div className="w-full h-screen flex md:flex-row">
       {/* Cache-busting meta tag */}
       <meta httpEquiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
       <meta httpEquiv="Pragma" content="no-cache" />
@@ -2054,6 +2070,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       )}
       </>
     </div>
+    </>
   )
 }
 

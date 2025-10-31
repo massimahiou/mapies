@@ -11,11 +11,16 @@ import {
   ArrowRight,
   Sparkles,
   Heart,
-  ChevronDown
+  ChevronDown,
+  Languages
 } from 'lucide-react'
 import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 import AuthModal from './AuthModal'
 import PublicMap from './PublicMap'
+import { useSearchParams } from 'react-router-dom'
+import { useToast } from '../contexts/ToastContext'
+import { translations, Language } from '../utils/landingPageTranslations'
+import SEO from './SEO'
 
 // Wrapper component to only render map when visible (performance optimization)
 const DemoMapWrapper: React.FC<{ mapId: string; customSettings: any }> = ({ mapId, customSettings }) => {
@@ -59,8 +64,7 @@ const DemoMapWrapper: React.FC<{ mapId: string; customSettings: any }> = ({ mapI
 }
 
 // Animated word component with 3D roll effect
-const RollingWord: React.FC = () => {
-  const words = ['business', 'markers', 'identity', 'retailers', 'stores', 'yourself']
+const RollingWord: React.FC<{ words: string[] }> = ({ words }) => {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [showStar, setShowStar] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
@@ -114,7 +118,7 @@ const RollingWord: React.FC = () => {
   }, [hasStarted])
 
   const currentWord = words[currentIndex]
-  const isYourself = currentWord === 'yourself'
+  const isLastWord = currentIndex === words.length - 1
   
   // Find longest word to set fixed width
   const longestWord = words.reduce((a, b) => a.length > b.length ? a : b)
@@ -135,7 +139,7 @@ const RollingWord: React.FC = () => {
       >
         {currentWord}
       </motion.span>
-      {showStar && isYourself && (
+      {showStar && isLastWord && (
         <motion.div
           className="absolute -top-2"
           style={{ right: `calc(${longestWordLength}ch - ${currentWord.length}ch - 0.5rem)` }}
@@ -186,7 +190,99 @@ const RollingWord: React.FC = () => {
 }
 
 const LandingPage: React.FC = () => {
+  const [language, setLanguage] = useState<Language>(() => {
+    // Get language from localStorage (user preference takes priority)
+    const saved = localStorage.getItem('landingPageLanguage') as Language | null
+    if (saved) return saved
+    // Default to browser language for now, will be updated after IP detection
+    const browserLang = navigator.language.toLowerCase()
+    return browserLang.startsWith('fr') ? 'fr' : 'en'
+  })
+  
+  // Detect language based on IP geolocation
+  useEffect(() => {
+    // Only detect if user hasn't manually set a preference
+    const saved = localStorage.getItem('landingPageLanguage')
+    if (saved) return // User already chose a language
+    
+    // List of French-speaking country codes
+    const frenchSpeakingCountries = ['FR', 'CA', 'BE', 'CH', 'LU', 'MC', 'SN', 'CM', 'CI', 'MA', 'DZ', 'TN', 'CD', 'MG', 'BJ', 'TG', 'ML', 'BF', 'NE', 'TD', 'CF', 'KM', 'DJ', 'GA', 'CG', 'GN', 'RW', 'BI', 'VU', 'PF', 'NC', 'WF', 'GP', 'MQ', 'RE', 'GF', 'YT', 'PM', 'BL', 'MF']
+    
+    // Try multiple geolocation services for reliability
+    const detectLanguage = async () => {
+      try {
+        // Try geojs.io first (free, no API key needed)
+        const response = await fetch('https://get.geojs.io/v1/ip/country.json', {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          const countryCode = data.country?.toUpperCase()
+          
+          if (countryCode && frenchSpeakingCountries.includes(countryCode)) {
+            setLanguage('fr')
+            localStorage.setItem('landingPageLanguage', 'fr')
+            return
+          }
+        }
+      } catch (error) {
+        console.log('GeoJS detection failed, trying fallback...', error)
+      }
+      
+      try {
+        // Fallback to ipapi.co (free tier: 1000 requests/day)
+        const response = await fetch('https://ipapi.co/json/', {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          const countryCode = data.country_code?.toUpperCase()
+          
+          if (countryCode && frenchSpeakingCountries.includes(countryCode)) {
+            setLanguage('fr')
+            localStorage.setItem('landingPageLanguage', 'fr')
+          }
+        }
+      } catch (error) {
+        console.log('IPAPI detection failed, using browser language', error)
+        // Fallback to browser language (already set initially)
+      }
+    }
+    
+    detectLanguage()
+  }, [])
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'signup'>('login')
+  const [searchParams] = useSearchParams()
+  const { showToast } = useToast()
+  
+  const t = translations[language]
+  
+  // Save language preference
+  useEffect(() => {
+    localStorage.setItem('landingPageLanguage', language)
+  }, [language])
+  
+  const toggleLanguage = () => {
+    setLanguage(prev => prev === 'en' ? 'fr' : 'en')
+  }
+  
+  // Show success message if email was just verified
+  useEffect(() => {
+    if (searchParams.get('verified') === 'true' && searchParams.get('emailVerified') === 'true') {
+      showToast({
+        type: 'success',
+        title: t.toast.emailVerified,
+        message: t.toast.emailVerifiedMessage
+      })
+      // Clean up URL
+      window.history.replaceState({}, '', '/')
+    }
+  }, [searchParams, showToast, t])
   const [activeSection, setActiveSection] = useState('hero')
   const [currentUserType, setCurrentUserType] = useState(0)
   const [displayedText, setDisplayedText] = useState('')
@@ -200,18 +296,7 @@ const LandingPage: React.FC = () => {
     clusteringEnabled: false
   })
 
-  const userTypes = [
-    'businesses',
-    'entrepreneurs', 
-    'musicians',
-    'artists',
-    'distributors',
-    'retailers',
-    'restaurants',
-    'hotels',
-    'events',
-    'nonprofits'
-  ]
+  const userTypes = t.userTypes
 
   // Typewriter effect with backspace
   useEffect(() => {
@@ -260,11 +345,11 @@ const LandingPage: React.FC = () => {
 
   // Navigation sections
   const sections = [
-    { id: 'hero', label: 'Home', name: 'Home' },
-    { id: 'demo', label: 'Demo', name: 'Demo' },
-    { id: 'features', label: 'Features', name: 'Features' },
-    { id: 'pricing', label: 'Pricing', name: 'Pricing' },
-    { id: 'footer', label: 'Contact', name: 'Contact' }
+    { id: 'hero', label: t.nav.home, name: t.nav.home },
+    { id: 'demo', label: t.nav.demo, name: t.nav.demo },
+    { id: 'features', label: t.nav.features, name: t.nav.features },
+    { id: 'pricing', label: t.nav.pricing, name: t.nav.pricing },
+    { id: 'footer', label: t.nav.contact, name: t.nav.contact }
   ]
 
   // Scroll detection for active section - Throttled for performance
@@ -316,53 +401,48 @@ const LandingPage: React.FC = () => {
     }
   }
 
-  const features = [
-    {
-      icon: MapPin,
-      title: "Interactive Maps",
-      description: "Create beautiful, interactive maps with custom markers and locations",
-      color: "from-pink-500 to-rose-500",
-      delay: 0
-    },
-    {
-      icon: Upload,
-      title: "Bulk Import",
-      description: "Import thousands of locations from CSV files with automatic geocoding",
-      color: "from-rose-500 to-pink-600",
-      delay: 0.1
-    },
-    {
-      icon: Zap,
-      title: "Smart Grouping",
-      description: "Automatically group and categorize your markers with AI-powered insights",
-      color: "from-pink-600 to-rose-600",
-      delay: 0.2
-    },
-    {
-      icon: Star,
-      title: "Custom Branding",
-      description: "Remove watermarks and customize your maps with your brand colors",
-      color: "from-rose-600 to-pink-500",
-      delay: 0.3
-    },
-    {
-      icon: Globe,
-      title: "Public Sharing",
-      description: "Share your maps publicly or embed them in your website",
-      color: "from-pink-500 to-rose-500",
-      delay: 0.4
-    },
-    {
-      icon: Users,
-      title: "Team Collaboration",
-      description: "Invite team members to collaborate on maps with different permission levels",
-      color: "from-rose-500 to-pink-600",
-      delay: 0.5
+  const features = t.features.items.map((item, index) => {
+    const icons = [MapPin, Upload, Zap, Star, Globe, Users]
+    const colors = [
+      "from-pink-500 to-rose-500",
+      "from-rose-500 to-pink-600",
+      "from-pink-600 to-rose-600",
+      "from-rose-600 to-pink-500",
+      "from-pink-500 to-rose-500",
+      "from-rose-500 to-pink-600"
+    ]
+    return {
+      icon: icons[index],
+      title: item.title,
+      description: item.description,
+      color: colors[index],
+      delay: index * 0.1
     }
-  ]
+  })
 
+  // Get rolling words for RollingWord component
+  const rollingWords = Object.values(t.typewriter)
+  
+  // SEO content based on language
+  const seoTitle = language === 'fr' 
+    ? 'PINZ - Créez des Cartes Interactives pour votre Entreprise'
+    : 'PINZ - Create Interactive Maps for Your Business'
+  
+  const seoDescription = language === 'fr'
+    ? 'Le moyen le plus simple de créer une carte interactive pour votre entreprise, vos magasins ou vos marqueurs. Créez, personnalisez et partagez vos cartes en quelques minutes.'
+    : 'The easiest way to create interactive maps for your business, stores, or markers. Create, customize, and share your maps in minutes.'
+  
+  const ogImage = 'https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5'
+  
   return (
-    <div className="min-h-screen bg-white overflow-hidden">
+    <>
+      <SEO 
+        title={seoTitle}
+        description={seoDescription}
+        image={ogImage}
+        language={language}
+      />
+      <div className="min-h-screen bg-white overflow-hidden">
       <style dangerouslySetInnerHTML={{
         __html: `
           @keyframes blink-caret {
@@ -371,14 +451,44 @@ const LandingPage: React.FC = () => {
           }
         `
       }} />
+      {/* Language Toggle Button - Mobile (top right, above nav) */}
+      <motion.button
+        onClick={toggleLanguage}
+        className="fixed top-2 right-2 z-[60] px-2.5 py-1.5 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-pink-200 hover:bg-pink-50 transition-all duration-300 flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:text-pink-600 lg:hidden"
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.3 }}
+      >
+        <Languages className="w-3.5 h-3.5" />
+        <span className="font-semibold">{language.toUpperCase()}</span>
+      </motion.button>
+      
+      {/* Language Toggle Button - Desktop */}
+      <motion.button
+        onClick={toggleLanguage}
+        className="hidden lg:flex fixed top-4 right-4 z-[60] px-3 py-2 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-pink-200 hover:bg-pink-50 transition-all duration-300 items-center gap-2 text-sm font-medium text-gray-700 hover:text-pink-600"
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.3 }}
+      >
+        <Languages className="w-4 h-4" />
+        <span className="font-semibold">{language.toUpperCase()}</span>
+      </motion.button>
+      
       {/* Mobile Top Navigation */}
       <div className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-sm border-b border-pink-100 lg:hidden">
-        <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center justify-between px-4 py-3 pr-16">
           {/* Logo */}
           <img
             src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
-            alt="Pinz Logo"
+            alt="PINZ Logo"
             className="h-8"
+            loading="eager"
+            fetchPriority="high"
           />
           
           {/* Navigation Menu */}
@@ -469,7 +579,7 @@ const LandingPage: React.FC = () => {
           >
             <div className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-pink-100 to-rose-100 text-pink-800 rounded-full text-sm font-semibold mb-8 shadow-lg border border-pink-200">
               <MapPin className="w-5 h-5 text-pink-600 mr-2" />
-              The Future of Map Creation
+              {t.hero.badge}
               <div className="ml-2 w-2 h-2 bg-pink-500 rounded-full" />
             </div>
           </motion.div>
@@ -483,8 +593,10 @@ const LandingPage: React.FC = () => {
           >
             <img
               src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
-              alt="Pinz Logo"
+              alt="PINZ - Interactive Maps Platform Logo"
               className="h-24 md:h-32 mx-auto"
+              loading="eager"
+              fetchPriority="high"
             />
           </motion.div>
 
@@ -494,7 +606,7 @@ const LandingPage: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.4 }}
           >
-            Interactive maps for
+            {t.hero.title}
             <br />
             <br />
             <div className="inline-block w-48 md:w-64 text-center relative">
@@ -527,7 +639,10 @@ const LandingPage: React.FC = () => {
               className="relative px-8 py-4 bg-gradient-to-r from-pink-600 to-rose-600 text-white rounded-xl font-semibold text-lg shadow-lg hover:shadow-pink-500/25 transition-all duration-300 flex items-center justify-center overflow-hidden group order-1"
               whileHover={{ scale: 1.02, y: -1 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => setIsAuthModalOpen(true)}
+              onClick={() => {
+                setAuthModalMode('signup')
+                setIsAuthModalOpen(true)
+              }}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.8 }}
@@ -535,7 +650,7 @@ const LandingPage: React.FC = () => {
               {/* Removed shimmer animation for performance */}
               
               <span className="relative z-10 flex items-center">
-                Create Account
+                {t.hero.createAccount}
                 <ArrowRight className="w-4 h-4 ml-2" />
               </span>
             </motion.button>
@@ -545,12 +660,15 @@ const LandingPage: React.FC = () => {
               className="px-8 py-4 bg-white text-gray-700 rounded-xl font-medium text-lg border-2 border-gray-200 hover:border-pink-300 hover:text-pink-600 transition-all duration-300 flex items-center justify-center order-2"
               whileHover={{ scale: 1.02, y: -1 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => setIsAuthModalOpen(true)}
+              onClick={() => {
+                setAuthModalMode('login')
+                setIsAuthModalOpen(true)
+              }}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.9 }}
             >
-              Sign In
+              {t.hero.signIn}
             </motion.button>
           </motion.div>
 
@@ -560,7 +678,7 @@ const LandingPage: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 1.0 }}
           >
-            Free to get started • No credit card required
+            {t.hero.freeText}
           </motion.p>
         </div>
 
@@ -586,7 +704,7 @@ const LandingPage: React.FC = () => {
             viewport={{ once: true }}
           >
             <h2 className="text-3xl md:text-5xl font-bold text-white mb-4 leading-tight inline-block">
-              The easiest way to put <RollingWord /> on a map
+              {t.tagline.main} <RollingWord words={rollingWords} /> {t.tagline.connector || (language === 'en' ? 'on a map' : '')}
               <motion.span
                 className="inline-block"
                 animate={{ opacity: [1, 0.3, 1] }}
@@ -606,7 +724,7 @@ const LandingPage: React.FC = () => {
               transition={{ duration: 0.8, delay: 0.3, ease: "easeOut" }}
               viewport={{ once: true }}
             >
-              <span>Made with</span>
+              <span>{t.tagline.madeWith}</span>
               <motion.div
                 animate={{ scale: [1, 1.1, 1] }}
                 transition={{ 
@@ -617,7 +735,7 @@ const LandingPage: React.FC = () => {
               >
                 <Heart className="w-5 h-5 text-pink-200 fill-pink-200" />
               </motion.div>
-              <span>in Montreal</span>
+              <span>{t.tagline.inMontreal}</span>
             </motion.div>
           </motion.div>
         </div>
@@ -639,10 +757,10 @@ const LandingPage: React.FC = () => {
             transition={{ duration: 0.6 }}
           >
             <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
-              See Pinz in Action
+              {t.demo.title}
             </h2>
             <p className="text-xl text-gray-600 mb-4 max-w-3xl mx-auto">
-              Try out our fast, responsive and easily embeddable maps for yourself.
+              {t.demo.description}
             </p>
             <motion.div
               className="flex justify-center mb-8"
@@ -669,15 +787,15 @@ const LandingPage: React.FC = () => {
             <div className="flex flex-wrap justify-center gap-4 mb-12">
               <div className="flex items-center bg-white rounded-full px-4 py-2 shadow-sm">
                 <MapPin className="w-4 h-5 text-pink-500 mr-2" />
-                <span className="text-sm font-medium text-gray-700">1000+ Markers</span>
+                <span className="text-sm font-medium text-gray-700">{t.demo.markersCount}</span>
               </div>
               <div className="flex items-center bg-white rounded-full px-4 py-2 shadow-sm">
                 <Globe className="w-4 h-5 text-pink-500 mr-2" />
-                <span className="text-sm font-medium text-gray-700">3 Countries</span>
+                <span className="text-sm font-medium text-gray-700">{t.demo.countries}</span>
               </div>
               <div className="flex items-center bg-white rounded-full px-4 py-2 shadow-sm">
                 <Zap className="w-4 h-5 text-pink-500 mr-2" />
-                <span className="text-sm font-medium text-gray-700">Lightning Fast</span>
+                <span className="text-sm font-medium text-gray-700">{t.demo.fast}</span>
               </div>
             </div>
           </motion.div>
@@ -724,7 +842,7 @@ const LandingPage: React.FC = () => {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.3 }}
                     >
-                      Ready to Explore?
+                      {t.demo.readyToExplore}
                     </motion.h3>
                     
                     {/* Description */}
@@ -734,7 +852,7 @@ const LandingPage: React.FC = () => {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.4 }}
                     >
-                      Click below to load an interactive demo map with 1000+ markers from 3 countries
+                      {t.demo.exploreDescription}
                     </motion.p>
                     
                     {/* Reveal Button */}
@@ -762,7 +880,7 @@ const LandingPage: React.FC = () => {
                       
                       <span className="relative flex items-center justify-center gap-2">
                         <Zap className="w-5 h-5 group-hover:rotate-12 transition-transform" />
-                        Load Interactive Map
+                        {t.demo.loadMap}
                         <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                       </span>
                     </motion.button>
@@ -797,18 +915,18 @@ const LandingPage: React.FC = () => {
               <div className="text-center mb-4">
                 <p className="text-xs text-gray-500 mb-2">
                   <span className="inline-flex items-center px-2 py-1 rounded-full bg-pink-50 text-pink-600 text-xs font-medium">
-                    Demo Controls
+                    {t.demo.demoControls}
                   </span>
                 </p>
                 <p className="text-xs text-gray-400">
-                  Try these basic customization options - Pinz offers many more advanced features
+                  {t.demo.controlsDescription}
                 </p>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {/* Map Style */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-2">Style</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-2">{t.demo.style}</label>
                   <div className="flex gap-1">
                     <button
                       onClick={() => setMapSettings({...mapSettings, style: 'light'})}
@@ -818,7 +936,7 @@ const LandingPage: React.FC = () => {
                           : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
                       }`}
                     >
-                      Light
+                      {t.demo.light}
                     </button>
                     <button
                       onClick={() => setMapSettings({...mapSettings, style: 'dark'})}
@@ -828,14 +946,14 @@ const LandingPage: React.FC = () => {
                           : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
                       }`}
                     >
-                      Dark
+                      {t.demo.dark}
                     </button>
                   </div>
                 </div>
 
                 {/* Marker Shape */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-2">Shape</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-2">{t.demo.shape}</label>
                   <div className="flex gap-1">
                     {[
                       { value: 'circle', label: '●' },
@@ -861,7 +979,7 @@ const LandingPage: React.FC = () => {
 
                 {/* Marker Color */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-2">Color</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-2">{t.demo.color}</label>
                   <div className="grid grid-cols-4 gap-1">
                     {[
                       '#3B82F6', '#EF4444', '#10B981', '#F59E0B',
@@ -884,7 +1002,7 @@ const LandingPage: React.FC = () => {
 
                 {/* Clustering */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-2">Clustering</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-2">{t.demo.clustering}</label>
                   <div className="flex gap-1">
                     <button
                       onClick={() => setMapSettings({...mapSettings, clusteringEnabled: true})}
@@ -894,7 +1012,7 @@ const LandingPage: React.FC = () => {
                           : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
                       }`}
                     >
-                      On
+                      {t.demo.on}
                     </button>
                     <button
                       onClick={() => setMapSettings({...mapSettings, clusteringEnabled: false})}
@@ -904,7 +1022,7 @@ const LandingPage: React.FC = () => {
                           : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
                       }`}
                     >
-                      Off
+                      {t.demo.off}
                     </button>
                   </div>
                 </div>
@@ -924,24 +1042,24 @@ const LandingPage: React.FC = () => {
               <div className="w-16 h-16 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <MapPin className="w-8 h-8 text-pink-500" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Interactive Markers</h3>
-              <p className="text-gray-600">Click any marker to see detailed information about businesses, restaurants, and attractions.</p>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">{t.demo.interactiveMarkers}</h3>
+              <p className="text-gray-600">{t.demo.interactiveMarkersDesc}</p>
             </div>
             
             <div className="text-center">
               <div className="w-16 h-16 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Zap className="w-8 h-8 text-pink-500" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Lightning Performance</h3>
-              <p className="text-gray-600">Smooth rendering and interactions even with 1000+ markers thanks to our optimized engine.</p>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">{t.demo.lightningPerformance}</h3>
+              <p className="text-gray-600">{t.demo.lightningPerformanceDesc}</p>
             </div>
             
             <div className="text-center">
               <div className="w-16 h-16 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Globe className="w-8 h-8 text-pink-500" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Global Scale</h3>
-              <p className="text-gray-600">From local Quebec businesses to major US cities - Pinz scales beautifully across any region.</p>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">{t.demo.globalScale}</h3>
+              <p className="text-gray-600">{t.demo.globalScaleDesc}</p>
             </div>
           </motion.div>
         </div>
@@ -971,16 +1089,16 @@ const LandingPage: React.FC = () => {
               viewport={{ once: true }}
             >
               <Sparkles className="w-4 h-4 mr-2" />
-              Amazing Features
+              {t.features.badge}
             </motion.div>
             <h2 className="text-4xl md:text-6xl font-bold text-gray-900 mb-6">
-              Powerful Features for
+              {t.features.title}
               <span className="block bg-gradient-to-r from-pink-600 to-rose-600 bg-clip-text text-transparent">
-                Every Use Case
+                {language === 'en' ? 'Every Use Case' : 'Tous les cas d\'utilisation'}
               </span>
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-              Everything you need to create, customize, and share beautiful interactive maps
+              {t.features.subtitle}
             </p>
           </motion.div>
 
@@ -1069,13 +1187,13 @@ const LandingPage: React.FC = () => {
             viewport={{ once: true }}
           >
             <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
-              Choose Your
+              {t.pricing.title}
               <span className="block bg-gradient-to-r from-pink-600 to-rose-600 bg-clip-text text-transparent">
-                Perfect Plan
+                {language === 'en' ? 'Perfect Plan' : 'Plan Parfait'}
               </span>
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-              Start free and upgrade as you grow. All plans include our core features.
+              {t.pricing.subtitle}
             </p>
           </motion.div>
 
@@ -1096,21 +1214,25 @@ const LandingPage: React.FC = () => {
                   <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
                     <div className="bg-gradient-to-r from-pink-600 to-rose-600 text-white px-4 py-2 rounded-full text-sm font-semibold flex items-center">
                       <Star className="w-4 h-4 mr-1" />
-                      Most Popular
+                      {t.pricing.mostPopular}
                     </div>
                   </div>
                 )}
 
                 <div className="text-center mb-8">
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">{plan.name}</h3>
-                  <p className="text-gray-600 mb-4">{plan.description}</p>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                    {t.subscriptionPlans[key as keyof typeof t.subscriptionPlans]?.name || plan.name}
+                  </h3>
+                  <p className="text-gray-600 mb-4">
+                    {t.subscriptionPlans[key as keyof typeof t.subscriptionPlans]?.description || plan.description}
+                  </p>
                   <div className="text-4xl font-bold text-gray-900 mb-2">
                     ${plan.price}
-                    <span className="text-lg text-gray-500 font-normal">/month</span>
+                    <span className="text-lg text-gray-500 font-normal">{t.pricing.perMonth}</span>
                   </div>
                   {plan.trialDays && (
                     <div className="text-sm text-pink-600 font-medium">
-                      {plan.trialDays}-day free trial
+                      {plan.trialDays}{t.pricing.dayTrial}
                     </div>
                   )}
                 </div>
@@ -1118,27 +1240,27 @@ const LandingPage: React.FC = () => {
                 <div className="space-y-4 mb-8">
                   <div className="flex items-center">
                     <CheckCircle className="w-5 h-5 text-green-500 mr-3" />
-                    <span className="text-gray-700">{plan.maxMaps} {plan.maxMaps === 1 ? 'Map' : 'Maps'}</span>
+                    <span className="text-gray-700">{plan.maxMaps} {plan.maxMaps === 1 ? t.pricing.map : t.pricing.maps}</span>
                   </div>
                   <div className="flex items-center">
                     <CheckCircle className="w-5 h-5 text-green-500 mr-3" />
-                    <span className="text-gray-700">{plan.maxMarkersPerMap.toLocaleString()} Markers per Map</span>
+                    <span className="text-gray-700">{plan.maxMarkersPerMap.toLocaleString()} {t.pricing.markersPerMap}</span>
                   </div>
                   <div className="flex items-center">
                     <CheckCircle className="w-5 h-5 text-green-500 mr-3" />
-                    <span className="text-gray-700">{plan.bulkImport ? 'Bulk Import' : 'Manual Entry Only'}</span>
+                    <span className="text-gray-700">{plan.bulkImport ? t.pricing.bulkImport : t.pricing.manualEntry}</span>
                   </div>
                   <div className="flex items-center">
                     <CheckCircle className="w-5 h-5 text-green-500 mr-3" />
-                    <span className="text-gray-700">{plan.geocoding ? 'Auto Geocoding' : 'Manual Coordinates'}</span>
+                    <span className="text-gray-700">{plan.geocoding ? t.pricing.autoGeocoding : t.pricing.manualCoordinates}</span>
                   </div>
                   <div className="flex items-center">
                     <CheckCircle className="w-5 h-5 text-green-500 mr-3" />
-                    <span className="text-gray-700">{plan.smartGrouping ? 'Smart Grouping' : 'Basic Grouping'}</span>
+                    <span className="text-gray-700">{plan.smartGrouping ? t.pricing.smartGrouping : t.pricing.basicGrouping}</span>
                   </div>
                   <div className="flex items-center">
                     <CheckCircle className="w-5 h-5 text-green-500 mr-3" />
-                    <span className="text-gray-700">{plan.watermark ? 'With Watermark' : 'No Watermark'}</span>
+                    <span className="text-gray-700">{plan.watermark ? t.pricing.withWatermark : t.pricing.noWatermark}</span>
                   </div>
                 </div>
 
@@ -1150,9 +1272,12 @@ const LandingPage: React.FC = () => {
                   }`}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => setIsAuthModalOpen(true)}
+                  onClick={() => {
+                    setAuthModalMode('signup')
+                    setIsAuthModalOpen(true)
+                  }}
                 >
-                  {plan.price === 0 ? 'Get Started Free' : 'Start Free Trial'}
+                  {plan.price === 0 ? t.pricing.getStartedFree : t.pricing.startTrial}
                 </motion.button>
               </motion.div>
             ))}
@@ -1176,7 +1301,7 @@ const LandingPage: React.FC = () => {
             transition={{ duration: 0.8 }}
             viewport={{ once: true }}
           >
-            Ready to Create Your First Map?
+            {t.cta.title}
           </motion.h2>
           <motion.p 
             className="text-xl text-pink-100 mb-12"
@@ -1185,7 +1310,7 @@ const LandingPage: React.FC = () => {
             transition={{ duration: 0.8, delay: 0.2 }}
             viewport={{ once: true }}
           >
-            Join thousands of users who are already creating amazing maps with Pinz
+            {t.cta.description}
           </motion.p>
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -1197,9 +1322,12 @@ const LandingPage: React.FC = () => {
               className="px-12 py-4 bg-white text-pink-600 rounded-xl font-bold text-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center mx-auto"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setIsAuthModalOpen(true)}
+              onClick={() => {
+                setAuthModalMode('signup')
+                setIsAuthModalOpen(true)
+              }}
             >
-              Start Creating Maps
+              {t.cta.button}
               <ArrowRight className="ml-2 w-6 h-6" />
             </motion.button>
           </motion.div>
@@ -1212,19 +1340,20 @@ const LandingPage: React.FC = () => {
           <div className="text-center">
             <img
               src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
-              alt="Pinz Logo"
+              alt="PINZ Logo"
               className="h-8 mx-auto mb-4 filter brightness-0 invert"
+              loading="lazy"
             />
-            <p className="text-gray-400 mb-8">Create beautiful, interactive maps in minutes</p>
+            <p className="text-gray-400 mb-8">{t.footer.tagline}</p>
             <div className="flex justify-center space-x-6 text-sm text-gray-400 mb-8">
-              <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
-              <a href="/terms" className="hover:text-white transition-colors">Terms of Service</a>
-              <a href="mailto:support@mapies.com" className="hover:text-white transition-colors">Contact</a>
+              <a href="/privacy" className="hover:text-white transition-colors">{t.footer.privacyPolicy}</a>
+              <a href="/terms" className="hover:text-white transition-colors">{t.footer.termsOfService}</a>
+              <a href="mailto:support@mapies.com" className="hover:text-white transition-colors">{t.footer.contact}</a>
             </div>
             <div className="flex items-center justify-center space-x-1 text-sm text-gray-400">
-              <span>Made with</span>
+              <span>{t.footer.madeWith}</span>
               <Heart className="w-4 h-4 text-pink-500 fill-pink-500" />
-              <span>in Montreal</span>
+              <span>{t.footer.inMontreal}</span>
             </div>
           </div>
         </div>
@@ -1235,8 +1364,10 @@ const LandingPage: React.FC = () => {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onAuthSuccess={handleAuthSuccess}
+        initialMode={authModalMode}
       />
     </div>
+    </>
   )
 }
 
