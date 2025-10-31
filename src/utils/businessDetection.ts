@@ -512,13 +512,38 @@ const QUEBEC_BUSINESSES: Record<string, { category: string; confidence: number }
 }
 
 // Comprehensive keyword patterns for category detection (with confidence levels)
+// Keywords are ordered by specificity - more specific first
 const KEYWORD_PATTERNS: Record<string, { keywords: string[]; confidence: number }> = {
   grocery: { 
-    keywords: ['grocery', 'supermarket', 'market', 'food', 'superstore', 'wholesale', 'fresh', 'coop', 'store', 'bazaar', 'mart', 'épicerie', 'fruiterie', 'supermarché', 'alimentation', 'marché', 'coop', 'magasin', 'produits alimentaires'], 
+    // Specific grocery terms first (high confidence matches)
+    keywords: [
+      // French - specific
+      'épicerie', 'fruiterie', 'supermarché', 'hypermarché', 'grande surface', 
+      'alimentation générale', 'épicerie fine', 'marché alimentaire', 'produits alimentaires',
+      'commerce alimentaire', 'distributeur alimentaire', 'grossiste alimentaire',
+      // French - context terms
+      'marché ahuntsic', 'marché atwater', 'marché jean-talon', // Specific market names
+      // English - specific
+      'grocery store', 'grocery', 'supermarket', 'super market', 'food market',
+      'superstore', 'hypermarket', 'wholesale club', 'food store', 'grocery mart',
+      'food mart', 'food warehouse', 'grocery warehouse',
+      // English - chains and types
+      'iga', 'metro', 'provigo', 'maxi', 'super c', 'loblaws', 'walmart grocery',
+      'costco wholesale', 'sams club',
+      // Context terms (only match if followed by grocery context)
+      'alimentation', 'produits alimentaires', 'commerce alimentaire'
+    ], 
     confidence: 90 
   },
   coffee: { 
-    keywords: ['coffee', 'espresso', 'latte', 'brew', 'cappuccino', 'tea', 'barista', 'roaster', 'coffeehouse', 'café', 'thé', 'espresso', 'latte', 'moka', 'brûlerie', 'torréfacteur', 'infusion'], 
+    keywords: [
+      // French
+      'café', 'brûlerie', 'torréfacteur', 'café-bar', 'café-boutique',
+      // English - specific coffee terms
+      'coffee shop', 'coffee house', 'coffee bar', 'coffee roaster', 'espresso bar',
+      'coffee', 'barista', 'cappuccino', 'latte', 'cafe', 'coffeehouse',
+      // Remove generic 'tea', 'brew', 'infusion' that can match other things
+    ], 
     confidence: 95 
   },
   pharmacy: { 
@@ -530,7 +555,16 @@ const KEYWORD_PATTERNS: Record<string, { keywords: string[]; confidence: number 
     confidence: 85 
   },
   restaurant: { 
-    keywords: ['restaurant', 'food', 'eatery', 'bistro', 'grill', 'burger', 'pizza', 'sushi', 'bar', 'pub', 'diner', 'resto', 'bistro', 'brasserie', 'pizzeria', 'grill', 'bar', 'pub', 'cantine', 'sandwicherie'], 
+    keywords: [
+      // French
+      'restaurant', 'resto', 'bistro', 'brasserie', 'pizzeria', 'cantine', 
+      'sandwicherie', 'casse-croûte', 'resto-bar', 'café-restaurant',
+      // English - specific restaurant terms
+      'restaurant', 'eatery', 'diner', 'bistro', 'tavern', 'grill house',
+      // Food types (more specific context)
+      'burger place', 'pizza place', 'sushi restaurant', 'steakhouse', 'seafood restaurant',
+      // Remove generic terms like 'food', 'bar', 'pub' that cause false matches
+    ], 
     confidence: 80 
   },
   convenience: { 
@@ -546,7 +580,16 @@ const KEYWORD_PATTERNS: Record<string, { keywords: string[]; confidence: number 
     confidence: 85 
   },
   shopping: { 
-    keywords: ['mall', 'store', 'boutique', 'shop', 'retail', 'fashion', 'clothing', 'apparel', 'outlet', 'magasin', 'boutique', 'centre commercial', 'vêtements', 'mode', 'détaillant'], 
+    keywords: [
+      // French - specific retail terms
+      'boutique de vêtements', 'magasin de vêtements', 'centre commercial', 
+      'mode', 'prêt-à-porter', 'vêtements', 'habillement',
+      // English - specific retail terms
+      'clothing store', 'fashion store', 'apparel store', 'retail store',
+      'shopping mall', 'outlet store', 'department store',
+      // Remove overly generic 'store', 'shop', 'boutique', 'retail' that match everything
+      'mall', 'outlet', 'fashion', 'clothing', 'apparel'
+    ], 
     confidence: 75 
   },
   bank: { 
@@ -665,44 +708,123 @@ export function detectBusinessType(name: string, address?: string, hasSmartGroup
   const fullText = `${normalizedName} ${normalizedAddress}`.trim()
   
   // Priority 0: Obvious patterns (100% confidence) - Grocery first to prevent misclassification
+  // More comprehensive with French and English variants
   const obviousPatterns = [
+    // Grocery / Supermarket (check first to prevent misclassification)
     { pattern: 'épicerie', category: 'grocery', confidence: 100 },
     { pattern: 'fruiterie', category: 'grocery', confidence: 100 },
     { pattern: 'supermarché', category: 'grocery', confidence: 100 },
+    { pattern: 'super marché', category: 'grocery', confidence: 100 },
+    { pattern: 'hypermarché', category: 'grocery', confidence: 100 },
+    { pattern: 'grande surface', category: 'grocery', confidence: 100 },
+    { pattern: 'alimentation générale', category: 'grocery', confidence: 100 },
+    { pattern: 'alimentation', category: 'grocery', confidence: 100 },
+    { pattern: 'épicerie fine', category: 'grocery', confidence: 100 },
+    { pattern: 'marché public', category: 'grocery', confidence: 100 },
     { pattern: 'supermarket', category: 'grocery', confidence: 100 },
+    { pattern: 'super market', category: 'grocery', confidence: 100 },
+    { pattern: 'grocery store', category: 'grocery', confidence: 100 },
     { pattern: 'grocery', category: 'grocery', confidence: 100 },
-    { pattern: 'café', category: 'coffee', confidence: 100 },
-    { pattern: 'coffee', category: 'coffee', confidence: 100 },
+    { pattern: 'food store', category: 'grocery', confidence: 100 },
+    { pattern: 'superstore', category: 'grocery', confidence: 100 },
+    { pattern: 'hypermarket', category: 'grocery', confidence: 100 },
+    { pattern: 'wholesale club', category: 'grocery', confidence: 100 },
+    
+    // Pharmacy
     { pattern: 'pharmacie', category: 'pharmacy', confidence: 100 },
     { pattern: 'pharmacy', category: 'pharmacy', confidence: 100 },
+    { pattern: 'drugstore', category: 'pharmacy', confidence: 100 },
+    { pattern: 'drug store', category: 'pharmacy', confidence: 100 },
+    
+    // Coffee / Café
+    { pattern: 'café', category: 'coffee', confidence: 100 },
+    { pattern: 'coffee shop', category: 'coffee', confidence: 100 },
+    { pattern: 'coffee house', category: 'coffee', confidence: 100 },
+    { pattern: 'coffee', category: 'coffee', confidence: 100 },
+    { pattern: 'cafeteria', category: 'coffee', confidence: 100 },
+    { pattern: 'brûlerie', category: 'coffee', confidence: 100 },
+    { pattern: 'torréfacteur', category: 'coffee', confidence: 100 },
+    
+    // Restaurant
     { pattern: 'restaurant', category: 'restaurant', confidence: 100 },
     { pattern: 'resto', category: 'restaurant', confidence: 100 },
+    { pattern: 'fast food', category: 'restaurant', confidence: 100 },
+    { pattern: 'fast-food', category: 'restaurant', confidence: 100 },
+    { pattern: 'bistro', category: 'restaurant', confidence: 100 },
+    { pattern: 'brasserie', category: 'restaurant', confidence: 100 },
+    { pattern: 'pizzeria', category: 'restaurant', confidence: 100 },
+    { pattern: 'cantine', category: 'restaurant', confidence: 100 },
+    { pattern: 'sandwicherie', category: 'restaurant', confidence: 100 },
+    
+    // Bakery
     { pattern: 'boulangerie', category: 'bakery', confidence: 100 },
+    { pattern: 'pâtisserie', category: 'bakery', confidence: 100 },
+    { pattern: 'patisserie', category: 'bakery', confidence: 100 },
     { pattern: 'bakery', category: 'bakery', confidence: 100 },
+    { pattern: 'bakehouse', category: 'bakery', confidence: 100 },
+    
+    // Gym / Fitness
     { pattern: 'gym', category: 'gym', confidence: 100 },
+    { pattern: 'fitness center', category: 'gym', confidence: 100 },
+    { pattern: 'fitness centre', category: 'gym', confidence: 100 },
     { pattern: 'fitness', category: 'gym', confidence: 100 },
+    { pattern: 'centre de remise en forme', category: 'gym', confidence: 100 },
+    { pattern: 'salle de sport', category: 'gym', confidence: 100 },
+    
+    // Bank
     { pattern: 'bank', category: 'bank', confidence: 100 },
     { pattern: 'banque', category: 'bank', confidence: 100 },
+    { pattern: 'credit union', category: 'bank', confidence: 100 },
+    { pattern: 'caisse populaire', category: 'bank', confidence: 100 },
+    
+    // Hotel
     { pattern: 'hotel', category: 'hotel', confidence: 100 },
     { pattern: 'hôtel', category: 'hotel', confidence: 100 },
+    { pattern: 'motel', category: 'hotel', confidence: 100 },
+    { pattern: 'auberge', category: 'hotel', confidence: 100 },
+    
+    // School
     { pattern: 'école', category: 'school', confidence: 100 },
     { pattern: 'school', category: 'school', confidence: 100 },
     { pattern: 'université', category: 'school', confidence: 100 },
     { pattern: 'university', category: 'school', confidence: 100 },
+    { pattern: 'collège', category: 'school', confidence: 100 },
+    { pattern: 'college', category: 'school', confidence: 100 },
+    
+    // Library
     { pattern: 'bibliothèque', category: 'library', confidence: 100 },
     { pattern: 'library', category: 'library', confidence: 100 },
+    { pattern: 'librairie', category: 'library', confidence: 100 },
+    { pattern: 'bookstore', category: 'library', confidence: 100 },
+    
+    // Hospital
     { pattern: 'hôpital', category: 'hospital', confidence: 100 },
     { pattern: 'hospital', category: 'hospital', confidence: 100 },
+    { pattern: 'clinique', category: 'hospital', confidence: 100 },
+    { pattern: 'clinic', category: 'hospital', confidence: 100 },
+    
+    // Park
     { pattern: 'parc', category: 'park', confidence: 100 },
     { pattern: 'park', category: 'park', confidence: 100 },
+    
+    // Organic Grocery
     { pattern: 'bio', category: 'organic_grocery', confidence: 100 },
     { pattern: 'organic', category: 'organic_grocery', confidence: 100 },
+    { pattern: 'organic grocery', category: 'organic_grocery', confidence: 100 },
+    { pattern: 'épicerie bio', category: 'organic_grocery', confidence: 100 },
+    
+    // Herbal Shop
     { pattern: 'herboristerie', category: 'herbal_shop', confidence: 100 },
-    { pattern: 'herbal', category: 'herbal_shop', confidence: 100 },
+    { pattern: 'herbal shop', category: 'herbal_shop', confidence: 100 },
+    
+    // Health Café
     { pattern: 'bar à jus', category: 'health_cafe', confidence: 100 },
     { pattern: 'juice bar', category: 'health_cafe', confidence: 100 },
+    
+    // Farmers Market
     { pattern: 'marché fermier', category: 'farmers_market', confidence: 100 },
-    { pattern: 'farmers market', category: 'farmers_market', confidence: 100 }
+    { pattern: 'farmers market', category: 'farmers_market', confidence: 100 },
+    { pattern: 'marché public', category: 'farmers_market', confidence: 85 } // Lower confidence as it could be grocery
   ]
   
   for (const { pattern, category, confidence } of obviousPatterns) {
@@ -748,13 +870,22 @@ export function detectBusinessType(name: string, address?: string, hasSmartGroup
   }
   
   // Priority 3: Keyword pattern matching (comprehensive bilingual with confidence)
-  for (const [categoryId, patternData] of Object.entries(KEYWORD_PATTERNS)) {
+  // Check grocery first to prevent misclassification
+  const categoryOrder = ['grocery', 'pharmacy', 'coffee', 'restaurant', 'bakery', 'gym', 'convenience', 'bar', 'shopping', 'bank', 'hotel', 'gas', 'hospital', 'school', 'library', 'park', 'transportation', 'organic_grocery', 'herbal_shop', 'health_cafe', 'farmers_market']
+  
+  for (const categoryId of categoryOrder) {
+    const patternData = KEYWORD_PATTERNS[categoryId]
+    if (!patternData) continue
+    
     for (const keyword of patternData.keywords) {
-      if (fullText.includes(keyword)) {
+      // Use word boundary matching for better accuracy
+      // Check if keyword appears as a whole word or phrase
+      const keywordPattern = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+      if (keywordPattern.test(fullText)) {
         const category = BUSINESS_CATEGORIES.find(cat => cat.id === categoryId)!
         return {
           category,
-          confidence: patternData.confidence, // Use specific confidence for each category
+          confidence: patternData.confidence,
           matchedTerm: keyword
         }
       }

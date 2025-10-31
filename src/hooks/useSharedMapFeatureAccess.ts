@@ -13,7 +13,7 @@ export const useSharedMapFeatureAccess = (currentMap?: any) => {
   const mapInheritance = useMapFeatureInheritance(currentMap)
   
   // Determine if this is a shared map or owned map
-  const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid) : true
+  const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid, user.email) : true
   
   if (isOwnedMap) {
     // For owned maps, use the owner's feature access (current behavior)

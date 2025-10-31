@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Eye, Share2, Plus, Trash2, Settings, ChevronDown, Map, Check, GripVertical, Edit2, X, AlertTriangle } from 'lucide-react'
+import { Eye, Share2, Plus, Trash2, Settings, ChevronDown, Map, Check, GripVertical, Edit2, X, AlertTriangle, MapPin } from 'lucide-react'
 import UserProfile from './UserProfile'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
-import { getUserMaps, createMap, deleteMap, updateMap, MapDocument, shareMapWithUser, removeUserFromMap, updateUserRole, SharedUser, isMapOwnedByUser, leaveSharedMap } from '../firebase/maps'
+import { getUserMaps, createMap, deleteMap, updateMap, MapDocument, shareMapWithUser, removeUserFromMap, updateUserRole, SharedUser, isMapOwnedByUser, leaveSharedMap, transferMapOwnership } from '../firebase/maps'
 import DeleteMapDialog from './DeleteMapDialog'
 import ManageTabContent from './sidebar/ManageTabContent'
 import DataTabContent from './sidebar/DataTabContent'
@@ -106,6 +106,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [sharingEmail, setSharingEmail] = useState('')
   const [sharingRole, setSharingRole] = useState<'viewer' | 'editor' | 'admin'>('viewer')
   const [isSharing, setIsSharing] = useState(false)
+  
+  // Transfer ownership state
+  const [transferEmail, setTransferEmail] = useState('')
+  const [isTransferring, setIsTransferring] = useState(false)
   
   // Draggable sidebar state
   const [sidebarWidth, setSidebarWidth] = useState(320) // Default width in pixels
@@ -272,7 +276,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     setIsRenamingMap(true)
     try {
       console.log('Calling updateMap with:', { userId: user!.uid, mapId, name: newName.trim() })
-      await updateMap(user!.uid, mapId, { name: newName.trim() })
+      await updateMap(user!.uid, mapId, { name: newName.trim() }, user!.email)
       console.log('Map renamed successfully')
       
       // Wait a moment for Firestore to propagate the changes
@@ -359,6 +363,49 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }
 
+  // Handle transfer ownership
+  const handleTransferOwnership = async () => {
+    if (!currentMapId || !user || !transferEmail.trim()) return
+
+    if (!window.confirm(`Are you sure you want to transfer ownership of this map to ${transferEmail}? This action cannot be undone.`)) {
+      return
+    }
+
+    setIsTransferring(true)
+    try {
+      await transferMapOwnership(currentMapId, user.uid, transferEmail.trim())
+      
+      // Refresh maps list
+      const userMaps = await getUserMaps(user.uid)
+      onMapsChange(userMaps)
+      
+      // If we transferred the current map, select the first available map or clear selection
+      if (userMaps.length > 0) {
+        onMapChange(userMaps[0].id!)
+      } else {
+        onMapChange('')
+      }
+      
+      setTransferEmail('')
+      setShowSharingModal(false)
+      
+      showToast({
+        type: 'success',
+        title: 'Ownership Transferred',
+        message: `Map ownership has been successfully transferred to ${transferEmail}.`
+      })
+    } catch (error) {
+      console.error('Error transferring ownership:', error)
+      showToast({
+        type: 'error',
+        title: 'Transfer Failed',
+        message: error instanceof Error ? error.message : 'Failed to transfer ownership. Please try again.'
+      })
+    } finally {
+      setIsTransferring(false)
+    }
+  }
+
   const confirmDeleteMap = async () => {
     if (!user || !mapToDelete) {
       console.log('Cannot delete map - missing user or mapToDelete:', { user: !!user, mapToDelete: !!mapToDelete })
@@ -369,7 +416,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     setIsDeletingMap(true)
     
     try {
-      await deleteMap(user.uid, mapToDelete.id!)
+      await deleteMap(user.uid, mapToDelete.id!, user.email)
       console.log('Map deletion completed successfully')
       
       // Refresh maps list
@@ -489,7 +536,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div 
-      className="bg-white shadow-lg flex flex-col relative"
+      className="bg-white shadow-lg flex flex-col relative h-screen overflow-hidden"
       style={{ width: `${sidebarWidth}px` }}
     >
       {/* Drag Handle */}
@@ -503,14 +550,14 @@ const Sidebar: React.FC<SidebarProps> = ({
           <GripVertical className="w-3 h-3 text-gray-400" />
         </div>
       </div>
-              {/* Header */}
-              <div className="p-6 border-b border-gray-200">
-                <div className="text-center mb-4">
-                  <div className="flex items-center justify-center mb-2">
+              {/* Header - Reduced padding - Fixed */}
+              <div className="p-4 border-b border-gray-200 flex-shrink-0">
+                <div className="text-center mb-3">
+                  <div className="flex items-center justify-center">
                     <img 
                       src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
                       alt="Pinz Logo"
-                      className="h-24 w-auto"
+                      className="h-16 w-auto"
                     />
                   </div>
                 </div>
@@ -518,7 +565,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {/* Map Usage Warning - REMOVED - Now only shown in create map functionality */}
 
                 {/* Map Selector */}
-                <div className="mb-4">
+                <div className="mb-3">
                   <div className="relative">
                     <button
                       onClick={() => setShowMapSelector(!showMapSelector)}
@@ -652,7 +699,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                           </div>
                                         </button>
                                         <div className="flex items-center gap-1 ml-2">
-                                          {isMapOwnedByUser(map, user!.uid) && (
+                                          {isMapOwnedByUser(map, user!.uid, user!.email) && (
                                             <>
                                               <button
                                                 onClick={(e) => {
@@ -675,7 +722,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                           )}
                                           <button
                                             onClick={(e) => {
-                                              const isOwned = isMapOwnedByUser(map, user!.uid)
+                                              const isOwned = isMapOwnedByUser(map, user!.uid, user!.email)
                                               if (isOwned) {
                                                 handleDeleteMap(map, e)
                                               } else {
@@ -683,7 +730,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                               }
                                             }}
                                             className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                                            title={isMapOwnedByUser(map, user!.uid) ? "Delete map" : "Leave map"}
+                                            title={isMapOwnedByUser(map, user!.uid, user!.email) ? "Delete map" : "Leave map"}
                                           >
                                             <Trash2 className="w-3 h-3" />
                                           </button>
@@ -798,23 +845,24 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {/* Navigation Tabs */}
-      <div className="p-4 border-b border-gray-200">
-        <nav className="space-y-1">
+      {/* Navigation Tabs - Horizontal layout - Fixed */}
+      <div className="px-3 py-2 border-b border-gray-200 flex-shrink-0">
+        <nav className="flex items-center gap-1">
           {sidebarItems.map((item) => {
             const Icon = item.icon
             return (
               <button
                 key={item.id}
                 onClick={() => onTabChange(item.id)}
-                className={`sidebar-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                className={`sidebar-item flex-1 flex flex-col items-center justify-center gap-1 px-2 py-1.5 rounded-lg transition-colors ${
                   activeTab === item.id 
                     ? 'bg-pinz-50 text-pinz-700 border border-pinz-200' 
                     : 'text-gray-700 hover:bg-gray-50'
                 }`}
+                title={item.label}
               >
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                <span className="truncate">{item.label}</span>
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                <span className="text-xs font-medium truncate w-full text-center">{item.label}</span>
               </button>
             )
           })}
@@ -836,7 +884,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             currentMarkerCount={(() => {
               // Calculate marker count based on map ownership
               const currentMap = maps.find(m => m.id === currentMapId)
-              const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid) : true
+              const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid, user.email) : true
               
               if (isOwnedMap) {
                 // For owned maps: count all markers (current behavior)
@@ -862,6 +910,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             mapId={currentMapId || undefined}
             onOpenModal={onOpenMarkerManagementModal}
             currentMap={maps.find(m => m.id === currentMapId)}
+            onOpenSubscription={onOpenSubscription}
           />
         )}
 
@@ -1056,7 +1105,19 @@ const Sidebar: React.FC<SidebarProps> = ({
               {/* Marker Shape */}
               <div className="mb-4">
                 <label className="block text-xs font-medium text-gray-600 mb-2">Shape</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
+                  <button
+                    onClick={() => onMapSettingsChange({...mapSettings, markerShape: 'pin'})}
+                    className={`p-2 border rounded flex flex-col items-center justify-center gap-1 ${
+                      mapSettings.markerShape === 'pin' 
+                        ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                    title="Pin"
+                  >
+                    <MapPin className="w-5 h-5" />
+                    <span className="text-xs">Pin</span>
+                  </button>
                   <button
                     onClick={() => onMapSettingsChange({...mapSettings, markerShape: 'circle'})}
                     className={`p-2 border rounded text-xs ${
@@ -1064,6 +1125,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
+                    title="Circle"
                   >
                     ●
                   </button>
@@ -1074,6 +1136,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
+                    title="Square"
                   >
                     ■
                   </button>
@@ -1084,6 +1147,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                     }`}
+                    title="Diamond"
                   >
                     ◆
                   </button>
@@ -1421,11 +1485,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       <DeleteMapDialog
         isOpen={showDeleteDialog}
         onClose={() => setShowDeleteDialog(false)}
-        onConfirm={mapToDelete && user ? (isMapOwnedByUser(mapToDelete, user.uid) ? confirmDeleteMap : confirmLeaveMap) : confirmDeleteMap}
+        onConfirm={mapToDelete && user ? (isMapOwnedByUser(mapToDelete, user.uid, user.email) ? confirmDeleteMap : confirmLeaveMap) : confirmDeleteMap}
         mapName={mapToDelete?.name || ''}
         markerCount={mapToDelete?.stats?.markerCount || 0}
         isDeleting={isDeletingMap}
-        isOwnedMap={mapToDelete && user ? isMapOwnedByUser(mapToDelete, user.uid) : true}
+        isOwnedMap={mapToDelete && user ? isMapOwnedByUser(mapToDelete, user.uid, user.email) : true}
       />
 
       {/* Sharing Modal */}
@@ -1509,6 +1573,30 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Transfer Ownership Section */}
+              <div className="pt-4 border-t border-gray-200">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Transfer Ownership</h4>
+                <p className="text-xs text-gray-500 mb-3">
+                  Permanently transfer this map and all its markers to another user. This action cannot be undone.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={transferEmail}
+                    onChange={(e) => setTransferEmail(e.target.value)}
+                    placeholder="Enter recipient email"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  />
+                  <button
+                    onClick={handleTransferOwnership}
+                    disabled={!transferEmail.trim() || isTransferring}
+                    className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isTransferring ? 'Transferring...' : 'Transfer'}
+                  </button>
+                </div>
+              </div>
 
               <div className="flex items-center gap-3 pt-2">
                 <button

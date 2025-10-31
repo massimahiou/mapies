@@ -22,6 +22,17 @@ const MobileBottomBar: React.FC<MobileBottomBarProps> = ({
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 safe-area-pb">
       <div className="flex items-center justify-around h-16 px-2">
+        {/* User profile button - First on left */}
+        <button
+          onClick={onUserProfileClick}
+          className="flex flex-col items-center justify-center px-3 py-2 rounded-lg transition-all duration-200 min-w-0 flex-1 text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+        >
+          <User className="w-5 h-5 mb-1 text-gray-500" />
+          <span className="text-xs font-medium truncate text-gray-600">
+            Profile
+          </span>
+        </button>
+        
         {/* Main tabs */}
         {tabs.map((tab) => {
           const Icon = tab.icon
@@ -44,17 +55,6 @@ const MobileBottomBar: React.FC<MobileBottomBarProps> = ({
             </button>
           )
         })}
-        
-        {/* User profile button */}
-        <button
-          onClick={onUserProfileClick}
-          className="flex flex-col items-center justify-center px-3 py-2 rounded-lg transition-all duration-200 min-w-0 flex-1 text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-        >
-          <User className="w-5 h-5 mb-1 text-gray-500" />
-          <span className="text-xs font-medium truncate text-gray-600">
-            Profile
-          </span>
-        </button>
       </div>
     </div>
   )

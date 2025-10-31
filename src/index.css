@@ -360,7 +360,13 @@ body[style*="--mobile-mode: 1"] .mobile-search-container {
 .embed-map-container .leaflet-container {
   width: 100% !important;
   height: 100% !important;
-  min-height: inherit !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
 }
 
 /* Mobile-friendly iframe embed styles */

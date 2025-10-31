@@ -86,6 +86,26 @@ export function createMarkerHTML(options: MarkerCreationOptions): MarkerHTML {
   let iconAnchor: [number, number] = [markerSize / 2, markerSize / 2]
   
   switch (mapSettings.markerShape) {
+    case 'pin':
+      // Pin shape: rounded top, pointed bottom
+      const pinHtml = `<div style="
+        width: ${markerSize}px; 
+        height: ${markerSize}px; 
+        background-color: ${mapSettings.markerColor}; 
+        border-radius: 50% 50% 50% 0;
+        transform: rotate(-45deg);
+        ${borderStyle}
+        cursor: pointer;
+        transition: transform 0.2s ease;
+      " 
+      onmouseover="this.style.transform='rotate(-45deg) scale(1.1)'" 
+      onmouseout="this.style.transform='rotate(-45deg) scale(1)'">
+      </div>`
+      return {
+        html: pinHtml,
+        iconSize: [markerSize, markerSize],
+        iconAnchor: [markerSize / 2, markerSize / 2]
+      }
     case 'square':
       shapeStyle = ''
       break

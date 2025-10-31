@@ -36,6 +36,7 @@ interface PublicMapSidebarProps {
   allMarkers: Marker[]
   onToggleLocation: () => void
   locationModeActive: boolean
+  viewportMarkers?: Marker[] // Markers visible in current viewport (optional, used in public maps)
   mapSettings: {
     searchBarBackgroundColor: string
     searchBarTextColor: string
@@ -71,6 +72,7 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
   allMarkers,
   onToggleLocation,
   locationModeActive,
+  viewportMarkers,
   mapSettings
 }) => {
   const clearSearch = () => {
@@ -86,8 +88,23 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
     }
   }
 
-  // Determine which markers to show - always show all results
-  const markersToShow = searchTerm.trim() === '' ? allMarkers : searchResults
+  // Determine which markers to show - use viewport markers when location is not active
+  const markersToShow = (() => {
+    // When searching, use searchResults
+    if (searchTerm.trim() !== '') {
+      return searchResults
+    }
+    // When location is active, use allMarkers (will be sorted by distance)
+    if (locationModeActive) {
+      return allMarkers
+    }
+    // When location is NOT active and viewportMarkers are provided, show markers visible in current viewport
+    if (!locationModeActive && viewportMarkers && viewportMarkers.length > 0) {
+      return viewportMarkers
+    }
+    // Fallback to all markers
+    return allMarkers
+  })()
   
   console.log('PublicMapSidebar - searchTerm:', searchTerm)
   console.log('PublicMapSidebar - searchResults.length:', searchResults.length)
@@ -183,16 +200,12 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
                   <button
                     key={marker.id}
                     onClick={() => onNavigateToMarker(marker)}
-                    className={`w-full flex items-center gap-3 p-3 transition-all duration-200 text-left rounded-lg mb-2 group ${
-                      isNearby && showNearbyPlaces 
-                        ? 'bg-pinz-50/30' 
-                        : ''
-                    }`}
+                    className="w-full flex items-center gap-3 p-3 transition-all duration-200 text-left rounded-lg mb-2 group"
                     onMouseEnter={(e) => {
                       e.currentTarget.style.backgroundColor = mapSettings.searchBarHoverColor
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = isNearby && showNearbyPlaces ? 'rgba(236, 72, 153, 0.1)' : 'transparent'
+                      e.currentTarget.style.backgroundColor = 'transparent'
                     }}
                   >
                     <span className="text-lg">{getMarkerIcon(marker.type)}</span>
@@ -214,11 +227,7 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
                       {isNearby && showNearbyPlaces && (
                         <div className="w-2 h-2 bg-pinz-500 rounded-full"></div>
                       )}
-                      <MapPin className={`w-4 h-4 transition-colors ${
-                        isNearby && showNearbyPlaces 
-                          ? 'text-pinz-500 group-hover:text-pinz-600' 
-                          : 'group-hover:text-gray-500'
-                      }`} style={{ color: mapSettings.searchBarTextColor }} />
+                      <MapPin className="w-4 h-4 transition-colors" style={{ color: mapSettings.searchBarTextColor }} />
                     </div>
                   </button>
                 )

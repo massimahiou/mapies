@@ -22,7 +22,7 @@ export interface FreemiumCompliantMapSettings {
 export const getFreemiumCompliantDefaults = (): FreemiumCompliantMapSettings => {
   return {
     style: 'light',
-    markerShape: 'circle', // Only circle is allowed for freemium
+    markerShape: 'pin', // Default pin shape for all maps (past and new)
     markerColor: '#3B82F6', // Default blue color
     markerSize: 'medium',
     markerBorder: 'white',
@@ -54,8 +54,10 @@ export const ensureFreemiumCompliance = (
   
   // Force freemium compliance for basic plans
   if (planLimits.customizationLevel === 'basic') {
-    // Only allow circle shape
-    compliantSettings.markerShape = 'circle'
+    // Allow pin (default) and circle for basic plans, force to pin if invalid
+    if (!compliantSettings.markerShape || (compliantSettings.markerShape !== 'pin' && compliantSettings.markerShape !== 'circle')) {
+      compliantSettings.markerShape = 'pin'
+    }
     
     // Force default search bar colors
     compliantSettings.searchBarBackgroundColor = '#ffffff'
@@ -83,8 +85,8 @@ export const isSettingFreemiumCompliant = (
   
   switch (setting) {
     case 'markerShape':
-      // Only circle is allowed for basic plans
-      return planLimits.customizationLevel === 'premium' || value === 'circle'
+      // Pin (default) and circle are allowed for basic plans, all shapes for premium
+      return planLimits.customizationLevel === 'premium' || value === 'pin' || value === 'circle'
     
     case 'searchBarBackgroundColor':
     case 'searchBarTextColor':

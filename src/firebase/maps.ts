@@ -11,11 +11,13 @@ import {
   orderBy,
   where,
   onSnapshot,
-  serverTimestamp
+  serverTimestamp,
+  deleteField
 } from 'firebase/firestore'
 import { db } from './config'
 import { UsageTracker } from '../utils/usageTracker'
 import { detectBusinessType } from '../utils/businessDetection'
+import { isAdmin } from '../utils/admin'
 
 export interface NameRule {
   id: string
@@ -379,11 +381,57 @@ export const getMapById = async (mapId: string): Promise<MapDocument | null> => 
   }
 }
 
-// Update a map
-export const updateMap = async (userId: string, mapId: string, updates: Partial<MapDocument>): Promise<void> => {
+// Find map owner by mapId (searches all users)
+export const findMapOwner = async (mapId: string): Promise<{ userId: string, map: MapDocument | null } | null> => {
   try {
-    console.log('Updating map:', { userId, mapId, updates })
-    const mapRef = doc(db, 'users', userId, 'maps', mapId)
+    const usersQuery = query(collection(db, 'users'))
+    const usersSnapshot = await getDocs(usersQuery)
+    
+    for (const userDoc of usersSnapshot.docs) {
+      const mapRef = doc(db, 'users', userDoc.id, 'maps', mapId)
+      const mapSnap = await getDoc(mapRef)
+      
+      if (mapSnap.exists()) {
+        return {
+          userId: userDoc.id,
+          map: {
+            id: mapSnap.id,
+            ...mapSnap.data()
+          } as MapDocument
+        }
+      }
+    }
+    
+    return null
+  } catch (error) {
+    console.error('Error finding map owner:', error)
+    return null
+  }
+}
+
+// Update a map
+// If userEmail is provided and is admin, can update any map regardless of userId
+export const updateMap = async (
+  userId: string, 
+  mapId: string, 
+  updates: Partial<MapDocument>,
+  userEmail?: string | null
+): Promise<void> => {
+  try {
+    // If admin, find the actual map owner
+    let actualUserId = userId
+    if (userEmail && isAdmin(userEmail)) {
+      const mapOwner = await findMapOwner(mapId)
+      if (mapOwner) {
+        actualUserId = mapOwner.userId
+        console.log('Admin updating map owned by:', actualUserId)
+      } else {
+        throw new Error(`Map ${mapId} not found`)
+      }
+    }
+    
+    console.log('Updating map:', { userId: actualUserId, mapId, updates })
+    const mapRef = doc(db, 'users', actualUserId, 'maps', mapId)
     console.log('Map reference path:', mapRef.path)
     
     // Use updateDoc directly instead of setDoc with merge
@@ -422,12 +470,29 @@ export const updateMap = async (userId: string, mapId: string, updates: Partial<
 }
 
 // Delete a map and all its markers
-export const deleteMap = async (userId: string, mapId: string): Promise<void> => {
+// If userEmail is provided and is admin, can delete any map regardless of userId
+export const deleteMap = async (
+  userId: string, 
+  mapId: string,
+  userEmail?: string | null
+): Promise<void> => {
   try {
-    console.log('Deleting map:', { userId, mapId })
+    // If admin, find the actual map owner
+    let actualUserId = userId
+    if (userEmail && isAdmin(userEmail)) {
+      const mapOwner = await findMapOwner(mapId)
+      if (mapOwner) {
+        actualUserId = mapOwner.userId
+        console.log('Admin deleting map owned by:', actualUserId)
+      } else {
+        throw new Error(`Map ${mapId} not found`)
+      }
+    }
+    
+    console.log('Deleting map:', { userId: actualUserId, mapId })
     
     // First, delete all markers in the user's private map
-    const markersRef = collection(db, 'users', userId, 'maps', mapId, 'markers')
+    const markersRef = collection(db, 'users', actualUserId, 'maps', mapId, 'markers')
     const markersSnapshot = await getDocs(markersRef)
     
     console.log('Found markers to delete:', markersSnapshot.docs.length)
@@ -458,7 +523,7 @@ export const deleteMap = async (userId: string, mapId: string): Promise<void> =>
     }
     
     // Delete the map from user's private collection
-    const mapRef = doc(db, 'users', userId, 'maps', mapId)
+    const mapRef = doc(db, 'users', actualUserId, 'maps', mapId)
     await deleteDoc(mapRef)
     console.log('Deleted map from user collection')
     
@@ -647,11 +712,75 @@ export const subscribeToMapMarkers = (
   })
 }
 
+// Get all maps from all users (admin only)
+export const getAllMaps = async (): Promise<MapDocument[]> => {
+  try {
+    console.log('👑 getAllMaps: Fetching all maps from all users')
+    const allMaps: MapDocument[] = []
+    
+    // Get all users
+    const usersQuery = query(collection(db, 'users'))
+    const usersSnapshot = await getDocs(usersQuery)
+    console.log('👑 Found', usersSnapshot.docs.length, 'users')
+    
+    // For each user, get their maps
+    for (const userDoc of usersSnapshot.docs) {
+      const mapsRef = collection(db, 'users', userDoc.id, 'maps')
+      const mapsQuery = query(mapsRef, orderBy('createdAt', 'desc'))
+      const mapsSnapshot = await getDocs(mapsQuery)
+      
+      console.log(`👑 User ${userDoc.id} has ${mapsSnapshot.docs.length} maps`)
+      
+      mapsSnapshot.docs.forEach(mapDoc => {
+        const mapData = mapDoc.data() as MapDocument
+        allMaps.push({
+          id: mapDoc.id,
+          ...mapData
+        } as MapDocument)
+      })
+    }
+    
+    console.log('👑 Total maps found:', allMaps.length)
+    
+    // Sort all maps by createdAt descending
+    return allMaps.sort((a, b) => {
+      const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : (a.createdAt as any)?.seconds * 1000 || 0
+      const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : (b.createdAt as any)?.seconds * 1000 || 0
+      return bTime - aTime
+    })
+  } catch (error) {
+    console.error('Error getting all maps:', error)
+    throw error
+  }
+}
+
 // Listen to user's maps in real-time
+// If userEmail is provided and is admin, subscribes to all maps
 export const subscribeToUserMaps = (
-  userId: string, 
-  callback: (maps: MapDocument[]) => void
+  userId: string,
+  callback: (maps: MapDocument[]) => void,
+  userEmail?: string | null
 ): (() => void) => {
+  console.log('🔐 subscribeToUserMaps called with:', { 
+    userId, 
+    userEmail, 
+    userEmailType: typeof userEmail,
+    userEmailLength: userEmail?.length,
+    isAdminCheck: userEmail ? isAdmin(userEmail) : false 
+  })
+  
+  // Check if admin BEFORE doing anything else
+  const adminCheck = userEmail ? isAdmin(userEmail) : false
+  console.log('🔐 Admin check result:', adminCheck)
+  
+  // If admin, subscribe to all maps
+  if (adminCheck) {
+    console.log('👑 Admin detected! Subscribing to all maps instead of user maps')
+    return subscribeToAllMaps(callback)
+  }
+  
+  console.log('👤 Regular user, subscribing to own maps only')
+  // Otherwise, subscribe to user's maps only
   const mapsRef = collection(db, 'users', userId, 'maps')
   const q = query(mapsRef, orderBy('createdAt', 'desc'))
   
@@ -662,6 +791,69 @@ export const subscribeToUserMaps = (
     } as MapDocument))
     callback(maps)
   })
+}
+
+// Listen to all maps from all users (admin only)
+// Uses polling with getAllMaps to ensure we get all maps
+// Only updates if maps actually changed (by ID and count)
+export const subscribeToAllMaps = (
+  callback: (maps: MapDocument[]) => void
+): (() => void) => {
+  console.log('👑 subscribeToAllMaps: Starting admin map subscription')
+  let isActive = true
+  let pollInterval: ReturnType<typeof setInterval> | null = null
+  let lastMapsHash: string = ''
+  
+  // Helper to create a hash of maps for comparison
+  const getMapsHash = (maps: MapDocument[]): string => {
+    const ids = maps.map(m => m.id || '').sort().join(',')
+    return `${maps.length}:${ids}`
+  }
+  
+  // Function to fetch and compare maps
+  const fetchAndUpdateMaps = async () => {
+    if (!isActive) return
+    
+    try {
+      const allMapsList = await getAllMaps()
+      const newHash = getMapsHash(allMapsList)
+      
+      // Only call callback if maps actually changed
+      if (newHash !== lastMapsHash) {
+        console.log('👑 Admin maps changed:', {
+          previous: lastMapsHash,
+          current: newHash,
+          count: allMapsList.length
+        })
+        lastMapsHash = newHash
+        if (isActive) {
+          callback(allMapsList)
+        }
+      } else {
+        console.log('👑 Admin maps unchanged, skipping update')
+      }
+    } catch (error) {
+      console.error('Error polling all maps:', error)
+    }
+  }
+  
+  // Initial load
+  fetchAndUpdateMaps()
+  
+  // Poll every 5 seconds for updates (reduced frequency)
+  // This is simpler than subscribing to each user's maps individually
+  pollInterval = setInterval(() => {
+    fetchAndUpdateMaps()
+  }, 5000)
+  
+  // Return cleanup function
+  return () => {
+    console.log('👑 Cleaning up admin map subscription')
+    isActive = false
+    if (pollInterval) {
+      clearInterval(pollInterval)
+    }
+  }
 }
 
 // Listen to a specific map document for settings changes
@@ -915,7 +1107,16 @@ export const getSharedMaps = async (userEmail: string): Promise<MapDocument[]> =
 }
 
 // Helper function to determine if a map is owned by the current user
-export const isMapOwnedByUser = (map: MapDocument, userId: string): boolean => {
+// If userEmail is provided and is admin, always returns true
+export const isMapOwnedByUser = (
+  map: MapDocument, 
+  userId: string,
+  userEmail?: string | null
+): boolean => {
+  // Admin always has ownership permissions
+  if (userEmail && isAdmin(userEmail)) {
+    return true
+  }
   return map.userId === userId
 }
 
@@ -1026,6 +1227,164 @@ export const deleteMapPolygon = async (
     console.log('Polygon deleted successfully')
   } catch (error) {
     console.error('Error deleting polygon:', error)
+    throw error
+  }
+}
+
+// Find user ID by email
+export const findUserIdByEmail = async (email: string): Promise<string | null> => {
+  try {
+    const usersQuery = query(collection(db, 'users'), where('email', '==', email.toLowerCase().trim()))
+    const usersSnapshot = await getDocs(usersQuery)
+    
+    if (usersSnapshot.empty) {
+      return null
+    }
+    
+    return usersSnapshot.docs[0].id
+  } catch (error) {
+    console.error('Error finding user by email:', error)
+    return null
+  }
+}
+
+// Transfer map ownership to another user
+export const transferMapOwnership = async (
+  mapId: string,
+  currentOwnerId: string,
+  newOwnerEmail: string
+): Promise<void> => {
+  try {
+    console.log('🔄 Starting map ownership transfer:', { mapId, currentOwnerId, newOwnerEmail })
+    
+    // Find new owner's user ID
+    const newOwnerId = await findUserIdByEmail(newOwnerEmail)
+    if (!newOwnerId) {
+      throw new Error(`User with email ${newOwnerEmail} not found`)
+    }
+    
+    if (newOwnerId === currentOwnerId) {
+      throw new Error('Cannot transfer map to the same owner')
+    }
+    
+    // Get map document from current owner
+    const currentMapRef = doc(db, 'users', currentOwnerId, 'maps', mapId)
+    const currentMapDoc = await getDoc(currentMapRef)
+    
+    if (!currentMapDoc.exists()) {
+      throw new Error('Map not found')
+    }
+    
+    const mapData = currentMapDoc.data() as MapDocument
+    console.log('📄 Map data retrieved:', mapData)
+    
+    // Get all markers from current owner
+    const currentMarkersRef = collection(db, 'users', currentOwnerId, 'maps', mapId, 'markers')
+    const currentMarkersSnapshot = await getDocs(currentMarkersRef)
+    console.log(`📍 Found ${currentMarkersSnapshot.docs.length} markers to transfer`)
+    
+    // Create map document in new owner's collection
+    const newMapRef = doc(db, 'users', newOwnerId, 'maps', mapId)
+    const newMapData: MapDocument = {
+      ...mapData,
+      userId: newOwnerId,
+      updatedAt: new Date()
+    }
+    await setDoc(newMapRef, newMapData)
+    console.log('✅ Map document created in new owner collection')
+    
+    // Transfer all markers to new owner's collection
+    const newMarkersRef = collection(db, 'users', newOwnerId, 'maps', mapId, 'markers')
+    const transferMarkerPromises = currentMarkersSnapshot.docs.map(async (markerDoc) => {
+      const markerData = markerDoc.data() as MarkerDocument
+      const newMarkerRef = doc(newMarkersRef, markerDoc.id)
+      
+      await setDoc(newMarkerRef, {
+        ...markerData,
+        userId: newOwnerId,
+        updatedAt: serverTimestamp()
+      })
+    })
+    
+    await Promise.all(transferMarkerPromises)
+    console.log(`✅ Transferred ${currentMarkersSnapshot.docs.length} markers to new owner`)
+    
+    // Update publicMaps collection
+    try {
+      const publicMapRef = doc(db, 'publicMaps', mapId)
+      const publicMapDoc = await getDoc(publicMapRef)
+      
+      if (publicMapDoc.exists()) {
+        await updateDoc(publicMapRef, {
+          userId: newOwnerId,
+          updatedAt: serverTimestamp()
+        })
+        console.log('✅ Updated publicMaps collection')
+      }
+    } catch (publicError) {
+      console.warn('⚠️ Failed to update publicMaps collection:', publicError)
+    }
+    
+    // Update publicMaps markers
+    try {
+      const publicMarkersRef = collection(db, 'publicMaps', mapId, 'markers')
+      const publicMarkersSnapshot = await getDocs(publicMarkersRef)
+      
+      const updatePublicMarkerPromises = publicMarkersSnapshot.docs.map(async (markerDoc) => {
+        const publicMarkerRef = doc(publicMarkersRef, markerDoc.id)
+        await updateDoc(publicMarkerRef, {
+          userId: newOwnerId,
+          updatedAt: serverTimestamp()
+        })
+      })
+      
+      await Promise.all(updatePublicMarkerPromises)
+      console.log(`✅ Updated ${publicMarkersSnapshot.docs.length} public markers`)
+    } catch (publicMarkerError) {
+      console.warn('⚠️ Failed to update publicMaps markers:', publicMarkerError)
+    }
+    
+    // Update sharing - remove old owner from shared users if present, or clear sharing
+    const updateData: any = {
+      updatedAt: serverTimestamp()
+    }
+    
+    if (mapData.sharing) {
+      const updatedSharedWith = mapData.sharing.sharedWith.filter(user => user.email.toLowerCase() !== newOwnerEmail.toLowerCase())
+      if (updatedSharedWith.length > 0) {
+        updateData.sharing = {
+          ...mapData.sharing,
+          sharedWith: updatedSharedWith
+        }
+      } else {
+        // If no shared users left, remove the sharing field
+        updateData.sharing = deleteField()
+      }
+    }
+    
+    await updateDoc(newMapRef, updateData)
+    
+    // Delete map and markers from old owner's collection
+    const deleteMarkerPromises = currentMarkersSnapshot.docs.map(async (markerDoc) => {
+      await deleteDoc(doc(currentMarkersRef, markerDoc.id))
+    })
+    
+    await Promise.all(deleteMarkerPromises)
+    await deleteDoc(currentMapRef)
+    console.log('✅ Deleted map and markers from old owner collection')
+    
+    // Update usage stats for both users
+    try {
+      await UsageTracker.updateUsage(currentOwnerId, 'maps', -1)
+      await UsageTracker.updateUsage(newOwnerId, 'maps', 1)
+      console.log('✅ Updated usage statistics')
+    } catch (statsError) {
+      console.warn('⚠️ Failed to update usage statistics:', statsError)
+    }
+    
+    console.log('✅ Map ownership transfer completed successfully')
+  } catch (error) {
+    console.error('❌ Error transferring map ownership:', error)
     throw error
   }
 }

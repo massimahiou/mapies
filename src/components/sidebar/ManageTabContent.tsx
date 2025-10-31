@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, Folder, GripVertical, Edit2, Check, Upload, AlertTriangle, Unlink, Maximize2, Lock } from 'lucide-react'
+import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, Folder, GripVertical, Edit2, Check, Upload, Unlink, Maximize2, Info } from 'lucide-react'
 import { applyNameRules } from '../../utils/markerUtils'
 import { createMarkerGroup, updateMarkerGroup, deleteMarkerGroup, getMarkerGroupByName, uploadFolderIconBase64, updateMarkerGroupIcon, removeMarkerGroupIcon } from '../../firebase/firestore'
 import { useToast } from '../../contexts/ToastContext'
@@ -7,6 +7,8 @@ import { getUserMaps, getMapPolygons, deleteMapPolygon, updateMapPolygon, Polygo
 import PolygonEditModal from '../PolygonEditModal'
 import { useUsageWarning } from '../../hooks/useFeatureAccess'
 import { useSharedMapFeatureAccess } from '../../hooks/useSharedMapFeatureAccess'
+import DeleteMarkerDialog from '../DeleteMarkerDialog'
+import LimitationInfoModal from '../LimitationInfoModal'
 
 interface Marker {
   id: string
@@ -36,6 +38,7 @@ interface ManageTabContentProps {
   mapId: string | undefined
   onOpenModal?: () => void
   currentMap?: any // Add current map data to determine ownership
+  onOpenSubscription?: () => void
 }
 
 const ManageTabContent: React.FC<ManageTabContentProps> = ({
@@ -49,7 +52,8 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   userId,
   mapId,
   onOpenModal,
-  currentMap
+  currentMap,
+  onOpenSubscription
 }) => {
   const { showToast } = useToast()
   const { showWarning, showError, limit, currentCount } = useUsageWarning('markers', markers.length)
@@ -68,6 +72,9 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const [editingMarkerName, setEditingMarkerName] = useState('')
   const [folderIcons, setFolderIcons] = useState<Record<string, string>>({})
   const [isUngrouping, setIsUngrouping] = useState(false)
+  const [markerToDelete, setMarkerToDelete] = useState<{ id: string; name: string } | null>(null)
+  const [isDeletingMarker, setIsDeletingMarker] = useState(false)
+  const [showLimitationModal, setShowLimitationModal] = useState<{ type: 'marker-usage' | 'name-rules' } | null>(null)
 
   // Transfer rules state
   const [sourceMapRules, setSourceMapRules] = useState<NameRule[]>([])
@@ -946,50 +953,35 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
 
   return (
     <div className="p-4">
-      {/* Usage Warning */}
-      {(showWarning || showError) && (
-        <div className={`mb-4 p-3 border rounded-lg ${
-          showError 
-            ? 'bg-red-50 border-red-200' 
-            : 'bg-yellow-50 border-yellow-200'
-        }`}>
-          <div className="flex items-center gap-2">
-            <AlertTriangle className={`w-4 h-4 ${
-              showError ? 'text-red-600' : 'text-yellow-600'
-            }`} />
-            <p className={`text-sm ${
-              showError ? 'text-red-800' : 'text-yellow-800'
-            }`}>
-              {showError 
-                ? `You've used all ${limit} markers in your current plan. Consider upgrading for more markers.`
-                : `You're using ${currentCount} of ${limit} markers. Consider upgrading for more capacity.`
-              }
-            </p>
-          </div>
-          {showError && (
-            <div className="mt-2">
-              <button 
-                onClick={() => {/* TODO: Open upgrade modal */}}
-                className="text-sm text-red-600 hover:text-red-700 underline"
-              >
-                Learn More
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Header with Modal Button */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">Manage Markers</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-gray-900">Manage Markers</h2>
+          {/* Compact Info Icon for Usage Warning */}
+          {(showWarning || showError) && (
+            <button
+              onClick={() => setShowLimitationModal({ type: 'marker-usage' })}
+              className={`p-1 rounded-full transition-colors ${
+                showError 
+                  ? 'text-red-500 hover:bg-red-50' 
+                  : 'text-yellow-500 hover:bg-yellow-50'
+              }`}
+              title={showError 
+                ? `You've used all ${limit} markers. Click for more info.`
+                : `You're using ${currentCount} of ${limit} markers. Click for more info.`
+              }
+            >
+              <Info className="w-4 h-4" />
+            </button>
+          )}
+        </div>
         {onOpenModal && (
           <button
             onClick={onOpenModal}
-            className="hidden sm:flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
             title="Open in full screen"
           >
-            <Maximize2 className="w-4 h-4" />
-            Open in Modal
+            <Maximize2 className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
@@ -997,7 +989,19 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
       {/* Name Rules Section */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-800">Name Rules</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-gray-800">Name Rules</h3>
+            {/* Compact Info Icon for Name Rules Limitation */}
+            {!hasSmartGrouping && (
+              <button
+                onClick={() => setShowLimitationModal({ type: 'name-rules' })}
+                className="p-1 text-yellow-500 hover:bg-yellow-50 rounded-full transition-colors"
+                title="Name rules available with upgrade. Click for more info."
+              >
+                <Info className="w-4 h-4" />
+              </button>
+            )}
+          </div>
           <button
             onClick={() => hasSmartGrouping ? setShowRules(!showRules) : null}
             disabled={!hasSmartGrouping}
@@ -1012,29 +1016,6 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
             Manage
           </button>
         </div>
-
-        {/* Smart Grouping Limitation Warning */}
-        {!hasSmartGrouping && (
-          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="flex items-center gap-2">
-              <Lock className="w-4 h-4 text-yellow-600" />
-              <div className="flex-1">
-                <p className="text-sm text-yellow-800 font-medium">
-                  Name Rules Available with Upgrade
-                </p>
-                <p className="text-xs text-yellow-700 mt-1">
-                  Name rules (smart grouping) are available with Professional plan or higher. Upgrade to automatically rename and group markers.
-                </p>
-              </div>
-              <button 
-                onClick={() => {/* TODO: Open upgrade modal */}}
-                className="text-xs text-yellow-600 hover:text-yellow-700 underline font-medium"
-              >
-                Learn More
-              </button>
-            </div>
-          </div>
-        )}
 
         {showRules && hasSmartGrouping && (
           <div className="space-y-4">
@@ -1451,16 +1432,16 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                             onDrop={(e) => handleDrop(e, marker)}
                             onDragEnd={handleDragEnd}
                           >
-                            <GripVertical className="w-4 h-4 text-gray-400 cursor-grab" />
-                            <span className="text-lg">{getMarkerIcon(marker.type)}</span>
-                            <div className="flex-1 min-w-0">
+                            <GripVertical className="w-4 h-4 text-gray-400 cursor-grab flex-shrink-0" />
+                            <span className="text-lg flex-shrink-0">{getMarkerIcon(marker.type)}</span>
+                            <div className="flex-1 min-w-0 overflow-hidden">
                               {editingMarker === marker.id ? (
-                                <div className="flex items-center gap-1 w-full">
+                                <div className="flex items-center gap-1 w-full min-w-0">
                                   <input
                                     type="text"
                                     value={editingMarkerName}
                                     onChange={(e) => setEditingMarkerName(e.target.value)}
-                                    className="flex-1 text-sm font-medium text-gray-900 bg-white border border-pinz-300 rounded px-2 py-1 focus:ring-2 focus:ring-pinz-500 focus:border-pinz-500"
+                                    className="flex-1 min-w-0 text-sm font-medium text-gray-900 bg-white border border-pinz-300 rounded px-2 py-1 focus:ring-2 focus:ring-pinz-500 focus:border-pinz-500 max-w-full"
                                     autoFocus
                                     onKeyDown={(e) => {
                                       if (e.key === 'Enter') saveMarkerRename(marker.id)
@@ -1534,7 +1515,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                                     </button>
                                   )}
                                   <button
-                                    onClick={() => onDeleteMarker(marker.id)}
+                                    onClick={() => setMarkerToDelete({ id: marker.id, name: marker.name })}
                                     className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors"
                                     title="Delete marker"
                                   >
@@ -1566,16 +1547,16 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <GripVertical className="w-4 h-4 text-gray-400 cursor-grab" />
-                        <span className="text-lg">{getMarkerIcon(marker.type)}</span>
-                        <div className="flex-1 min-w-0">
+                        <GripVertical className="w-4 h-4 text-gray-400 cursor-grab flex-shrink-0" />
+                        <span className="text-lg flex-shrink-0">{getMarkerIcon(marker.type)}</span>
+                        <div className="flex-1 min-w-0 overflow-hidden">
                           {editingMarker === marker.id ? (
-                            <div className="flex items-center gap-1 w-full">
+                            <div className="flex items-center gap-1 w-full min-w-0">
                               <input
                                 type="text"
                                 value={editingMarkerName}
                                 onChange={(e) => setEditingMarkerName(e.target.value)}
-                                className="flex-1 text-sm font-medium text-gray-900 bg-white border border-pinz-300 rounded px-2 py-1 focus:ring-2 focus:ring-pinz-500 focus:border-pinz-500"
+                                className="flex-1 min-w-0 text-sm font-medium text-gray-900 bg-white border border-pinz-300 rounded px-2 py-1 focus:ring-2 focus:ring-pinz-500 focus:border-pinz-500 max-w-full"
                                 autoFocus
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') saveMarkerRename(marker.id)
@@ -1649,7 +1630,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                                 </button>
                               )}
                               <button
-                                onClick={() => onDeleteMarker(marker.id)}
+                                onClick={() => setMarkerToDelete({ id: marker.id, name: marker.name })}
                                 className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors"
                                 title="Delete marker"
                               >
@@ -1827,6 +1808,40 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
         mapId={mapId || ''}
         currentMap={currentMap}
         onSave={handlePolygonEditSave}
+      />
+
+      {/* Delete Marker Confirmation Modal */}
+      <DeleteMarkerDialog
+        isOpen={!!markerToDelete}
+        onClose={() => setMarkerToDelete(null)}
+        onConfirm={async () => {
+          if (!markerToDelete) return
+          setIsDeletingMarker(true)
+          try {
+            // Call the delete function - it's async in App.tsx
+            onDeleteMarker(markerToDelete.id)
+            setMarkerToDelete(null)
+            showToast({ type: 'success', title: 'Success', message: 'Marker deleted successfully' })
+          } catch (error) {
+            console.error('Error deleting marker:', error)
+            showToast({ type: 'error', title: 'Error', message: 'Failed to delete marker' })
+          } finally {
+            setIsDeletingMarker(false)
+          }
+        }}
+        markerName={markerToDelete?.name || ''}
+        isDeleting={isDeletingMarker}
+      />
+
+      {/* Limitation Info Modal */}
+      <LimitationInfoModal
+        isOpen={!!showLimitationModal}
+        onClose={() => setShowLimitationModal(null)}
+        type={showLimitationModal?.type || 'marker-usage'}
+        currentCount={currentCount}
+        limit={limit}
+        isError={showError}
+        onOpenSubscription={onOpenSubscription}
       />
     </div>
   )

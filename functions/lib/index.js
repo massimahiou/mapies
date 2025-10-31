@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncUserSubscription = exports.cancelSubscription = exports.listPrices = exports.fixUserLimits = exports.testCustomerPortal = exports.createCustomerPortalSession = exports.createCheckoutSession = exports.leaveSharedMap = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
+exports.syncUserSubscription = exports.cancelSubscription = exports.listPrices = exports.fixUserLimits = exports.testCustomerPortal = exports.createCustomerPortalSession = exports.createCheckoutSession = exports.transferMapOwnership = exports.leaveSharedMap = exports.webhookStatus = exports.handleMapiesStripeWebhooks = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const stripe_1 = require("stripe");
@@ -295,6 +295,139 @@ exports.leaveSharedMap = functions.https.onCall(async (data, context) => {
             throw error;
         }
         throw new functions.https.HttpsError('internal', 'Internal server error');
+    }
+});
+/**
+ * Transfer map ownership to another user
+ */
+exports.transferMapOwnership = functions.https.onCall(async (data, context) => {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+    }
+    const { mapId, newOwnerEmail } = data;
+    const currentOwnerId = context.auth.uid;
+    if (!mapId || !newOwnerEmail) {
+        throw new functions.https.HttpsError('invalid-argument', 'Map ID and new owner email are required');
+    }
+    try {
+        logger.info('🔄 Starting map ownership transfer', { mapId, currentOwnerId, newOwnerEmail });
+        const db = admin.firestore();
+        // Find new owner's user ID by email
+        const usersSnapshot = await db.collection('users')
+            .where('email', '==', newOwnerEmail.toLowerCase().trim())
+            .limit(1)
+            .get();
+        if (usersSnapshot.empty) {
+            throw new functions.https.HttpsError('not-found', `User with email ${newOwnerEmail} not found`);
+        }
+        const newOwnerId = usersSnapshot.docs[0].id;
+        if (newOwnerId === currentOwnerId) {
+            throw new functions.https.HttpsError('invalid-argument', 'Cannot transfer map to the same owner');
+        }
+        // Get map document from current owner
+        const currentMapRef = db.collection('users').doc(currentOwnerId).collection('maps').doc(mapId);
+        const currentMapDoc = await currentMapRef.get();
+        if (!currentMapDoc.exists) {
+            throw new functions.https.HttpsError('not-found', 'Map not found');
+        }
+        const mapData = currentMapDoc.data();
+        if (!mapData) {
+            throw new functions.https.HttpsError('not-found', 'Map data not found');
+        }
+        // Verify current user is the owner
+        if (mapData.userId !== currentOwnerId) {
+            throw new functions.https.HttpsError('permission-denied', 'Only the map owner can transfer ownership');
+        }
+        logger.info('📄 Map data retrieved', { markerCount: ((_a = mapData.stats) === null || _a === void 0 ? void 0 : _a.markerCount) || 0 });
+        // Get all markers from current owner
+        const currentMarkersRef = currentMapRef.collection('markers');
+        const currentMarkersSnapshot = await currentMarkersRef.get();
+        logger.info(`📍 Found ${currentMarkersSnapshot.docs.length} markers to transfer`);
+        // Create map document in new owner's collection
+        const newMapRef = db.collection('users').doc(newOwnerId).collection('maps').doc(mapId);
+        const newMapData = Object.assign(Object.assign({}, mapData), { userId: newOwnerId, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+        // Batch write for atomicity
+        const batch = db.batch();
+        // Add map to new owner
+        batch.set(newMapRef, newMapData);
+        // Transfer all markers to new owner's collection
+        const newMarkersRef = newMapRef.collection('markers');
+        currentMarkersSnapshot.docs.forEach((markerDoc) => {
+            const markerData = markerDoc.data();
+            const newMarkerRef = newMarkersRef.doc(markerDoc.id);
+            batch.set(newMarkerRef, Object.assign(Object.assign({}, markerData), { userId: newOwnerId, updatedAt: admin.firestore.FieldValue.serverTimestamp() }));
+        });
+        // Update publicMaps collection
+        const publicMapRef = db.collection('publicMaps').doc(mapId);
+        const publicMapDoc = await publicMapRef.get();
+        if (publicMapDoc.exists) {
+            batch.update(publicMapRef, {
+                userId: newOwnerId,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+        // Update publicMaps markers
+        const publicMarkersRef = publicMapRef.collection('markers');
+        const publicMarkersSnapshot = await publicMarkersRef.get();
+        publicMarkersSnapshot.docs.forEach((markerDoc) => {
+            batch.update(markerDoc.ref, {
+                userId: newOwnerId,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        });
+        // Update sharing - remove old owner from shared users if present
+        if (mapData.sharing) {
+            const updatedSharing = Object.assign(Object.assign({}, mapData.sharing), { sharedWith: mapData.sharing.sharedWith.filter((user) => user.email.toLowerCase() !== newOwnerEmail.toLowerCase()) });
+            batch.update(newMapRef, {
+                sharing: updatedSharing
+            });
+        }
+        // Commit batch
+        await batch.commit();
+        logger.info('✅ Batch committed - map and markers transferred');
+        // Delete map and markers from old owner's collection (after successful transfer)
+        const deleteBatch = db.batch();
+        currentMarkersSnapshot.docs.forEach((markerDoc) => {
+            deleteBatch.delete(markerDoc.ref);
+        });
+        deleteBatch.delete(currentMapRef);
+        await deleteBatch.commit();
+        logger.info('✅ Deleted map and markers from old owner collection');
+        // Update usage stats for both users
+        try {
+            const currentUserRef = db.collection('users').doc(currentOwnerId);
+            const currentUserDoc = await currentUserRef.get();
+            const currentUsage = ((_c = (_b = currentUserDoc.data()) === null || _b === void 0 ? void 0 : _b.usage) === null || _c === void 0 ? void 0 : _c.maps) || 0;
+            await currentUserRef.update({
+                'usage.maps': Math.max(0, currentUsage - 1),
+                'usage.mapsCount': Math.max(0, (((_e = (_d = currentUserDoc.data()) === null || _d === void 0 ? void 0 : _d.usage) === null || _e === void 0 ? void 0 : _e.mapsCount) || 0) - 1)
+            });
+            const newUserRef = db.collection('users').doc(newOwnerId);
+            const newUserDoc = await newUserRef.get();
+            const newUsage = ((_g = (_f = newUserDoc.data()) === null || _f === void 0 ? void 0 : _f.usage) === null || _g === void 0 ? void 0 : _g.maps) || 0;
+            await newUserRef.update({
+                'usage.maps': newUsage + 1,
+                'usage.mapsCount': (((_j = (_h = newUserDoc.data()) === null || _h === void 0 ? void 0 : _h.usage) === null || _j === void 0 ? void 0 : _j.mapsCount) || 0) + 1
+            });
+            logger.info('✅ Updated usage statistics');
+        }
+        catch (statsError) {
+            logger.warn('⚠️ Failed to update usage statistics', statsError);
+        }
+        logger.info('✅ Map ownership transfer completed successfully');
+        return {
+            success: true,
+            message: `Map ownership successfully transferred to ${newOwnerEmail}`,
+            newOwnerId
+        };
+    }
+    catch (error) {
+        logger.error('❌ Error transferring map ownership', error);
+        if (error instanceof functions.https.HttpsError) {
+            throw error;
+        }
+        throw new functions.https.HttpsError('internal', 'Failed to transfer map ownership');
     }
 });
 var listPrices_1 = require("./listPrices");

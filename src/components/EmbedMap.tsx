@@ -287,6 +287,8 @@ const EmbedMap: React.FC = () => {
           console.log('🔍 EmbedMap: Loading map settings from Firestore:', mapData.settings)
           const rawSettings = {
             ...mapData.settings,
+            // Ensure markerShape defaults to 'pin' if missing (for existing maps)
+            markerShape: mapData.settings.markerShape || 'pin',
             clusteringEnabled: mapData.settings.clusteringEnabled !== undefined ? mapData.settings.clusteringEnabled : true,
             clusterRadius: mapData.settings.clusterRadius || 50,
             // Search bar settings with defaults

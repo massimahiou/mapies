@@ -118,16 +118,21 @@ export function validateMapAgainstPlan(
   // Check for premium customization
   // Premium customization includes advanced styling (search bar colors, non-default shapes)
   // Basic customization (border, border width, basic colors) is available to all plans
+  // For basic plans: allow 'pin' and 'circle' shapes, disallow 'square' and 'diamond'
+  const allowedShapes = planLimits.customizationLevel === 'premium' 
+    ? ['pin', 'circle', 'square', 'diamond'] // Premium: all shapes allowed
+    : ['pin', 'circle'] // Basic: only pin and circle allowed
   const hasPremiumCustomization = 
-    mapSettings.markerShape !== 'circle' || // Non-default shapes
+    !allowedShapes.includes(mapSettings.markerShape) || // Non-allowed shapes
     mapSettings.searchBarBackgroundColor !== '#ffffff' || // Custom search bar colors
     mapSettings.searchBarTextColor !== '#000000' || // Custom text colors
     mapSettings.searchBarHoverColor !== '#f3f4f6' // Custom hover colors
 
   console.log('🔍 Premium Customization Check:', {
     hasPremiumCustomization,
+    allowedShapes,
     checks: {
-      markerShapeNotCircle: mapSettings.markerShape !== 'circle',
+      markerShapeNotAllowed: !allowedShapes.includes(mapSettings.markerShape),
       searchBarBackgroundNotWhite: mapSettings.searchBarBackgroundColor !== '#ffffff',
       searchBarTextNotBlack: mapSettings.searchBarTextColor !== '#000000',
       searchBarHoverNotGray: mapSettings.searchBarHoverColor !== '#f3f4f6'
@@ -154,7 +159,7 @@ export function validateMapAgainstPlan(
   }
 
   // Check for smart grouping usage
-  const smartGroupingUsed = checkSmartGroupingUsage(markers, mapSettings)
+  const smartGroupingUsed = checkSmartGroupingUsage(mapSettings)
   if (smartGroupingUsed && !planLimits.smartGrouping) {
     premiumFeaturesUsed.push('smart_grouping')
   }
@@ -245,24 +250,22 @@ function checkCustomLogosUsage(markers: Marker[], folderIcons?: Record<string, s
 /**
  * Checks if smart grouping features are being used
  * Note: Basic clustering is available to all plans, only advanced smart grouping is premium
+ * Only checks settings, not markers, because we can't undo smart grouping once applied to markers
  */
-function checkSmartGroupingUsage(markers: Marker[], mapSettings: MapSettings): boolean {
+function checkSmartGroupingUsage(mapSettings: MapSettings): boolean {
   // Check if name rules are applied (premium feature)
+  // This is the only check we do - if nameRules is empty, smart grouping is not being used
+  // We don't check markers themselves because:
+  // 1. Markers can be renamed manually without smart grouping
+  // 2. Once smart grouping is removed from settings, the map should be compliant
   if (mapSettings.nameRules && mapSettings.nameRules.length > 0) {
     return true
   }
 
   // Basic clustering is available to all plans - don't flag it as premium
-  // Only advanced smart grouping features should be flagged
-
-  // Check for renamed markers (indicates smart grouping was used)
-  const hasRenamedMarkers = markers.some(marker => {
-    // This would need to be tracked during marker creation
-    // For now, we'll check if markers have been processed by name rules
-    return marker.name !== marker.address // Simple heuristic
-  })
-
-  return hasRenamedMarkers
+  // Only advanced smart grouping features (name rules) should be flagged
+  
+  return false
 }
 
 /**

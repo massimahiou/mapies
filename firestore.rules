@@ -15,11 +15,16 @@ service cloud.firestore {
         // Application-level validation ensures only shared users can remove themselves
         allow update: if request.auth != null;
         
+        // Allow delete if user owns the map (for ownership transfer cleanup)
+        allow delete: if request.auth != null && request.auth.uid == userId;
+        
         // Users can read and write markers within their maps
         match /markers/{markerId} {
           allow read: if true; // Anyone can read markers for public sharing
           allow write: if request.auth != null && request.auth.uid == userId; // Map owner can write
           allow update: if request.auth != null; // Allow any authenticated user to update markers (application-level validation ensures proper permissions)
+          // Allow delete for ownership transfer cleanup
+          allow delete: if request.auth != null && request.auth.uid == userId;
         }
         
         // Users can read and write polygons/regions within their maps
@@ -33,18 +38,52 @@ service cloud.firestore {
       }
     }
     
+    // Allow creating maps in other users' collections for ownership transfer
+    // Only if the current user owns a map with the same ID in their own collection
+    match /users/{targetUserId}/maps/{mapId} {
+      allow create: if request.auth != null && 
+        request.resource.data.userId == targetUserId &&
+        // Verify the current user owns the original map by checking if it exists in their collection
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)/maps/$(mapId)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)/maps/$(mapId)).data.userId == request.auth.uid;
+      
+      // Allow creating markers in other users' maps during transfer
+      match /markers/{markerId} {
+        allow create: if request.auth != null && 
+          request.resource.data.userId == targetUserId &&
+          // Verify the map exists in the target user's collection (was just transferred)
+          exists(/databases/$(database)/documents/users/$(targetUserId)/maps/$(mapId));
+      }
+    }
+    
     // Public maps collection - for easy access to shared maps
     match /publicMaps/{mapId} {
       allow read: if true; // Anyone can read public maps
       allow write: if request.auth != null && request.auth.uid == resource.data.userId; // Only map owner can write
       allow create: if request.auth != null && request.auth.uid == request.resource.data.userId; // Only map owner can create
       
+      // Allow updating userId during ownership transfer if current user is the owner
+      allow update: if request.auth != null && (
+        request.auth.uid == resource.data.userId || // Current owner can update
+        // Or if user is transferring (owns the map in their collection and only updating userId)
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)/maps/$(mapId)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)/maps/$(mapId)).data.userId == request.auth.uid &&
+         request.resource.data.userId != resource.data.userId)
+      );
+      
       // Public map markers
       match /markers/{markerId} {
         allow read: if true; // Anyone can read public map markers
         allow write: if request.auth != null && request.auth.uid == get(/databases/$(database)/documents/publicMaps/$(mapId)).data.userId; // Only map owner can write
         allow create: if request.auth != null && request.auth.uid == get(/databases/$(database)/documents/publicMaps/$(mapId)).data.userId; // Only map owner can create
-        allow update: if request.auth != null; // Allow any authenticated user to update markers (application-level validation ensures proper permissions)
+        allow update: if request.auth != null && (
+          // Current owner can update
+          request.auth.uid == get(/databases/$(database)/documents/publicMaps/$(mapId)).data.userId ||
+          // Or during ownership transfer (only updating userId)
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)/maps/$(mapId)) &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)/maps/$(mapId)).data.userId == request.auth.uid &&
+           request.resource.data.userId != resource.data.userId)
+        );
       }
     }
     

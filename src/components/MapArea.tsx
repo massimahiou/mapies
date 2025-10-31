@@ -24,11 +24,12 @@ interface MapAreaProps {
   onOpenSubscription?: () => void
   currentMap?: any // Add current map data to determine ownership
   showPolygonDrawing?: boolean // Pass through polygon drawing mode
+  onMapSettingsChange?: (settings: any) => void // Callback to update map settings
 }
 
-const MapArea: React.FC<MapAreaProps> = ({ markers, activeTab, mapSettings, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {}, onOpenSubscription, currentMap, showPolygonDrawing }) => {
+const MapArea: React.FC<MapAreaProps> = ({ markers, activeTab, mapSettings, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {}, onOpenSubscription, currentMap, showPolygonDrawing, onMapSettingsChange }) => {
   const isPublishMode = activeTab === 'publish'
-  return <Map markers={markers} activeTab={activeTab} mapSettings={mapSettings} isPublishMode={isPublishMode} userLocation={userLocation} locationError={locationError} onGetCurrentLocation={onGetCurrentLocation} iframeDimensions={iframeDimensions} onIframeDimensionsChange={onIframeDimensionsChange} folderIcons={folderIcons} onOpenSubscription={onOpenSubscription} currentMap={currentMap} showPolygonDrawing={showPolygonDrawing} />
+  return <Map markers={markers} activeTab={activeTab} mapSettings={mapSettings} isPublishMode={isPublishMode} userLocation={userLocation} locationError={locationError} onGetCurrentLocation={onGetCurrentLocation} iframeDimensions={iframeDimensions} onIframeDimensionsChange={onIframeDimensionsChange} folderIcons={folderIcons} onOpenSubscription={onOpenSubscription} currentMap={currentMap} showPolygonDrawing={showPolygonDrawing} onMapSettingsChange={onMapSettingsChange} />
 }
 
 export default MapArea

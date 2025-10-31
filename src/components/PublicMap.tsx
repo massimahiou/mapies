@@ -15,6 +15,7 @@ import InteractiveWatermark from './InteractiveWatermark'
 import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from '../utils/freemiumDefaults'
 import { validateMapAgainstPlan } from '../utils/mapValidation'
 import { usePolygonLoader } from '../hooks/usePolygonLoader'
+import { useResponsive } from '../hooks/useResponsive'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -88,6 +89,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   const urlMapId = useParams<{ mapId: string }>().mapId
   const mapId = propMapId || urlMapId
   const { showWatermark: defaultShowWatermark, hasGeocoding } = usePublicFeatureAccess()
+  const { isMobile } = useResponsive()
   
   const [showWatermark, setShowWatermark] = useState(defaultShowWatermark)
   const mapRef = useRef<HTMLDivElement>(null)
@@ -122,6 +124,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   const [locationModeActive, setLocationModeActive] = useState(false)
   const [renamedMarkers] = useState<Record<string, string>>({})
   const [showMobileResults, setShowMobileResults] = useState(false)
+  const [viewportMarkers, setViewportMarkers] = useState<Marker[]>([]) // Markers visible in current viewport
   
   // Load polygons for public maps
   usePolygonLoader({
@@ -137,113 +140,298 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   // Check if map should be disabled for public viewing
   const isMapDisabled = !mapValidation.isValid
 
-  // Geocoding function for postal codes - Using Mapbox API
+  // Geocoding function for postal codes - Using Mapbox API (primary) with Nominatim fallback
   const geocodePostalCode = async (postalCode: string): Promise<{lat: number, lng: number} | null> => {
     try {
-      // Check if user has geocoding access
-      if (!hasGeocoding) {
-        console.log('❌ Geocoding not available in current plan')
-        return null
+      const cleanedPostalCode = postalCode.trim().replace(/\s+/g, '').toUpperCase()
+      console.log('🌐 Attempting to geocode postal code:', cleanedPostalCode)
+      
+      // PRIORITY 1: Always try Mapbox first (even if hasGeocoding is false - Mapbox public token should work for basic geocoding)
+      const encodedPostalCode = encodeURIComponent(cleanedPostalCode)
+      
+      // Try Mapbox with postal code autocomplete/geocoding
+      // Method 1: Query parameter style (more reliable for postal codes)
+      const mapboxQueryUrl = `${MAPBOX_CONFIG.GEOCODING_API_URL}/${encodedPostalCode}.json?access_token=${MAPBOX_CONFIG.ACCESS_TOKEN}&country=CA&types=postcode&limit=1`
+      console.log('🌐 Mapbox query URL:', mapboxQueryUrl)
+      
+      try {
+        const response = await fetch(mapboxQueryUrl)
+        const data = await response.json()
+        
+        console.log('📍 Mapbox geocoding response:', data)
+        console.log('📍 Mapbox response status:', response.status, response.ok)
+        
+        if (response.ok && data.features && data.features.length > 0) {
+          const feature = data.features[0]
+          const coordinates = feature.center
+          console.log(`✅ Mapbox found coordinates for ${cleanedPostalCode}:`, coordinates)
+          return {
+            lat: coordinates[1], // Mapbox returns [lng, lat]
+            lng: coordinates[0]
+          }
+        }
+        
+        // If no results with types=postcode, try without types restriction
+        if (!data.features || data.features.length === 0) {
+          console.log('⚠️ Mapbox returned no features with postcode type, trying without type restriction...')
+          const mapboxUrlNoTypes = `${MAPBOX_CONFIG.GEOCODING_API_URL}/${encodedPostalCode}.json?access_token=${MAPBOX_CONFIG.ACCESS_TOKEN}&country=CA&limit=5`
+          
+          const response2 = await fetch(mapboxUrlNoTypes)
+          const data2 = await response2.json()
+          console.log('📍 Mapbox response (no types, limit 5):', data2)
+          
+          if (response2.ok && data2.features && data2.features.length > 0) {
+            // Look for postal code features first, or any Canadian location
+            const postalCodeFeature = data2.features.find((f: any) => 
+              f.place_type?.includes('postcode') || 
+              f.properties?.type === 'postcode' ||
+              f.context?.some((ctx: any) => ctx.id?.startsWith('postcode'))
+            )
+            
+            const feature = postalCodeFeature || data2.features[0]
+            const coordinates = feature.center
+            console.log(`✅ Mapbox found coordinates (broader search) for ${cleanedPostalCode}:`, coordinates)
+            return {
+              lat: coordinates[1],
+              lng: coordinates[0]
+            }
+          }
+        }
+        
+        if (data.error || data.message) {
+          console.log('⚠️ Mapbox API error:', data.error || data.message)
+        }
+      } catch (mapboxError) {
+        console.error('⚠️ Mapbox error:', mapboxError)
       }
-
-      const cleanedPostalCode = postalCode.trim().replace(/\s+/g, '')
-      console.log('🌐 Attempting to geocode with Mapbox:', cleanedPostalCode)
       
-      // Use Mapbox Geocoding API for postal codes
-      const response = await fetch(
-        `${MAPBOX_CONFIG.GEOCODING_API_URL}/${cleanedPostalCode}.json?access_token=${MAPBOX_CONFIG.ACCESS_TOKEN}&country=CA&types=postcode`
-      )
+      console.log('ℹ️ Mapbox geocoding not successful, trying free Nominatim API as fallback')
       
-      if (!response.ok) {
-        throw new Error(`Mapbox API error: ${response.status}`)
+      // Always try Nominatim - it's FREE and works for postal codes
+      // Fallback to Nominatim - full postal code
+      try {
+        console.log('🔄 Trying Nominatim for full postal code:', cleanedPostalCode)
+        const nominatimUrl = `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(cleanedPostalCode)}&countrycodes=ca&format=json&limit=1`
+        const response = await fetch(nominatimUrl, {
+          headers: {
+            'User-Agent': 'Pinz Map App - pinz.app'
+          }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          console.log('📍 Nominatim geocoding response (full):', data)
+          
+          if (data && data.length > 0) {
+            const result = data[0]
+            console.log(`✅ Nominatim found coordinates for ${cleanedPostalCode}:`, { lat: result.lat, lng: result.lon })
+            return {
+              lat: parseFloat(result.lat),
+              lng: parseFloat(result.lon)
+            }
+          }
+        }
+      } catch (nominatimError) {
+        console.log('⚠️ Nominatim error:', nominatimError)
       }
       
-      const data = await response.json()
-      console.log('📍 Mapbox geocoding response:', data)
-      
-      if (data.features && data.features.length > 0) {
-        const coordinates = data.features[0].center
-        console.log(`✅ Found coordinates for ${cleanedPostalCode}:`, coordinates)
-        return {
-          lat: coordinates[1], // Mapbox returns [lng, lat]
-          lng: coordinates[0]
+      // If full postal code fails, try first 3 characters (postal code prefix)
+      if (cleanedPostalCode.length >= 3) {
+        const postalCodePrefix = cleanedPostalCode.substring(0, 3)
+        console.log('🔄 Full postal code not found, trying prefix:', postalCodePrefix)
+        
+        // Try Mapbox with prefix (only if geocoding is available)
+        if (hasGeocoding) {
+          try {
+            const mapboxUrl = `${MAPBOX_CONFIG.GEOCODING_API_URL}/${postalCodePrefix}.json?access_token=${MAPBOX_CONFIG.ACCESS_TOKEN}&country=CA&limit=1`
+            const response = await fetch(mapboxUrl)
+            
+            if (response.ok) {
+              const data = await response.json()
+              console.log('📍 Mapbox geocoding response (prefix):', data)
+              
+              if (data.features && data.features.length > 0) {
+                const coordinates = data.features[0].center
+                console.log(`✅ Mapbox found coordinates for prefix ${postalCodePrefix}:`, coordinates)
+                return {
+                  lat: coordinates[1],
+                  lng: coordinates[0]
+                }
+              }
+            }
+          } catch (mapboxError) {
+            console.log('⚠️ Mapbox prefix error:', mapboxError)
+          }
+        }
+        
+        // Try Nominatim with prefix (always available, it's free)
+        try {
+          console.log('🔄 Trying Nominatim for prefix:', postalCodePrefix)
+          const nominatimUrl = `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(postalCodePrefix)}&countrycodes=ca&format=json&limit=1`
+          const response = await fetch(nominatimUrl, {
+            headers: {
+              'User-Agent': 'Pinz Map App - pinz.app'
+            }
+          })
+          
+          if (response.ok) {
+            const data = await response.json()
+            console.log('📍 Nominatim geocoding response (prefix):', data)
+            
+            if (data && data.length > 0) {
+              const result = data[0]
+              console.log(`✅ Nominatim found coordinates for prefix ${postalCodePrefix}:`, { lat: result.lat, lng: result.lon })
+              return {
+                lat: parseFloat(result.lat),
+                lng: parseFloat(result.lon)
+              }
+            }
+          }
+        } catch (nominatimError) {
+          console.log('⚠️ Nominatim prefix error:', nominatimError)
         }
       }
       
       console.log(`❌ No coordinates found for postal code: ${cleanedPostalCode}`)
       return null
     } catch (error) {
-      console.error('Mapbox geocoding error:', error)
+      console.error('Postal code geocoding error:', error)
       return null
     }
   }
 
   // Check if search term is a postal code (Canadian format: A1A 1A1 or A1A1A1)
+  // Also checks for partial postal codes (3+ characters matching pattern)
   const isPostalCode = (term: string): boolean => {
-    const cleaned = term.trim().replace(/\s+/g, '') // Remove all spaces
-    const postalCodeRegex = /^[A-Za-z]\d[A-Za-z]\d[A-Za-z]\d$/
-    return postalCodeRegex.test(cleaned)
+    if (!term || !term.trim()) return false
+    
+    const cleaned = term.trim().replace(/\s+/g, '').toUpperCase() // Remove all spaces and normalize to uppercase
+    console.log('🔍 Checking postal code:', { original: term, cleaned })
+    
+    // Full postal code: A1A1A1 (6 characters)
+    const fullPostalCodeRegex = /^[A-Z]\d[A-Z]\d[A-Z]\d$/
+    // Partial postal code: A1A (3 characters - postal code prefix)
+    const partialPostalCodeRegex = /^[A-Z]\d[A-Z]$/
+    
+    const isFullMatch = fullPostalCodeRegex.test(cleaned)
+    const isPartialMatch = partialPostalCodeRegex.test(cleaned)
+    const result = isFullMatch || isPartialMatch
+    
+    console.log('🔍 Postal code check result:', { 
+      cleaned, 
+      isFullMatch, 
+      isPartialMatch, 
+      result,
+      length: cleaned.length 
+    })
+    
+    return result
   }
+
+  // Debounced search to avoid excessive API calls during typing
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Search functionality with postal code support
   const handleSearch = async (term: string) => {
-    console.log('Search term:', term, 'Markers count:', markers.length)
+    console.log('🔍 handleSearch called with term:', term, 'Markers count:', markers.length)
     setSearchTerm(term)
+    
+    // Clear any existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
     
     if (!term.trim()) {
       setSearchResults(markers)
       setShowMobileResults(false) // Hide results when search is cleared
-          return
-        }
+      return
+    }
 
     // Show mobile results panel when searching
     setShowMobileResults(true)
     
-    // Check if it's a postal code
-    if (isPostalCode(term)) {
-      console.log('🔍 Detected postal code:', term)
-      const coordinates = await geocodePostalCode(term)
-      if (coordinates) {
-        console.log('📍 Postal code coordinates:', coordinates)
+    // PRIORITY 1: Check if it's a postal code FIRST - postal codes ONLY use geocoding, no text search fallback
+    const isPostal = isPostalCode(term)
+    console.log('🔍 Postal code check for term:', term, 'Result:', isPostal)
+    
+    if (isPostal) {
+      console.log('✅ Detected postal code:', term, '- Starting geocoding...')
+      
+      // For postal codes, show loading state immediately but debounce the geocoding
+      // Show empty results initially to indicate geocoding is in progress
+      setSearchResults([])
+      
+      // Debounce postal code geocoding slightly to avoid excessive API calls
+      searchTimeoutRef.current = setTimeout(async () => {
+        console.log('🌐 Starting postal code geocoding for:', term)
+        console.log('🌐 Current markers available:', markers.length)
         
-        // For postal codes, use only first 3 characters for broader area search
-        const postalCodePrefix = term.trim().replace(/\s+/g, '').substring(0, 3)
-        console.log('🎯 Using postal code prefix for broader search:', postalCodePrefix)
+        // Reverse geocode postal code to get latitude/longitude
+        const coordinates = await geocodePostalCode(term)
+        console.log('🌐 Geocoding result:', coordinates)
         
-        // Calculate distance for ALL markers and sort by distance
-        const markersWithDistance = markers.map(marker => ({
-          ...marker,
-          distance: calculateDistance(coordinates.lat, coordinates.lng, marker.lat, marker.lng)
-        })).sort((a, b) => a.distance - b.distance)
-        
-        // Show the closest 30 markers (regardless of distance)
-        const closestMarkers = markersWithDistance.slice(0, 30)
-        
-        console.log(`🎯 Showing ${closestMarkers.length} closest markers to ${postalCodePrefix} area`)
-        console.log('📍 Closest markers:', closestMarkers.map(m => ({ name: m.name, distance: m.distance })))
-        
-        setSearchResults(closestMarkers)
-        
-        // Center map on postal code location
-        if (mapInstance.current) {
-          mapInstance.current.setView([coordinates.lat, coordinates.lng], 12)
+        if (coordinates && coordinates.lat && coordinates.lng) {
+          console.log('✅ Postal code geocoded successfully:', coordinates)
+          console.log(`📍 Using coordinates (${coordinates.lat}, ${coordinates.lng}) to find nearest spots`)
+          console.log('📍 Total markers to calculate distance for:', markers.length)
+          
+          // Use the geocoded coordinates to find nearest markers
+          // Calculate distance for ALL markers from the postal code location
+          const markersWithDistance = markers.map(marker => {
+            const distance = calculateDistance(coordinates.lat, coordinates.lng, marker.lat, marker.lng)
+            return {
+              ...marker,
+              distance
+            }
+          }).sort((a, b) => a.distance - b.distance)
+          
+          console.log('📍 Markers with distance calculated:', markersWithDistance.length)
+          console.log('📍 First few distances:', markersWithDistance.slice(0, 5).map(m => ({ name: m.name, distance: m.distance?.toFixed(2) + 'km' })))
+          
+          // Show the closest markers sorted by distance (nearest first)
+          const nearestMarkers = markersWithDistance.slice(0, 50) // Show up to 50 nearest
+          
+          console.log(`🎯 Found ${nearestMarkers.length} nearest markers to postal code location`)
+          console.log('📍 Nearest markers:', nearestMarkers.slice(0, 10).map(m => ({ 
+            name: m.name, 
+            distance: m.distance?.toFixed(2) + 'km',
+            lat: m.lat,
+            lng: m.lng
+          })))
+          
+          console.log('🎯 Setting search results to:', nearestMarkers.length, 'markers')
+          setSearchResults(nearestMarkers)
+          
+          // Center map on postal code location
+          if (mapInstance.current) {
+            mapInstance.current.setView([coordinates.lat, coordinates.lng], 12)
+            console.log('📍 Map centered on postal code location')
+          }
+          
+          // Set user location to the postal code location for distance display
+          setUserLocation({ lat: coordinates.lat, lng: coordinates.lng })
+          console.log('📍 User location set to postal code coordinates')
+        } else {
+          console.error('❌ Could not geocode postal code:', term)
+          console.error('❌ Geocoding returned null or invalid coordinates')
+          // NO FALLBACK - postal codes only use geocoding, no text search
+          setSearchResults([])
         }
-        return
-      } else {
-        console.log('❌ Could not geocode postal code:', term)
-        console.log('🔄 Falling back to regular text search...')
-        // Fall through to regular text search
-      }
+      }, 500) // Wait 500ms after user stops typing before geocoding
+      
+      return
     }
     
-    // Regular text search
-    const filtered = markers.filter(marker => 
-      marker.name.toLowerCase().includes(term.toLowerCase()) ||
-      marker.address.toLowerCase().includes(term.toLowerCase())
-    )
-    
-    console.log('Filtered results:', filtered.length, filtered)
-    setSearchResults(filtered)
+    // Regular text search (only for non-postal-code terms)
+    console.log('📝 Performing regular text search for:', term)
+    searchTimeoutRef.current = setTimeout(() => {
+      const filtered = markers.filter(marker => 
+        marker.name.toLowerCase().includes(term.toLowerCase()) ||
+        marker.address.toLowerCase().includes(term.toLowerCase())
+      )
+      console.log('📝 Filtered results:', filtered.length, filtered)
+      setSearchResults(filtered)
+    }, 300) // 300ms debounce for text search
   }
 
 
@@ -702,12 +890,57 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           mapInstance: !!mapInstance.current,
           markerClusterRef: !!markerClusterRef.current
         })
+        
+        // Listen to map move/zoom events to update visible markers in viewport
+        // Event handlers will be set up in a separate useEffect to access current state
       })
     }
     
     // Try to initialize immediately, if that fails, try again after a short delay
     initMap()
   }, [])
+
+  // Update viewport markers when map moves or zooms (always track, but only show when location is not active)
+  useEffect(() => {
+    if (!mapInstance.current || !mapLoaded) return
+    
+    const updateViewportMarkers = () => {
+      if (!mapInstance.current) return
+      
+      try {
+        const bounds = mapInstance.current.getBounds()
+        const visibleInViewport = markers.filter(marker => {
+          // Check if marker is within the current map viewport bounds
+          return bounds.contains([marker.lat, marker.lng])
+        })
+        
+        console.log('📍 Viewport markers updated:', visibleInViewport.length, 'markers visible in viewport')
+        setViewportMarkers(visibleInViewport)
+        
+        // Update search results to show viewport markers ONLY when location is not active and no search term
+        if (!locationModeActive && !searchTerm && showMobileResults) {
+          setSearchResults(visibleInViewport)
+        }
+      } catch (error) {
+        console.error('Error updating viewport markers:', error)
+      }
+    }
+    
+    // Update on map move and zoom (always track, regardless of location mode)
+    mapInstance.current.on('moveend', updateViewportMarkers)
+    mapInstance.current.on('zoomend', updateViewportMarkers)
+    
+    // Initial update after a short delay
+    const timeoutId = setTimeout(updateViewportMarkers, 500)
+    
+    return () => {
+      if (mapInstance.current) {
+        mapInstance.current.off('moveend', updateViewportMarkers)
+        mapInstance.current.off('zoomend', updateViewportMarkers)
+      }
+      clearTimeout(timeoutId)
+    }
+  }, [mapLoaded, markers, locationModeActive, searchTerm, showMobileResults])
 
   // Load map data from Firestore
   useEffect(() => {
@@ -795,6 +1028,8 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           console.log('🎨 Loading initial map settings:', mapDoc.settings)
           const rawSettings = {
             ...mapDoc.settings,
+            // Ensure markerShape defaults to 'pin' if missing (for existing maps)
+            markerShape: mapDoc.settings.markerShape || 'pin',
             // Ensure clustering settings have defaults
             clusteringEnabled: mapDoc.settings.clusteringEnabled !== undefined ? mapDoc.settings.clusteringEnabled : true,
             clusterRadius: mapDoc.settings.clusterRadius || 50,
@@ -836,17 +1071,62 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         // Set up real-time listeners for markers and settings
         console.log('Setting up real-time listeners...')
         
-              // Use direct user markers subscription with optimized updates
+              // Use direct user markers subscription with optimized updates and throttling
+              let lastUpdateTime = 0
+              const throttleDelay = 500 // Throttle updates to max once per 500ms
+              
               const unsubscribeMarkers = subscribeToMapMarkers(foundUserId, mapId, (markers: any[]) => {
+                const now = Date.now()
+                if (now - lastUpdateTime < throttleDelay && mapId === 'demo-map-1000-markers') {
+                  // Skip update if throttled (especially important for demo map with many markers)
+                  return
+                }
+                lastUpdateTime = now
+                
                 console.log('Public map markers updated:', markers.length, 'markers')
                 
                 // Transform markers to ensure correct coordinate structure
-                const transformedMarkers = markers.map((marker: any) => ({
+                let transformedMarkers = markers.map((marker: any) => ({
                   ...marker,
                   lat: marker.coordinates?.lat || marker.lat,
                   lng: marker.coordinates?.lng || marker.lng,
                   visible: marker.visible !== false // Default to true if not set
                 }))
+                
+                // Limit demo map to 250 markers for performance (keep all in Firestore)
+                // Prioritize Quebec/Montreal markers
+                if (mapId === 'demo-map-1000-markers' && transformedMarkers.length > 250) {
+                  // Define Quebec/Montreal regions (approximate bounding box)
+                  const quebecMontrealBounds = {
+                    north: 47.0,  // Northern Quebec
+                    south: 45.0,  // South of Montreal
+                    east: -70.0,  // East of Quebec City
+                    west: -74.0   // West of Montreal area
+                  }
+                  
+                  // Helper to check if marker is in Quebec/Montreal region
+                  const isInQuebecMontreal = (marker: any) => {
+                    const lat = marker.lat || marker.coordinates?.lat
+                    const lng = marker.lng || marker.coordinates?.lng
+                    return lat >= quebecMontrealBounds.south &&
+                           lat <= quebecMontrealBounds.north &&
+                           lng >= quebecMontrealBounds.west &&
+                           lng <= quebecMontrealBounds.east
+                  }
+                  
+                  // Separate markers into Quebec/Montreal and others
+                  const quebecMontrealMarkers = transformedMarkers.filter(isInQuebecMontreal)
+                  const otherMarkers = transformedMarkers.filter(m => !isInQuebecMontreal(m))
+                  
+                  // Prioritize Quebec/Montreal markers, then fill with others
+                  const prioritizedMarkers = [
+                    ...quebecMontrealMarkers,
+                    ...otherMarkers
+                  ].slice(0, 250)
+                  
+                  console.log(`📍 Limited demo map to 250 markers (${quebecMontrealMarkers.length} Quebec/Montreal, ${prioritizedMarkers.length - quebecMontrealMarkers.length} others)`)
+                  transformedMarkers = prioritizedMarkers
+                }
                 
                 // Only update if markers actually changed (optimized comparison)
                 setMarkers(prevMarkers => {
@@ -1458,7 +1738,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               </div>
               <input
                 type="text"
-                placeholder="Search locations or postal code..."
+                placeholder="Search locations"
                 value={searchTerm}
                 onChange={(e) => handleSearch(e.target.value)}
                 className="block w-full pl-10 pr-20 py-3 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-lg text-base"
@@ -1486,6 +1766,22 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                 </button>
               </div>
             </div>
+            
+            {/* Mobile Watermark - Under search bar */}
+            {isMobile && mapId !== 'demo-map-1000-markers' && showWatermark && (
+              <div className="mt-2 flex justify-center">
+                <div className="flex items-center gap-1 bg-white/90 backdrop-blur-sm px-2 py-1 rounded text-xs font-medium text-gray-600"
+                  style={{ fontSize: '10px' }}
+                >
+                  <img 
+                    src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
+                    alt="Pinz Logo"
+                    style={{ height: '10px', width: 'auto' }}
+                  />
+                  <span>Powered by Pinz</span>
+                </div>
+              </div>
+            )}
           </div>
           
           {/* Sidebar */}
@@ -1500,6 +1796,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
             calculateDistance={calculateDistance}
             renamedMarkers={renamedMarkers}
             allMarkers={markers}
+            viewportMarkers={viewportMarkers}
             onToggleLocation={toggleLocationMode}
             locationModeActive={locationModeActive}
             mapSettings={mapSettings}
@@ -1622,8 +1919,8 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               className="w-full h-full bg-gray-100"
             />
             
-            {/* Interactive Watermark - Show for other maps if required by subscription */}
-            {mapId !== 'demo-map-1000-markers' && showWatermark && (
+            {/* Interactive Watermark - Show for other maps if required by subscription (Desktop only) */}
+            {!isMobile && mapId !== 'demo-map-1000-markers' && showWatermark && (
               <InteractiveWatermark 
                 mode="static"
               />
@@ -1700,7 +1997,18 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           {/* Ultra-thin horizontal scrolling results */}
           <div className="bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-white/20 overflow-hidden">
             <div className="flex overflow-x-auto scrollbar-hide py-2 px-3 space-x-2">
-              {(searchTerm || locationModeActive ? searchResults : markers.sort(() => Math.random() - 0.5)).slice(0, 30).map((marker) => (
+              {(() => {
+                // When searching or location active, use searchResults
+                if (searchTerm || locationModeActive) {
+                  return searchResults
+                }
+                // When location is NOT active, show markers visible in current viewport
+                if (!locationModeActive && viewportMarkers.length > 0) {
+                  return viewportMarkers
+                }
+                // Fallback to random markers
+                return markers.sort(() => Math.random() - 0.5)
+              })().slice(0, 30).map((marker) => (
                 <button
                   key={marker.id}
                   onClick={() => navigateToMarker(marker)}
@@ -1725,7 +2033,14 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                 </button>
               ))}
               
-              {(searchTerm || locationModeActive ? searchResults : markers).length === 0 && (
+              {(() => {
+                const markersToShow = searchTerm || locationModeActive 
+                  ? searchResults 
+                  : (!locationModeActive && viewportMarkers.length > 0) 
+                    ? viewportMarkers 
+                    : markers
+                return markersToShow.length === 0
+              })() && (
                 <div className="flex-shrink-0 w-full flex items-center justify-center py-4 text-gray-500">
                   <div className="text-center">
                     <MapPin className="h-6 w-6 mx-auto mb-1 text-gray-300" />

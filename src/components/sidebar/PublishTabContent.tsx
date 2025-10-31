@@ -1,5 +1,6 @@
 import React from 'react'
 import { Globe, Copy, Maximize2 } from 'lucide-react'
+import { useToast } from '../../contexts/ToastContext'
 
 interface PublishTabContentProps {
   onShowPublishModal: () => void
@@ -12,6 +13,8 @@ const PublishTabContent: React.FC<PublishTabContentProps> = ({
   currentMapId,
   onOpenModal
 }) => {
+  const { showToast } = useToast()
+
   const generatePublicUrl = () => {
     if (!currentMapId) {
       return 'Please select a map to generate public URL'
@@ -23,9 +26,18 @@ const PublishTabContent: React.FC<PublishTabContentProps> = ({
   const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(generatePublicUrl())
-      // You could add a toast notification here
+      showToast({
+        type: 'success',
+        title: 'Link copied!',
+        message: 'Link copied to clipboard'
+      })
     } catch (err) {
       console.error('Failed to copy: ', err)
+      showToast({
+        type: 'error',
+        title: 'Failed to copy',
+        message: 'Could not copy link to clipboard'
+      })
     }
   }
 
@@ -37,11 +49,10 @@ const PublishTabContent: React.FC<PublishTabContentProps> = ({
         {onOpenModal && (
           <button
             onClick={onOpenModal}
-            className="hidden sm:flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-pinz-300 transition-colors"
+            className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
             title="Open in full screen"
           >
-            <Maximize2 className="w-4 h-4" />
-            Open in Modal
+            <Maximize2 className="w-3.5 h-3.5" />
           </button>
         )}
       </div>

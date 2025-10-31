@@ -8,6 +8,7 @@ import ManageTabContent from './sidebar/ManageTabContent'
 import EditTabContent from './sidebar/EditTabContent'
 import PublishTabContent from './sidebar/PublishTabContent'
 import UserProfile from './UserProfile'
+import MapSelectorMobile from './MapSelectorMobile'
 
 interface Marker {
   id: string
@@ -134,14 +135,30 @@ const ResponsiveSidebar: React.FC<ResponsiveSidebarProps> = (props) => {
           )}
         </MobileContentPanel>
 
-        {/* User Profile Panel */}
+        {/* User Profile Panel with Map Selector */}
         <MobileContentPanel
           isOpen={showUserProfile}
           onClose={handleCloseUserProfile}
-          title="User Profile"
+          title="Profile"
         >
-          <div className="p-4">
-            <UserProfile onSignOut={props.onSignOut} />
+          <div className="p-4 space-y-4">
+            {/* Map Selector Section */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Select Map</h3>
+              <MapSelectorMobile
+                maps={props.maps}
+                currentMapId={props.currentMapId}
+                onMapChange={props.onMapChange}
+                onMapsChange={props.onMapsChange}
+                userId={props.userId}
+                onOpenSubscription={props.onOpenSubscription}
+              />
+            </div>
+            {/* User Profile */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Account</h3>
+              <UserProfile onSignOut={props.onSignOut} />
+            </div>
           </div>
         </MobileContentPanel>
       </>

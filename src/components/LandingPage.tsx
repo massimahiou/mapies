@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { 
   MapPin, 
@@ -9,11 +9,181 @@ import {
   CheckCircle, 
   Star,
   ArrowRight,
-  Sparkles
+  Sparkles,
+  Heart,
+  ChevronDown
 } from 'lucide-react'
 import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 import AuthModal from './AuthModal'
 import PublicMap from './PublicMap'
+
+// Wrapper component to only render map when visible (performance optimization)
+const DemoMapWrapper: React.FC<{ mapId: string; customSettings: any }> = ({ mapId, customSettings }) => {
+  const [isVisible, setIsVisible] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!containerRef.current) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          setIsVisible(entry.isIntersecting)
+        })
+      },
+      { 
+        rootMargin: '100px', // Start loading 100px before it's visible
+        threshold: 0.1
+      }
+    )
+
+    observer.observe(containerRef.current)
+
+    return () => {
+      if (containerRef.current) {
+        observer.unobserve(containerRef.current)
+      }
+    }
+  }, [])
+
+  return (
+    <div ref={containerRef} className="w-full h-full">
+      {isVisible && (
+        <PublicMap 
+          mapId={mapId} 
+          customSettings={customSettings}
+        />
+      )}
+    </div>
+  )
+}
+
+// Animated word component with 3D roll effect
+const RollingWord: React.FC = () => {
+  const words = ['business', 'markers', 'identity', 'retailers', 'stores', 'yourself']
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [showStar, setShowStar] = useState(false)
+  const [isAnimating, setIsAnimating] = useState(false)
+  const [hasStarted, setHasStarted] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    if (!hasStarted || !isAnimating) return
+
+    const interval = setInterval(() => {
+      setCurrentIndex((prev) => {
+        const next = prev + 1
+        if (next >= words.length) {
+          setIsAnimating(false)
+          setShowStar(true)
+          return words.length - 1 // Stay on "yourself"
+        }
+        return next
+      })
+    }, 600) // Change word every 600ms
+
+    return () => clearInterval(interval)
+  }, [isAnimating, hasStarted, words.length])
+
+  // Use IntersectionObserver to detect when element comes into view
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !hasStarted) {
+            setHasStarted(true)
+            setIsAnimating(true)
+          }
+        })
+      },
+      { 
+        threshold: 0.3, // Start when 30% visible
+        rootMargin: '0px' 
+      }
+    )
+
+    if (ref.current) {
+      observer.observe(ref.current)
+    }
+
+    return () => {
+      if (ref.current) {
+        observer.unobserve(ref.current)
+      }
+    }
+  }, [hasStarted])
+
+  const currentWord = words[currentIndex]
+  const isYourself = currentWord === 'yourself'
+  
+  // Find longest word to set fixed width
+  const longestWord = words.reduce((a, b) => a.length > b.length ? a : b)
+  const longestWordLength = longestWord.length
+
+  return (
+    <span ref={ref} className="relative inline-block mx-1" style={{ width: `${longestWordLength}ch`, minWidth: `${longestWordLength}ch` }}>
+      <motion.span
+        key={currentIndex}
+        className="inline-block"
+        initial={{ rotateX: 90, opacity: 0 }}
+        animate={{ rotateX: 0, opacity: 1 }}
+        transition={{ 
+          duration: 0.4,
+          ease: "easeOut"
+        }}
+        style={{ transformPerspective: 1000 }}
+      >
+        {currentWord}
+      </motion.span>
+      {showStar && isYourself && (
+        <motion.div
+          className="absolute -top-2"
+          style={{ right: `calc(${longestWordLength}ch - ${currentWord.length}ch - 0.5rem)` }}
+          initial={{ scale: 0, rotate: -180 }}
+          animate={{ 
+            scale: 1, 
+            rotate: [0, -15, 15, -10, 10, 0],
+            filter: ["brightness(1)", "brightness(1.5)", "brightness(1)"]
+          }}
+          transition={{ 
+            scale: {
+              type: "spring",
+              stiffness: 300,
+              damping: 20
+            },
+            rotate: {
+              duration: 2,
+              repeat: Infinity,
+              ease: "easeInOut",
+              times: [0, 0.25, 0.5, 0.75, 1]
+            },
+            filter: {
+              duration: 1.5,
+              repeat: Infinity,
+              ease: "easeInOut"
+            }
+          }}
+        >
+          <motion.div
+            className="absolute inset-0 blur-sm"
+            animate={{
+              opacity: [0, 0.8, 0],
+              scale: [1, 1.3, 1]
+            }}
+            transition={{
+              duration: 1.5,
+              repeat: Infinity,
+              ease: "easeInOut"
+            }}
+          >
+            <Star className="w-4 h-4 text-yellow-300 fill-yellow-300" />
+          </motion.div>
+          <Star className="w-4 h-4 text-yellow-300 fill-yellow-300 relative z-10 drop-shadow-[0_0_8px_rgba(253,224,71,0.8)]" />
+        </motion.div>
+      )}
+    </span>
+  )
+}
 
 const LandingPage: React.FC = () => {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
@@ -21,6 +191,7 @@ const LandingPage: React.FC = () => {
   const [currentUserType, setCurrentUserType] = useState(0)
   const [displayedText, setDisplayedText] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [showDemoMap, setShowDemoMap] = useState(false)
   const [mapSettings, setMapSettings] = useState({
     style: 'dark',
     markerShape: 'pin',
@@ -96,9 +267,16 @@ const LandingPage: React.FC = () => {
     { id: 'footer', label: 'Contact', name: 'Contact' }
   ]
 
-  // Scroll detection for active section
+  // Scroll detection for active section - Throttled for performance
   useEffect(() => {
+    let lastScrollTime = 0
+    const throttleDelay = 100 // Throttle to max once per 100ms
+
     const handleScroll = () => {
+      const now = Date.now()
+      if (now - lastScrollTime < throttleDelay) return
+      lastScrollTime = now
+
       const scrollPosition = window.scrollY + 100
 
       for (const section of sections) {
@@ -113,7 +291,7 @@ const LandingPage: React.FC = () => {
       }
     }
 
-    window.addEventListener('scroll', handleScroll)
+    window.addEventListener('scroll', handleScroll, { passive: true })
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
@@ -181,13 +359,6 @@ const LandingPage: React.FC = () => {
       color: "from-rose-500 to-pink-600",
       delay: 0.5
     }
-  ]
-
-  const stats = [
-    { number: "10K+", label: "Maps Created" },
-    { number: "1M+", label: "Markers Placed" },
-    { number: "500+", label: "Happy Customers" },
-    { number: "99.9%", label: "Uptime" }
   ]
 
   return (
@@ -283,32 +454,11 @@ const LandingPage: React.FC = () => {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8 }}
       >
-        {/* Background Elements */}
+        {/* Background Elements - Removed continuous animations for performance */}
         <div className="absolute inset-0 overflow-hidden">
-          <motion.div
-            className="absolute -top-40 -right-40 w-80 h-80 bg-pink-200 rounded-full opacity-20"
-            animate={{ 
-              scale: [1, 1.2, 1],
-              rotate: [0, 180, 360]
-            }}
-            transition={{ 
-              duration: 20,
-              repeat: Infinity,
-              ease: "linear"
-            }}
-          />
-          <motion.div
-            className="absolute -bottom-40 -left-40 w-96 h-96 bg-rose-200 rounded-full opacity-20"
-            animate={{ 
-              scale: [1.2, 1, 1.2],
-              rotate: [360, 180, 0]
-            }}
-            transition={{ 
-              duration: 25,
-              repeat: Infinity,
-              ease: "linear"
-            }}
-          />
+          {/* Static background elements */}
+          <div className="absolute -top-40 -right-40 w-80 h-80 bg-pink-200 rounded-full opacity-10" />
+          <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-rose-200 rounded-full opacity-10" />
         </div>
 
         <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
@@ -318,26 +468,9 @@ const LandingPage: React.FC = () => {
             transition={{ duration: 0.8, delay: 0.2 }}
           >
             <div className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-pink-100 to-rose-100 text-pink-800 rounded-full text-sm font-semibold mb-8 shadow-lg border border-pink-200">
-              <motion.div
-                className="mr-2"
-                animate={{ 
-                  y: [0, -8, 0],
-                  rotate: [0, 5, -5, 0]
-                }}
-                transition={{ 
-                  duration: 1.5,
-                  repeat: Infinity,
-                  ease: "easeInOut"
-                }}
-              >
-                <MapPin className="w-5 h-5 text-pink-600" />
-              </motion.div>
+              <MapPin className="w-5 h-5 text-pink-600 mr-2" />
               The Future of Map Creation
-              <motion.div
-                className="ml-2 w-2 h-2 bg-pink-500 rounded-full"
-                animate={{ scale: [1, 1.2, 1] }}
-                transition={{ duration: 2, repeat: Infinity }}
-              />
+              <div className="ml-2 w-2 h-2 bg-pink-500 rounded-full" />
             </div>
           </motion.div>
 
@@ -399,12 +532,7 @@ const LandingPage: React.FC = () => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.8 }}
             >
-              {/* Subtle shimmer effect */}
-              <motion.div
-                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"
-                animate={{ x: ['-100%', '100%'] }}
-                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-              />
+              {/* Removed shimmer animation for performance */}
               
               <span className="relative z-10 flex items-center">
                 Create Account
@@ -436,137 +564,12 @@ const LandingPage: React.FC = () => {
           </motion.p>
         </div>
 
-        {/* Floating Elements - Redistributed for better balance */}
-        
-        {/* Top left corner - subtle */}
-        <motion.div
-          className="absolute top-20 left-8 w-12 h-12 bg-pink-200 rounded-lg opacity-40"
-          animate={{ 
-            y: [0, -15, 0],
-            rotate: [0, 5, 0]
-          }}
-          transition={{ 
-            duration: 4,
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-        />
-        
-        {/* Top right corner - subtle */}
-        <motion.div
-          className="absolute top-16 right-12 w-8 h-8 bg-rose-200 rounded-full opacity-50"
-          animate={{ 
-            y: [0, 12, 0],
-            rotate: [0, -5, 0]
-          }}
-          transition={{ 
-            duration: 5,
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-        />
-        
-        {/* Left side - medium pin */}
-        <motion.div
-          className="absolute top-1/2 left-8 opacity-30"
-          animate={{ 
-            y: [0, -20, 0],
-            x: [0, 8, 0],
-            rotate: [0, 10, -10, 0]
-          }}
-          transition={{ 
-            duration: 6,
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-        >
-          <MapPin className="w-16 h-20 text-pink-500" />
-        </motion.div>
-
-        {/* Right side - small pin */}
-        <motion.div
-          className="absolute top-2/3 right-8 opacity-25"
-          animate={{ 
-            y: [0, 15, 0],
-            x: [0, -10, 0],
-            rotate: [0, -8, 8, 0]
-          }}
-          transition={{ 
-            duration: 7,
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-        >
-          <MapPin className="w-10 h-12 text-rose-500" />
-        </motion.div>
-
-        {/* Bottom left - geometric shape */}
-        <motion.div
-          className="absolute bottom-20 left-1/4 w-10 h-10 bg-gradient-to-br from-pink-400 to-rose-500 rounded-full opacity-50 shadow-lg"
-          animate={{ 
-            scale: [1, 1.3, 1],
-            rotate: [0, 180, 360],
-            opacity: [0.5, 0.2, 0.5]
-          }}
-          transition={{ 
-            duration: 5,
-            repeat: Infinity,
-            ease: "easeInOut",
-            delay: 1
-          }}
-        />
-        
-        {/* Bottom right - geometric shape */}
-        <motion.div
-          className="absolute bottom-16 right-1/4 w-14 h-14 bg-gradient-to-br from-rose-300 to-pink-400 rounded-xl opacity-40 shadow-md"
-          animate={{ 
-            y: [0, -20, 0],
-            x: [0, 12, 0],
-            rotate: [0, 12, 0]
-          }}
-          transition={{ 
-            duration: 6,
-            repeat: Infinity,
-            ease: "easeInOut",
-            delay: 2
-          }}
-        />
-        
-        {/* Center bottom - small dot */}
-        <motion.div
-          className="absolute bottom-24 left-1/2 w-4 h-4 bg-pink-500 rounded-full opacity-60"
-          animate={{ 
-            scale: [1, 1.5, 1],
-            opacity: [0.6, 0.1, 0.6]
-          }}
-          transition={{ 
-            duration: 4,
-            repeat: Infinity,
-            ease: "easeInOut",
-            delay: 0.5
-          }}
-        />
-
-        {/* Far right - large pin */}
-        <motion.div
-          className="absolute top-1/3 right-4 opacity-20"
-          animate={{ 
-            y: [0, -25, 0],
-            x: [0, 15, 0],
-            rotate: [0, 15, -15, 0]
-          }}
-          transition={{ 
-            duration: 8,
-            repeat: Infinity,
-            ease: "easeInOut",
-            delay: 3
-          }}
-        >
-          <MapPin className="w-12 h-16 text-pink-600" />
-        </motion.div>
+        {/* Floating Elements - Static for performance (removed continuous animations) */}
+        <div className="absolute top-20 left-8 w-12 h-12 bg-pink-200 rounded-lg opacity-20" />
+        <div className="absolute top-16 right-12 w-8 h-8 bg-rose-200 rounded-full opacity-25" />
       </motion.section>
 
-      {/* Stats Section */}
+      {/* Tagline Section */}
       <motion.section 
         className="py-20 bg-gradient-to-r from-pink-600 to-rose-600"
         initial={{ opacity: 0 }}
@@ -575,21 +578,48 @@ const LandingPage: React.FC = () => {
         viewport={{ once: true }}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {stats.map((stat, index) => (
-              <motion.div
-                key={index}
-                className="text-center text-white"
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: index * 0.1 }}
-                viewport={{ once: true }}
+          <motion.div
+            className="text-center"
+            initial={{ opacity: 0, x: -50 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            viewport={{ once: true }}
+          >
+            <h2 className="text-3xl md:text-5xl font-bold text-white mb-4 leading-tight inline-block">
+              The easiest way to put <RollingWord /> on a map
+              <motion.span
+                className="inline-block"
+                animate={{ opacity: [1, 0.3, 1] }}
+                transition={{ 
+                  duration: 1.5, 
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
               >
-                <div className="text-4xl md:text-5xl font-bold mb-2">{stat.number}</div>
-                <div className="text-pink-100">{stat.label}</div>
+                .
+              </motion.span>
+            </h2>
+            <motion.div 
+              className="flex items-center justify-center space-x-2 text-pink-100 text-lg md:text-xl mt-6"
+              initial={{ opacity: 0, x: 30 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.8, delay: 0.3, ease: "easeOut" }}
+              viewport={{ once: true }}
+            >
+              <span>Made with</span>
+              <motion.div
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ 
+                  duration: 2, 
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+              >
+                <Heart className="w-5 h-5 text-pink-200 fill-pink-200" />
               </motion.div>
-            ))}
-          </div>
+              <span>in Montreal</span>
+            </motion.div>
+          </motion.div>
         </div>
       </motion.section>
 
@@ -611,9 +641,31 @@ const LandingPage: React.FC = () => {
             <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
               See Pinz in Action
             </h2>
-            <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
-              Here's an example to show our speed of light maps
+            <p className="text-xl text-gray-600 mb-4 max-w-3xl mx-auto">
+              Try out our fast, responsive and easily embeddable maps for yourself.
             </p>
+            <motion.div
+              className="flex justify-center mb-8"
+              animate={{ y: [0, 8, 0] }}
+              transition={{ 
+                duration: 1.5,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+            >
+              <button
+                onClick={() => {
+                  const demoElement = document.getElementById('demo-map-container')
+                  if (demoElement) {
+                    demoElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }
+                }}
+                className="text-pink-600 hover:text-pink-700 transition-colors"
+                aria-label="Scroll to demo map"
+              >
+                <ChevronDown className="w-8 h-8" />
+              </button>
+            </motion.div>
             <div className="flex flex-wrap justify-center gap-4 mb-12">
               <div className="flex items-center bg-white rounded-full px-4 py-2 shadow-sm">
                 <MapPin className="w-4 h-5 text-pink-500 mr-2" />
@@ -637,23 +689,108 @@ const LandingPage: React.FC = () => {
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.2 }}
           >
-            <div className="h-[500px] md:h-[500px] lg:h-[600px] relative">
-              {/* Demo Map Component */}
-              <div className="w-full h-full">
-                <PublicMap 
-                  mapId="demo-map-1000-markers" 
-                  customSettings={mapSettings}
-                />
-              </div>
+            <div className="h-[500px] md:h-[500px] lg:h-[600px] relative" id="demo-map-container">
+              {!showDemoMap ? (
+                // Cool reveal button/placeholder
+                <motion.div
+                  className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.6 }}
+                >
+                  <div className="text-center px-8">
+                    {/* Animated map icon */}
+                    <motion.div
+                      className="mb-8 flex justify-center"
+                      animate={{
+                        y: [0, -10, 0],
+                      }}
+                      transition={{
+                        duration: 2,
+                        repeat: Infinity,
+                        ease: "easeInOut"
+                      }}
+                    >
+                      <div className="relative">
+                        <Globe className="w-24 h-24 text-pink-500 opacity-20" />
+                        <MapPin className="w-12 h-12 text-pink-600 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" />
+                      </div>
+                    </motion.div>
+                    
+                    {/* Title */}
+                    <motion.h3
+                      className="text-3xl md:text-4xl font-bold text-gray-900 mb-4"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.3 }}
+                    >
+                      Ready to Explore?
+                    </motion.h3>
+                    
+                    {/* Description */}
+                    <motion.p
+                      className="text-lg text-gray-600 mb-8 max-w-md mx-auto"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.4 }}
+                    >
+                      Click below to load an interactive demo map with 1000+ markers from 3 countries
+                    </motion.p>
+                    
+                    {/* Reveal Button */}
+                    <motion.button
+                      onClick={() => setShowDemoMap(true)}
+                      className="group relative px-8 py-4 bg-gradient-to-r from-pink-600 to-rose-600 text-white rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.5 }}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      {/* Shimmer effect */}
+                      <motion.div
+                        className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                        animate={{
+                          x: ['-100%', '100%'],
+                        }}
+                        transition={{
+                          duration: 2,
+                          repeat: Infinity,
+                          ease: "linear"
+                        }}
+                      />
+                      
+                      <span className="relative flex items-center justify-center gap-2">
+                        <Zap className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                        Load Interactive Map
+                        <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                      </span>
+                    </motion.button>
+                  </div>
+                </motion.div>
+              ) : (
+                // Demo Map Component - Only render when revealed
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.5 }}
+                >
+                  <DemoMapWrapper
+                    mapId="demo-map-1000-markers" 
+                    customSettings={mapSettings}
+                  />
+                </motion.div>
+              )}
             </div>
           </motion.div>
 
-          {/* Subtle Map Controls - Always Visible */}
+          {/* Subtle Map Controls - Only visible after map is loaded */}
+          {showDemoMap && (
           <motion.div
             className="mt-6 flex justify-center"
             initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
           >
             <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-pink-100 p-4 max-w-3xl w-full">
               {/* Header with disclaimer */}
@@ -774,6 +911,7 @@ const LandingPage: React.FC = () => {
               </div>
             </div>
           </motion.div>
+          )}
 
           {/* Demo Features */}
           <motion.div
@@ -811,141 +949,10 @@ const LandingPage: React.FC = () => {
 
       {/* Features Section */}
       <section id="features" className="py-24 bg-gradient-to-br from-pink-50 via-white to-rose-50 relative overflow-hidden">
-        {/* Floating Background Elements */}
+        {/* Static Background Elements - Removed animations for performance */}
         <div className="absolute inset-0 overflow-hidden">
-          {/* Circles */}
-          <motion.div
-            className="absolute top-20 left-10 w-32 h-32 bg-pink-200 rounded-full opacity-20"
-            animate={{ 
-              y: [0, -30, 0],
-              x: [0, 20, 0],
-              rotate: [0, 180, 360]
-            }}
-            transition={{ 
-              duration: 8,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          />
-          <motion.div
-            className="absolute top-40 right-20 w-24 h-24 bg-rose-200 rounded-full opacity-30"
-            animate={{ 
-              y: [0, 40, 0],
-              x: [0, -30, 0],
-              rotate: [0, -180, -360]
-            }}
-            transition={{ 
-              duration: 10,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          />
-          <motion.div
-            className="absolute bottom-20 left-1/4 w-20 h-20 bg-pink-300 rounded-full opacity-25"
-            animate={{ 
-              y: [0, -20, 0],
-              x: [0, 15, 0],
-              scale: [1, 1.2, 1]
-            }}
-            transition={{ 
-              duration: 6,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          />
-
-          {/* Pin Shapes */}
-          <motion.div
-            className="absolute top-32 right-1/3 opacity-15"
-            animate={{ 
-              y: [0, -25, 0],
-              x: [0, 15, 0],
-              rotate: [0, 10, -10, 0]
-            }}
-            transition={{ 
-              duration: 7,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          >
-            <MapPin className="w-24 h-30 text-pink-500" />
-          </motion.div>
-
-          <motion.div
-            className="absolute top-60 left-1/3 opacity-20"
-            animate={{ 
-              y: [0, 30, 0],
-              x: [0, -20, 0],
-              rotate: [0, -15, 15, 0]
-            }}
-            transition={{ 
-              duration: 9,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          >
-            <MapPin className="w-8 h-10 text-rose-500" />
-          </motion.div>
-
-          <motion.div
-            className="absolute bottom-32 right-1/4 opacity-18"
-            animate={{ 
-              y: [0, -35, 0],
-              x: [0, 25, 0],
-              rotate: [0, 20, -20, 0]
-            }}
-            transition={{ 
-              duration: 11,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          >
-            <MapPin className="w-16 h-20 text-pink-600" />
-          </motion.div>
-
-          <motion.div
-            className="absolute top-80 left-1/5 opacity-22"
-            animate={{ 
-              y: [0, 25, 0],
-              x: [0, -15, 0],
-              rotate: [0, -25, 25, 0]
-            }}
-            transition={{ 
-              duration: 8.5,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          >
-            <MapPin className="w-12 h-15 text-rose-400" />
-          </motion.div>
-
-          {/* Squares */}
-          <motion.div
-            className="absolute top-16 right-1/5 w-16 h-16 bg-pink-200 opacity-15 rounded-lg"
-            animate={{ 
-              y: [0, -20, 0],
-              x: [0, 10, 0],
-              rotate: [0, 45, 0]
-            }}
-            transition={{ 
-              duration: 6.5,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          />
-          <motion.div
-            className="absolute bottom-40 right-1/6 w-12 h-12 bg-rose-200 opacity-20 rounded-lg"
-            animate={{ 
-              y: [0, 30, 0],
-              x: [0, -15, 0],
-              rotate: [0, -30, 30, 0]
-            }}
-            transition={{ 
-              duration: 7.5,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          />
+          <div className="absolute top-20 left-10 w-32 h-32 bg-pink-200 rounded-full opacity-10" />
+          <div className="absolute top-40 right-20 w-24 h-24 bg-rose-200 rounded-full opacity-15" />
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
@@ -1003,64 +1010,28 @@ const LandingPage: React.FC = () => {
                   transition: { duration: 0.3 }
                 }}
               >
-                {/* Floating Card */}
+                {/* Card - Simplified animations for performance */}
                 <motion.div
                   className="relative p-8 bg-white/80 backdrop-blur-sm rounded-3xl shadow-2xl border border-white/20 group-hover:shadow-3xl transition-all duration-500"
-                  animate={{
-                    y: [0, -10, 0],
-                    rotateY: [0, 2, 0],
-                    rotateX: [0, 1, 0]
-                  }}
-                  transition={{
-                    duration: 4 + index * 0.5,
-                    repeat: Infinity,
-                    ease: "easeInOut"
-                  }}
                   whileHover={{
-                    rotateY: 5,
-                    rotateX: 5,
+                    y: -5,
                     scale: 1.02
                   }}
                 >
-                  {/* Glow Effect */}
-                  <motion.div
-                    className={`absolute inset-0 bg-gradient-to-r ${feature.color} opacity-0 group-hover:opacity-10 rounded-3xl blur-xl transition-opacity duration-500`}
-                    animate={{
-                      opacity: [0, 0.1, 0],
-                    }}
-                    transition={{
-                      duration: 3,
-                      repeat: Infinity,
-                      ease: "easeInOut"
-                    }}
-                  />
+                  {/* Static Glow Effect - Only on hover */}
+                  <div className={`absolute inset-0 bg-gradient-to-r ${feature.color} opacity-0 group-hover:opacity-10 rounded-3xl blur-xl transition-opacity duration-500`} />
                   
                   {/* Icon Container */}
                   <motion.div
                     className={`relative w-20 h-20 bg-gradient-to-r ${feature.color} rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-all duration-500 shadow-lg`}
                     whileHover={{
-                      rotate: [0, -5, 5, 0],
                       scale: 1.1
                     }}
-                    transition={{ duration: 0.6 }}
                   >
-                    <motion.div
-                      animate={{
-                        rotate: [0, 360],
-                      }}
-                      transition={{
-                        duration: 20,
-                        repeat: Infinity,
-                        ease: "linear"
-                      }}
-                    >
-                      <feature.icon className="w-10 h-10 text-white" />
-                    </motion.div>
+                    <feature.icon className="w-10 h-10 text-white" />
                     
                     {/* Icon Glow */}
-                    <motion.div
-                      className={`absolute inset-0 bg-gradient-to-r ${feature.color} rounded-2xl opacity-0 group-hover:opacity-30 blur-md transition-opacity duration-500`}
-                    />
+                    <div className={`absolute inset-0 bg-gradient-to-r ${feature.color} rounded-2xl opacity-0 group-hover:opacity-30 blur-md transition-opacity duration-500`} />
                   </motion.div>
 
                   {/* Content */}
@@ -1077,32 +1048,9 @@ const LandingPage: React.FC = () => {
                     {feature.description}
                   </motion.p>
 
-                  {/* Decorative Elements */}
-                  <motion.div
-                    className="absolute top-4 right-4 w-2 h-2 bg-pink-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-                    animate={{
-                      scale: [1, 1.5, 1],
-                      opacity: [0, 0.6, 0]
-                    }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                      ease: "easeInOut"
-                    }}
-                  />
-                  <motion.div
-                    className="absolute bottom-4 left-4 w-1 h-1 bg-rose-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-                    animate={{
-                      scale: [1, 1.2, 1],
-                      opacity: [0, 0.4, 0]
-                    }}
-                    transition={{
-                      duration: 2.5,
-                      repeat: Infinity,
-                      ease: "easeInOut",
-                      delay: 0.5
-                    }}
-                  />
+                  {/* Decorative Elements - Static for performance */}
+                  <div className="absolute top-4 right-4 w-2 h-2 bg-pink-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                  <div className="absolute bottom-4 left-4 w-1 h-1 bg-rose-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                 </motion.div>
               </motion.div>
             ))}
@@ -1268,10 +1216,15 @@ const LandingPage: React.FC = () => {
               className="h-8 mx-auto mb-4 filter brightness-0 invert"
             />
             <p className="text-gray-400 mb-8">Create beautiful, interactive maps in minutes</p>
-            <div className="flex justify-center space-x-6 text-sm text-gray-400">
-              <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-              <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-              <a href="#" className="hover:text-white transition-colors">Contact</a>
+            <div className="flex justify-center space-x-6 text-sm text-gray-400 mb-8">
+              <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
+              <a href="/terms" className="hover:text-white transition-colors">Terms of Service</a>
+              <a href="mailto:support@mapies.com" className="hover:text-white transition-colors">Contact</a>
+            </div>
+            <div className="flex items-center justify-center space-x-1 text-sm text-gray-400">
+              <span>Made with</span>
+              <Heart className="w-4 h-4 text-pink-500 fill-pink-500" />
+              <span>in Montreal</span>
             </div>
           </div>
         </div>

@@ -16,6 +16,8 @@ import { ToastProvider } from './contexts/ToastContext'
 import EmbedMap from './components/EmbedMap'
 import PublicMap from './components/PublicMap'
 import LandingPage from './components/LandingPage'
+import PrivacyPolicy from './components/PrivacyPolicy'
+import TermsOfService from './components/TermsOfService'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { debugFirebase, testFirebaseConnection } from './firebase/debug'
 import { validateCoordinates, logSecurityViolation } from './utils/coordinateValidation'
@@ -25,6 +27,7 @@ import { testFirebaseAuth } from './firebase/test-auth'
 import { addMarkerToMap, MapDocument, getMapMarkers, deleteMapMarker, updateMapMarker, updateMap, subscribeToMapMarkers, subscribeToUserMaps, subscribeToMapDocument, getSharedMaps, addPolygonToMap } from './firebase/maps'
 import { useToast } from './contexts/ToastContext'
 import { checkForDuplicates, checkForInternalDuplicates, AddressData } from './utils/duplicateDetection'
+import { isAdmin } from './utils/admin'
 import DuplicateNotification from './components/DuplicateNotification'
 import SubscriptionManagementModal from './components/SubscriptionManagementModal'
 import { useSharedMapFeatureAccess } from './hooks/useSharedMapFeatureAccess'
@@ -370,7 +373,7 @@ const AppContent: React.FC = () => {
       console.log('Saving map settings to Firestore:', { mapId: currentMapId, settings: newSettings })
       await updateMap(user.uid, currentMapId, {
         settings: newSettings
-      })
+      }, user.email)
       console.log('✅ Map settings saved successfully to Firestore')
     } catch (error) {
       console.error('❌ Error saving map settings:', error)
@@ -448,13 +451,14 @@ const AppContent: React.FC = () => {
       console.log('📍 Markers updated from Firestore:', mapMarkers.length)
       
       // Convert Firestore markers to local Marker format
-      const localMarkers: Marker[] = mapMarkers.map(marker => ({
+      // Match PublicMap.tsx transformation exactly - handle coordinates and visibility
+      const localMarkers: Marker[] = mapMarkers.map((marker: any) => ({
         id: marker.id || `marker-${Date.now()}-${Math.random()}`,
         name: marker.name,
         address: marker.address,
-        lat: marker.lat,
-        lng: marker.lng,
-        visible: marker.visible,
+        lat: marker.coordinates?.lat || marker.lat,
+        lng: marker.coordinates?.lng || marker.lng,
+        visible: marker.visible !== false, // Default to true if not set (matches PublicMap.tsx)
         type: marker.type as 'pharmacy' | 'grocery' | 'retail' | 'other'
       }))
       
@@ -504,6 +508,8 @@ const AppContent: React.FC = () => {
         setMapSettings((prevSettings: any) => {
           const rawSettings = {
             ...mapData.settings!,
+            // Ensure markerShape defaults to 'pin' if missing (for existing maps)
+            markerShape: mapData.settings!.markerShape || 'pin',
             // Ensure clustering settings have defaults
             clusteringEnabled: mapData.settings!.clusteringEnabled !== undefined ? mapData.settings!.clusteringEnabled : true,
             clusterRadius: mapData.settings!.clusterRadius || 50,
@@ -571,19 +577,64 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     if (!user) return
 
-    console.log('🔄 Setting up real-time listeners for user:', user.uid)
+    console.log('🔄 Setting up real-time listeners for user:', {
+      uid: user.uid, 
+      email: user.email,
+      emailType: typeof user.email,
+      emailVerified: user.emailVerified
+    })
+
+    // Check admin status immediately
+    const userIsAdmin = user.email ? isAdmin(user.email) : false
+    console.log('🔄 Admin status check:', { email: user.email, isAdmin: userIsAdmin })
 
     // Listen to user's maps in real-time
+    // If admin, subscribeToUserMaps will automatically subscribe to all maps
     const unsubscribeMaps = subscribeToUserMaps(user.uid, async (userMaps) => {
-      console.log('📊 User maps updated from Firestore:', userMaps.length)
+      console.log('📊 Maps received from subscription:', userMaps.length, 'maps')
       
-      // Also load shared maps
+      if (userIsAdmin) {
+        // Admin already has all maps, no need to load shared maps
+        // Only update if maps actually changed
+        setMaps(prevMaps => {
+          const hasChanged = prevMaps.length !== userMaps.length ||
+            prevMaps.some((prev, index) => {
+              const current = userMaps[index]
+              return !current || prev.id !== current.id || prev.name !== current.name
+            })
+          
+          if (hasChanged) {
+            console.log('👑 Admin: Maps changed, updating. Total maps:', userMaps.length)
+            return userMaps
+          }
+          console.log('👑 Admin: Maps unchanged, skipping update')
+          return prevMaps
+        })
+        return
+      }
+      
+      // For regular users, also load shared maps
       try {
         const sharedMaps = await getSharedMaps(user.email || '')
         console.log('📊 Shared maps loaded:', sharedMaps.length)
         
         // Combine user maps and shared maps
-        const allMaps = [...userMaps, ...sharedMaps]
+        // Remove duplicates based on map id
+        const allMapsMap = new Map<string, MapDocument>()
+        
+        // Add all maps from subscription
+        userMaps.forEach(map => {
+          if (map.id) allMapsMap.set(map.id, map)
+        })
+        
+        // Add shared maps that aren't already present
+        sharedMaps.forEach(map => {
+          if (map.id && !allMapsMap.has(map.id)) {
+            allMapsMap.set(map.id, map)
+          }
+        })
+        
+        const allMaps = Array.from(allMapsMap.values())
         
         // Only update if maps actually changed
         setMaps(prevMaps => {
@@ -604,7 +655,7 @@ const AppContent: React.FC = () => {
         // Fallback to just user maps
         setMaps(userMaps)
       }
-    })
+    }, user.email)
 
     return () => {
       console.log('🔄 Cleaning up real-time listeners')
@@ -1352,6 +1403,7 @@ const AppContent: React.FC = () => {
           onOpenSubscription={() => setShowSubscriptionModal(true)}
           currentMap={maps.find(m => m.id === currentMapId)}
           showPolygonDrawing={showPolygonDrawing}
+          onMapSettingsChange={handleMapSettingsChange}
         />
       </div>
 
@@ -1488,6 +1540,8 @@ const App: React.FC = () => {
         <ToastProvider>
           <Routes>
             <Route path="/" element={<LandingPage />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfService />} />
             <Route path="/embed" element={<EmbedMap />} />
             <Route path="/dashboard" element={<DashboardRedirect />} />
             <Route path="/auth" element={<AppContent />} />

@@ -19,6 +19,8 @@ import { validateMapAgainstPlan, getPremiumFeatureDescription } from '../utils/m
 import { isMapOwnedByUser } from '../firebase/maps'
 import PolygonPropertiesModal from './PolygonPropertiesModal'
 import { usePolygonLoader } from '../hooks/usePolygonLoader'
+import { ensureFreemiumCompliance } from '../utils/freemiumDefaults'
+import { useToast } from '../contexts/ToastContext'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -61,18 +63,19 @@ interface MapProps {
   onOpenSubscription?: () => void // New prop for opening subscription modal
   currentMap?: any // Add current map data to determine ownership
   showPolygonDrawing?: boolean // Enable polygon drawing mode
+  onMapSettingsChange?: (settings: any) => void // Callback to update map settings
 }
 
-const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMode, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {}, onOpenSubscription, currentMap, showPolygonDrawing: _showPolygonDrawing }) => {
+const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMode, userLocation, locationError, onGetCurrentLocation, iframeDimensions, onIframeDimensionsChange, folderIcons = {}, onOpenSubscription, currentMap, showPolygonDrawing: _showPolygonDrawing, onMapSettingsChange }) => {
   console.log('🔷 Map component rendered, showPolygonDrawing:', _showPolygonDrawing)
   const { isMobile } = useResponsive()
   const { showWatermark, planLimits, currentPlan, mapInheritance } = useSharedMapFeatureAccess(currentMap)
   const { user } = useAuth()
+  const { showToast } = useToast()
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstance = useRef<L.Map | null>(null)
   const markersRef = useRef<L.Marker[]>([])
   const markerClusterRef = useRef<any>(null)
-  const userLocationRef = useRef<L.Marker | null>(null)
   const userLocationCircleRef = useRef<L.Circle | null>(null)
   const userLocationPulseRef = useRef<L.Circle | null>(null)
   const tileLayerRef = useRef<L.TileLayer | null>(null)
@@ -88,6 +91,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   const [nearbyMarkers, setNearbyMarkers] = useState<Marker[]>([])
   const [showNearbyPlaces, setShowNearbyPlaces] = useState(false)
   const [locationModeActive, setLocationModeActive] = useState(false)
+  const [isSettingLocation, setIsSettingLocation] = useState(false) // Track when location is being set
   const [searchResults, setSearchResults] = useState<Marker[]>([])
   const [renamedMarkers] = useState<Record<string, string>>({})
   
@@ -168,12 +172,12 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   }, [polygonLoaderResult])
   
   const visibleMarkers = useMemo(() => 
-    markers.filter(marker => marker.visible), 
+    markers.filter(marker => marker.visible !== false), 
     [markers]
   )
   
   // Determine if this is a shared map or owned map
-  const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid) : true
+  const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid, user.email) : true
   
   // For owned maps: validate against owner's plan (current behavior)
   // For shared maps: allow shared user to use their own permissions without disabling the map
@@ -232,6 +236,9 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       console.error('Geolocation is not supported by this browser.')
       return
     }
+
+    // Set flag to prevent fitBounds during location setting
+    setIsSettingLocation(true)
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -292,6 +299,11 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
           
         }
         
+        // Reset flag after a short delay to allow map to settle
+        setTimeout(() => {
+          setIsSettingLocation(false)
+        }, 500)
+        
         // Call the parent's location handler
         onGetCurrentLocation()
         
@@ -299,6 +311,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       },
       (error) => {
         console.error('Geolocation error:', error)
+        setIsSettingLocation(false)
         // Still call parent handler for error handling
         onGetCurrentLocation()
       },
@@ -376,7 +389,24 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   useEffect(() => {
     if (!mapRef.current) return
 
-    // Clean up existing map instance if it exists
+    // Only skip re-initialization if map is loaded AND we're not switching modes
+    // This prevents re-initialization on state changes but allows proper initialization
+    if (mapInstance.current && mapLoaded) {
+      // Check if we're switching publish mode - if so, allow re-initialization
+      const storedPublishMode = (mapInstance.current as any)._pinzPublishMode
+      const isCurrentlyPublishMode = storedPublishMode === isPublishMode
+      
+      // Only skip if the publish mode matches (i.e., we're not switching modes)
+      if (isCurrentlyPublishMode || (storedPublishMode === undefined && !isPublishMode)) {
+        console.log('Map already initialized and loaded with same mode, skipping re-initialization')
+        return
+      }
+      
+      // If we're switching modes, allow re-initialization by continuing to cleanup
+      console.log('Switching publish mode, re-initializing map')
+    }
+
+    // Clean up existing map instance if it exists (only if not loaded)
     if (mapInstance.current) {
       console.log('Cleaning up existing map instance')
       
@@ -425,6 +455,9 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
       bounds: undefined
     }).addTo(mapInstance.current)
 
+    // Store publish mode flag on map instance for comparison
+    ;(mapInstance.current as any)._pinzPublishMode = isPublishMode
+    
     mapInstance.current.whenReady(() => {
       console.log('Leaflet map loaded successfully')
       setMapLoaded(true)
@@ -580,19 +613,25 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     }
   }, [mapSettings.markerColor, mapSettings.clusteringEnabled, mapSettings.clusterRadius, mapLoaded])
 
-  // Force map resize when switching to embed preview mode
+  // Force map resize when switching to embed preview mode or when dimensions change
   useEffect(() => {
     if (!mapInstance.current || !mapLoaded) return
     
-    // Force map to resize when switching to embed preview mode
+    // Force map to resize when switching to embed preview mode or dimensions change
     if (isPublishMode) {
+      // Use multiple timeouts to ensure map resizes properly after container resize
       setTimeout(() => {
         if (mapInstance.current) {
           mapInstance.current.invalidateSize()
         }
       }, 100)
+      setTimeout(() => {
+        if (mapInstance.current) {
+          mapInstance.current.invalidateSize()
+        }
+      }, 300)
     }
-  }, [isPublishMode, mapLoaded])
+  }, [isPublishMode, mapLoaded, iframeDimensions.width, iframeDimensions.height])
 
   // Update map style based on settings
   useEffect(() => {
@@ -773,12 +812,14 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     })
 
     // Fit bounds to show all markers using cluster group
-    if (visibleMarkers.length > 0 && markerClusterRef.current) {
-      // Ensure map size is correct before fitting bounds
-      mapInstance.current.invalidateSize()
-      mapInstance.current.fitBounds(markerClusterRef.current.getBounds().pad(0.1))
+    // Skip fitBounds if location mode is active OR if location is currently being set
+    if (visibleMarkers.length > 0 && markerClusterRef.current && !locationModeActive && !isSettingLocation) {
+      // Don't invalidate size here if map is already loaded to prevent unnecessary reloads
+      if (mapLoaded) {
+        mapInstance.current.fitBounds(markerClusterRef.current.getBounds().pad(0.1))
+      }
     }
-  }, [visibleMarkers, mapLoaded, mapSettings, folderIcons, isPublishMode, isMapDisabled])
+  }, [visibleMarkers, mapLoaded, mapSettings, folderIcons, isPublishMode, isMapDisabled, locationModeActive, isSettingLocation])
 
   // Clear markers when map becomes disabled in publish mode
   useEffect(() => {
@@ -793,50 +834,8 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     }
   }, [isPublishMode, isMapDisabled, mapLoaded])
 
-  // Update user location marker
-  useEffect(() => {
-    if (!mapInstance.current || !mapLoaded) return
-
-    // Remove existing user location marker
-    if (userLocationRef.current) {
-      mapInstance.current.removeLayer(userLocationRef.current)
-      userLocationRef.current = null
-    }
-
-    // Add new user location marker if available
-    if (userLocation) {
-      console.log('Adding user location marker:', userLocation)
-      
-      // Create a distinctive marker for user location (blue circle with pulsing animation)
-      const userLocationIcon = L.divIcon({
-        className: 'user-location-marker',
-        html: `<div style="
-          width: 20px; 
-          height: 20px; 
-          background-color: #3B82F6; 
-          border: 3px solid white; 
-          border-radius: 50%; 
-          animation: pulse 2s infinite;
-        "></div>`,
-        iconSize: [20, 20],
-        iconAnchor: [10, 10]
-      })
-
-      userLocationRef.current = L.marker([userLocation.lat, userLocation.lng], { icon: userLocationIcon })
-        .bindPopup(`
-          <div style="padding: 8px; font-family: system-ui, sans-serif;">
-            <div style="font-weight: 600; color: #000; font-size: 14px; margin: 0 0 4px 0;">📍 Your Location</div>
-            <div style="color: #666; font-size: 12px; margin: 0;">Lat: ${userLocation.lat.toFixed(6)}, Lng: ${userLocation.lng.toFixed(6)}</div>
-          </div>
-        `)
-        .addTo(mapInstance.current)
-
-      // Center map on user location if no other markers
-      if (visibleMarkers.length === 0) {
-        mapInstance.current.setView([userLocation.lat, userLocation.lng], 15)
-      }
-    }
-  }, [userLocation, mapLoaded])
+  // Update user location marker - REMOVED: No automatic location marker display
+  // User location is only shown when location mode is actively requested by the user
 
   // Polygon loading is now handled by the usePolygonLoader hook above
 
@@ -1142,6 +1141,25 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
               const newWidth = parseInt(ref.style.width)
               const newHeight = parseInt(ref.style.height)
               onIframeDimensionsChange({ width: newWidth, height: newHeight })
+              
+              // Force map to resize immediately when container is resized
+              if (mapInstance.current && mapLoaded) {
+                setTimeout(() => {
+                  if (mapInstance.current) {
+                    mapInstance.current.invalidateSize()
+                  }
+                }, 50)
+              }
+            }}
+            onResizeStop={() => {
+              // Force map resize again when resize stops to ensure it fills the space
+              if (mapInstance.current && mapLoaded) {
+                setTimeout(() => {
+                  if (mapInstance.current) {
+                    mapInstance.current.invalidateSize()
+                  }
+                }, 100)
+              }
             }}
             enableResizing={{
               top: !isMobile,
@@ -1191,7 +1209,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
               {/* Disabled Map Message - Show if limits exceeded */}
               {isMapDisabled && (
                 <div className="flex-1 flex items-center justify-center bg-gray-50">
-                  <div className="text-center p-6">
+                  <div className="text-center p-6 max-w-md">
                     <div className="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
                       <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
@@ -1211,9 +1229,61 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                         </ul>
                       </div>
                     )}
-                    <p className="text-sm text-gray-500">
-                      Consider upgrading your plan to continue using this map.
-                    </p>
+                    <div className="flex flex-col sm:flex-row gap-3 justify-center items-center mt-6">
+                      {onMapSettingsChange && user && currentMap && isOwnedMap && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const simplifiedSettings = ensureFreemiumCompliance(mapSettings, currentPlan)
+                              console.log('🔄 Simplifying map settings:', {
+                                old: mapSettings,
+                                new: simplifiedSettings,
+                                plan: currentPlan
+                              })
+                              
+                              if (onMapSettingsChange) {
+                                await onMapSettingsChange(simplifiedSettings)
+                                
+                                // Wait a moment for the state to update, then show success
+                                setTimeout(() => {
+                                  showToast({
+                                    type: 'success',
+                                    title: 'Map Simplified',
+                                    message: 'Your map has been simplified to fit your current plan. You can now use it without premium features.'
+                                  })
+                                }, 500)
+                              }
+                            } catch (error) {
+                              console.error('Error simplifying map:', error)
+                              showToast({
+                                type: 'error',
+                                title: 'Error',
+                                message: 'Failed to simplify map. Please try again.'
+                              })
+                            }
+                          }}
+                          className="px-4 py-2 bg-pinz-600 text-white rounded-lg hover:bg-pinz-700 transition-colors text-sm font-medium"
+                        >
+                          Simplify Map to Fit Plan
+                        </button>
+                      )}
+                      {onOpenSubscription && (
+                        <button
+                          onClick={onOpenSubscription}
+                          className="px-4 py-2 bg-white border-2 border-pinz-600 text-pinz-600 rounded-lg hover:bg-pinz-50 transition-colors text-sm font-medium"
+                        >
+                          Upgrade Plan
+                        </button>
+                      )}
+                    </div>
+                    {!onMapSettingsChange || !user || !currentMap || !isOwnedMap ? (
+                      <p className="text-sm text-gray-500 mt-4">
+                        {!user ? 'Sign in to simplify or upgrade your map.' : 
+                         !currentMap ? 'Please select a map first.' :
+                         !isOwnedMap ? 'Only the map owner can simplify or upgrade.' :
+                         'Contact the map owner to simplify or upgrade this map.'}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               )}
@@ -1312,15 +1382,17 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                 </div>
                 
                 {/* Map */}
-                <div className="flex-1 relative">
+                <div className="flex-1 relative overflow-hidden min-w-0 min-h-0">
                   <div 
                     ref={mapRef} 
                     style={{ 
                       height: '100%', 
                       width: '100%', 
-                      zIndex: 1 
+                      zIndex: 1,
+                      minHeight: 0,
+                      minWidth: 0
                     }} 
-                    className="relative"
+                    className="relative embed-map-container"
                   >
                     {/* Interactive Watermark - Only show if required by subscription */}
                     {showWatermark && (
@@ -1330,43 +1402,45 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                     )}
                   </div>
                   
-              {/* Mobile Search Bar - Always show in embed preview */}
-              <div className="absolute top-2 left-2 right-2 z-[1000]">
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Search className="h-4 w-4 text-gray-400" />
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="Search locations or postal code..."
-                    value={searchTerm}
-                    onChange={(e) => handleSearch(e.target.value)}
-                    className="block w-full pl-10 pr-20 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-lg text-sm"
-                    style={{ fontSize: '16px' }} // Prevents zoom on iOS
-                  />
-                  <div className="absolute inset-y-0 right-0 flex items-center">
-                    {searchTerm ? (
+              {/* Mobile Search Bar - Show only on mobile in embed preview */}
+              {isMobile && (
+                <div className="absolute top-2 left-2 right-2 z-[1000]">
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Search className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Search locations"
+                      value={searchTerm}
+                      onChange={(e) => handleSearch(e.target.value)}
+                      className="block w-full pl-10 pr-20 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-lg text-sm"
+                      style={{ fontSize: '16px' }} // Prevents zoom on iOS
+                    />
+                    <div className="absolute inset-y-0 right-0 flex items-center">
+                      {searchTerm ? (
+                        <button
+                          onClick={() => handleSearch('')}
+                          className="absolute inset-y-0 right-12 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      ) : null}
                       <button
-                        onClick={() => handleSearch('')}
-                        className="absolute inset-y-0 right-12 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                        onClick={locationModeActive ? clearLocationMode : getCurrentLocation}
+                        className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors ${
+                          locationModeActive
+                            ? 'text-pinz-600 hover:text-pinz-700'
+                            : 'text-gray-400 hover:text-gray-600'
+                        }`}
+                        title={locationModeActive ? "Turn off location mode" : "Find my location"}
                       >
-                        <X className="h-4 w-4" />
+                        <Navigation className="h-4 w-4" />
                       </button>
-                    ) : null}
-                    <button
-                      onClick={locationModeActive ? clearLocationMode : getCurrentLocation}
-                      className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors ${
-                        locationModeActive
-                          ? 'text-pinz-600 hover:text-pinz-700'
-                          : 'text-gray-400 hover:text-gray-600'
-                      }`}
-                      title={locationModeActive ? "Turn off location mode" : "Find my location"}
-                    >
-                      <Navigation className="h-4 w-4" />
-                    </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
                   
                   {/* Location Button - Hidden in embed preview since mobile search bar has location button */}
                 </div>
@@ -1405,7 +1479,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                     </div>
                     <input
                       type="text"
-                      placeholder="Search locations..."
+                      placeholder="Search locations"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="block w-full pl-10 pr-20 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-sm"
@@ -1509,7 +1583,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                             {isNearby && showNearbyPlaces && locationModeActive && (
                               <div className="w-2 h-2 bg-pinz-500 rounded-full"></div>
                             )}
-                            <MapPin className="w-4 h-4 group-hover:text-pinz-500 transition-colors" style={{ color: mapSettings.searchBarTextColor }} />
+                            <MapPin className="w-4 h-4 transition-colors" style={{ color: mapSettings.searchBarTextColor }} />
                           </div>
                         </button>
                       )

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Maximize2, Lock } from 'lucide-react'
+import { Maximize2, Lock, MapPin } from 'lucide-react'
 import { useFeatureAccess } from '../../hooks/useFeatureAccess'
 import { isSettingFreemiumCompliant } from '../../utils/freemiumDefaults'
 
@@ -45,7 +45,7 @@ const EditTabContent: React.FC<EditTabContentProps> = ({
         // Revert to safe default
         switch (key) {
           case 'markerShape':
-            updatedSettings.markerShape = 'circle'
+            updatedSettings.markerShape = 'pin'
             break
           case 'searchBarBackgroundColor':
             updatedSettings.searchBarBackgroundColor = '#ffffff'
@@ -73,11 +73,10 @@ const EditTabContent: React.FC<EditTabContentProps> = ({
         {onOpenModal && (
           <button
             onClick={onOpenModal}
-            className="hidden sm:flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
             title="Open in full screen"
           >
-            <Maximize2 className="w-4 h-4" />
-            Open in Modal
+            <Maximize2 className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
@@ -262,10 +261,21 @@ const EditTabContent: React.FC<EditTabContentProps> = ({
           <label className="block text-sm font-medium text-gray-600 mb-3">
             Shape
             {customizationLevel === 'basic' && (
-              <span className="text-xs text-gray-500 ml-1">(Circle only)</span>
+              <span className="text-xs text-gray-500 ml-1">(Pin and Circle)</span>
             )}
           </label>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
+            <button
+              onClick={() => handleSettingsChange({markerShape: 'pin'})}
+              className={`p-3 border rounded-lg text-sm font-medium transition-colors touch-manipulation ${
+                mapSettings.markerShape === 'pin' 
+                  ? 'border-pinz-600 bg-pinz-50 text-pinz-700' 
+                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 active:bg-gray-100'
+              }`}
+            >
+              <MapPin className="w-5 h-5 mx-auto mb-1" />
+              <div className="text-xs">Pin</div>
+            </button>
             <button
               onClick={() => handleSettingsChange({markerShape: 'circle'})}
               className={`p-3 border rounded-lg text-sm font-medium transition-colors touch-manipulation ${

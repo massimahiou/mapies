@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useFeatureAccess } from './useFeatureAccess'
 import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 import { MapDocument } from '../firebase/maps'
+import { isAdmin } from '../utils/admin'
 
 export interface MapFeatureInheritance {
   // Inherited features from map owner
@@ -157,14 +158,22 @@ export const useMapFeatureInheritance = (currentMap?: MapDocument | null): MapFe
       }
     }
     
-    // Determine if this is the user's own map
-    const isOwnedMap = currentMap.userId === user.uid
+    // Determine if this is the user's own map or if user is admin
+    const userIsAdmin = isAdmin(user.email)
+    const isOwnedMap = currentMap.userId === user.uid || userIsAdmin
     
     // Get map owner's plan from loaded data
     const mapOwnerPlanLimits = SUBSCRIPTION_PLANS[mapOwnerPlan] || SUBSCRIPTION_PLANS.freemium
     
     // Determine permissions based on role
-    const permissions = {
+    // Admin always has full permissions
+    const permissions = userIsAdmin ? {
+      canEdit: true,
+      canDelete: true,
+      canShare: true,
+      canAddMarkers: true,
+      canModifySettings: true
+    } : {
       canEdit: isOwnedMap || userRole === 'editor' || userRole === 'admin',
       canDelete: isOwnedMap || userRole === 'admin',
       canShare: isOwnedMap || userRole === 'admin',

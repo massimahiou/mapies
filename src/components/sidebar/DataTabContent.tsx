@@ -81,11 +81,10 @@ const DataTabContent: React.FC<DataTabContentProps> = ({
         {onOpenModal && (
           <button
             onClick={onOpenModal}
-            className="hidden sm:flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
             title="Open in full screen"
           >
-            <Maximize2 className="w-4 h-4" />
-            Open in Modal
+            <Maximize2 className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
