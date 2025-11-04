@@ -79,40 +79,34 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
     onSearchChange('')
   }
 
-  const getMarkerIcon = (type: string) => {
-    switch (type) {
-      case 'pharmacy': return '🏥'
-      case 'grocery': return '🛒'
-      case 'retail': return '🏪'
-      default: return '•'
-    }
+
+  // Check if a marker is in the current viewport
+  const isMarkerInViewport = (marker: Marker): boolean => {
+    if (!viewportMarkers || viewportMarkers.length === 0) return true // If no viewport data, assume all visible
+    return viewportMarkers.some(vm => vm.id === marker.id)
   }
 
-  // Determine which markers to show - use viewport markers when location is not active
+  // Determine which markers to show - always show ALL markers, but visually distinguish by viewport
   const markersToShow = (() => {
     // When searching, use searchResults
     if (searchTerm.trim() !== '') {
       return searchResults
     }
-    // When location is active, use allMarkers (will be sorted by distance)
-    if (locationModeActive) {
-      return allMarkers
-    }
-    // When location is NOT active and viewportMarkers are provided, show markers visible in current viewport
-    if (!locationModeActive && viewportMarkers && viewportMarkers.length > 0) {
-      return viewportMarkers
-    }
-    // Fallback to all markers
+    // Always show all markers (not filtered by viewport)
     return allMarkers
   })()
   
-  console.log('PublicMapSidebar - searchTerm:', searchTerm)
-  console.log('PublicMapSidebar - searchResults.length:', searchResults.length)
-  console.log('PublicMapSidebar - allMarkers.length:', allMarkers.length)
-  console.log('PublicMapSidebar - markersToShow.length:', markersToShow.length)
-  
-  // Sort markers based on context - make it obvious!
+  // Sort markers based on context - viewport markers first, then hidden ones
   const sortedMarkers = markersToShow.sort((a, b) => {
+    // First, prioritize viewport visibility (viewport markers come first)
+    if (!locationModeActive && viewportMarkers && viewportMarkers.length > 0) {
+      const aInViewport = isMarkerInViewport(a)
+      const bInViewport = isMarkerInViewport(b)
+      if (aInViewport !== bInViewport) {
+        return aInViewport ? -1 : 1 // Viewport markers first
+      }
+    }
+    
     // If location mode is active, sort by distance
     if (showNearbyPlaces && userLocation) {
       const aDistance = calculateDistance(userLocation.lat, userLocation.lng, a.lat, a.lng)
@@ -195,20 +189,35 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
               {markersToDisplay.map((marker) => {
                 const distance = userLocation ? calculateDistance(userLocation.lat, userLocation.lng, marker.lat, marker.lng) : 0
                 const isNearby = nearbyMarkers.some(nearby => nearby.id === marker.id)
+                // Check if marker is in viewport (only when not in location mode and viewport data exists)
+                const isInViewport = locationModeActive || !viewportMarkers || viewportMarkers.length === 0 ? true : isMarkerInViewport(marker)
+                
+                // Visual distinction: reduce opacity and apply grayscale for hidden markers
+                const markerOpacity = isInViewport ? 1.0 : 0.4
+                const markerFilter = isInViewport ? 'none' : 'grayscale(100%)'
                 
                 return (
                   <button
                     key={marker.id}
                     onClick={() => onNavigateToMarker(marker)}
                     className="w-full flex items-center gap-3 p-3 transition-all duration-200 text-left rounded-lg mb-2 group"
+                    style={{
+                      opacity: markerOpacity,
+                      filter: markerFilter,
+                    }}
                     onMouseEnter={(e) => {
+                      // On hover, slightly increase opacity for hidden markers
+                      if (!isInViewport) {
+                        e.currentTarget.style.opacity = '0.6'
+                      }
                       e.currentTarget.style.backgroundColor = mapSettings.searchBarHoverColor
                     }}
                     onMouseLeave={(e) => {
+                      // Restore original opacity on mouse leave
+                      e.currentTarget.style.opacity = markerOpacity.toString()
                       e.currentTarget.style.backgroundColor = 'transparent'
                     }}
                   >
-                    <span className="text-lg">{getMarkerIcon(marker.type)}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate" style={{ color: mapSettings.searchBarTextColor }}>
                         <RenamedMarkerName marker={marker} renamedMarkers={renamedMarkers} mapSettings={mapSettings} />

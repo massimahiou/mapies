@@ -75,19 +75,6 @@ export function validateMapAgainstPlan(
   const planLimits = SUBSCRIPTION_PLANS[ownerPlan] || SUBSCRIPTION_PLANS.freemium
   const premiumFeaturesUsed: string[] = []
 
-  console.log('🔍 Map Validation Debug:', {
-    ownerPlan,
-    planLimits,
-    markersCount: markers.length,
-    mapSettings: {
-      markerShape: mapSettings.markerShape,
-      markerColor: mapSettings.markerColor,
-      searchBarBackgroundColor: mapSettings.searchBarBackgroundColor,
-      searchBarTextColor: mapSettings.searchBarTextColor,
-      searchBarHoverColor: mapSettings.searchBarHoverColor,
-      nameRules: mapSettings.nameRules?.length || 0
-    }
-  })
 
   // Check marker count limit
   if (markers.length > planLimits.maxMarkersPerMap) {
@@ -128,26 +115,8 @@ export function validateMapAgainstPlan(
     mapSettings.searchBarTextColor !== '#000000' || // Custom text colors
     mapSettings.searchBarHoverColor !== '#f3f4f6' // Custom hover colors
 
-  console.log('🔍 Premium Customization Check:', {
-    hasPremiumCustomization,
-    allowedShapes,
-    checks: {
-      markerShapeNotAllowed: !allowedShapes.includes(mapSettings.markerShape),
-      searchBarBackgroundNotWhite: mapSettings.searchBarBackgroundColor !== '#ffffff',
-      searchBarTextNotBlack: mapSettings.searchBarTextColor !== '#000000',
-      searchBarHoverNotGray: mapSettings.searchBarHoverColor !== '#f3f4f6'
-    },
-    values: {
-      markerShape: mapSettings.markerShape,
-      searchBarBackgroundColor: mapSettings.searchBarBackgroundColor,
-      searchBarTextColor: mapSettings.searchBarTextColor,
-      searchBarHoverColor: mapSettings.searchBarHoverColor
-    },
-    customizationLevel: planLimits.customizationLevel
-  })
 
   if (hasPremiumCustomization && planLimits.customizationLevel !== 'premium') {
-    console.log('❌ Premium customization detected for basic plan')
     premiumFeaturesUsed.push('premium_customization')
   }
 
@@ -172,15 +141,12 @@ export function validateMapAgainstPlan(
 
   // If any premium features are used without proper plan, map is invalid
   if (premiumFeaturesUsed.length > 0) {
-    console.log('❌ Map validation failed - premium features used:', premiumFeaturesUsed)
     return {
       isValid: false,
       reason: 'Map uses premium features not available in current plan',
       premiumFeaturesUsed
     }
   }
-
-  console.log('✅ Map validation passed - no premium features detected')
   return {
     isValid: true,
     premiumFeaturesUsed: []

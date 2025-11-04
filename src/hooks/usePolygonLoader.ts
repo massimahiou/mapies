@@ -78,7 +78,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
 
   useEffect(() => {
     if (!mapLoaded || !mapInstance || !userId || !mapId) {
-      console.log('🔷 Polygon loader conditions:', { mapLoaded, hasInstance: !!mapInstance, userId, mapId })
       return
     }
 
@@ -87,21 +86,10 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     const mapIdChanged = lastLoadedMapIdRef.current !== mapId
     const tabChanged = lastActiveTabRef.current !== activeTab
     
-    console.log('🔷 Polygon loader check:', { 
-      instanceChanged, 
-      mapIdChanged,
-      tabChanged,
-      lastTab: lastActiveTabRef.current,
-      currentTab: activeTab,
-      lastMapInstance: !!lastMapInstanceRef.current,
-      currentInstance: !!mapInstance,
-      hasPolygons: polygonLayersRef.current.size > 0
-    })
 
     // Remove existing layers from map before reloading
     // Only reload if instance changed (map recreated) - not just tab changes
     if (instanceChanged && lastMapInstanceRef.current) {
-      console.log('🔷 Map instance changed, removing old layers')
       const previousInstance = lastMapInstanceRef.current
       
       // Remove all polygon layers from previous instance
@@ -124,7 +112,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     // If tab changed but instance is the same, polygons should persist
     // Don't reload - just skip (polygons are already on the map)
     if (tabChanged && !instanceChanged) {
-      console.log('🔷 Tab changed but map instance same - polygons persist, skipping reload')
       lastActiveTabRef.current = activeTab || ''
       return
     }
@@ -133,7 +120,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       try {
         const { getMapPolygons } = await import('../firebase/maps')
         const polygons = await getMapPolygons(userId, mapId)
-        console.log('🔷 Loaded polygons:', polygons.length, 'for map:', mapId)
 
         // Initialize FeatureGroup for editable polygons if it doesn't exist
         if (!drawnItemsRef.current && mapInstance) {
@@ -159,7 +145,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
 
         // If switching maps (not just tabs), remove old polygon layers and vertex markers
         if (mapIdChanged && lastLoadedMapIdRef.current && lastMapInstanceRef.current !== null) {
-          console.log('🔷 Clearing old polygon layers from previous map')
           const previousInstance = lastMapInstanceRef.current
           
           // Remove vertex markers for old polygons
@@ -184,7 +169,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
             const polygonId = (layer as any).polygonId
             if (!polygonLayersRef.current.has(polygonId)) {
               // Layer exists on map but not in our ref - remove it
-              console.log('🔷 Removing orphaned polygon layer:', polygonId)
               mapInstance.removeLayer(layer)
             } else {
               currentLayersOnMap.push(layer)
@@ -201,13 +185,11 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
           // Check if already rendered on current map instance
           const existingLayer = polygonLayersRef.current.get(polygonId)
           if (existingLayer && mapInstance.hasLayer(existingLayer)) {
-            console.log('🔷 Polygon already on map, skipping:', polygonId)
             return
           }
           
           // If we have an existing layer in ref but it's not on the map, remove from ref
           if (existingLayer && !mapInstance.hasLayer(existingLayer)) {
-            console.log('🔷 Cleaning up stale layer reference:', polygonId)
             polygonLayersRef.current.delete(polygonId)
           }
 
@@ -243,7 +225,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
               if (polygonLayersRef.current.has(checkId)) {
                 const existing = polygonLayersRef.current.get(checkId)
                 if (existing && mapInstance.hasLayer(existing)) {
-                  console.log('🔷 Polygon already rendered, skipping duplicate:', checkId)
                   return // Skip this polygon
                 }
               }
@@ -268,7 +249,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
               
               layer.addTo(mapInstance)
               polygonLayersRef.current.set(polygonId, layer)
-              console.log('🔷 Rendered polygon:', polygonId)
               
               // If edit mode is already enabled, show vertex markers for this new polygon
               const polygonLayer = layer instanceof L.Polygon ? layer : null
@@ -286,7 +266,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
                 // Right-click to enter edit mode (Leaflet.draw convention)
                 polygonLayer.on('contextmenu', (e: L.LeafletMouseEvent) => {
                   e.originalEvent.preventDefault()
-                  console.log('🔷 Right-click on polygon, enabling edit mode')
                   
                   try {
                     // Use Leaflet.draw's edit handler
@@ -296,7 +275,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
                     ;(layer as any)._editHandler = editHandler
                     editHandler.enable()
                     
-                    console.log('🔷 Edit handler enabled for polygon:', polygonId)
                   } catch (err) {
                     console.error('Error enabling edit mode:', err)
                   }
@@ -311,7 +289,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
         lastLoadedMapIdRef.current = mapId
         lastMapInstanceRef.current = mapInstance
         lastActiveTabRef.current = activeTab || ''
-        console.log('🔷 Rendered', polygons.filter(p => p.visible).length, 'polygons on map')
       } catch (error) {
         console.error('Error loading polygons:', error)
       }
@@ -321,7 +298,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     if (mapInstance && userId && mapId) {
       // Add a small delay when instance changes to ensure map is fully initialized
       if (instanceChanged) {
-        console.log('🔷 Delaying polygon load to ensure map is ready')
         setTimeout(() => loadPolygons(), 100)
       } else {
         loadPolygons()
@@ -337,7 +313,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       
       if (!mapInstance || !mapLoaded) return
       
-      console.log('🔷 Edit mode toggled:', enabled)
       
       if (enabled) {
         // Show pink vertex dots for all polygons
@@ -369,7 +344,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     const handleBoxSelectModeToggle = (e: CustomEvent) => {
       const enabled = e.detail.enabled
       boxSelectModeEnabledRef.current = enabled
-      console.log('🔷 Box select mode toggled:', enabled)
       
       // Clear any existing selection rectangle
       if (!enabled && mapInstance && boxSelectRectRef.current) {
@@ -404,7 +378,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
           weight: strokeWeight,
           opacity: strokeOpacity
         })
-        console.log('🔷 Updated polygon styling in real-time:', polygonId)
       } else if (layer instanceof L.Circle) {
         layer.setStyle({
           fillColor,
@@ -413,7 +386,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
           weight: strokeWeight,
           opacity: strokeOpacity
         })
-        console.log('🔷 Updated circle styling in real-time:', polygonId)
       }
     }
     
@@ -435,12 +407,10 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
         return
       }
       
-      console.log('🔷 Box selection: mousedown in box select mode')
       
       // Check if click was on a vertex marker - if so, don't start box selection
       const target = e.originalEvent.target as HTMLElement
       if (target.closest('.pink-vertex-marker')) {
-        console.log('🔷 Box selection: clicked on vertex, allowing normal drag')
         return // Allow vertex dragging instead
       }
       
@@ -452,7 +422,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       boxSelectStartRef.current = e.latlng
       isBoxSelectingRef.current = true
       
-      console.log('🔷 Box selection: starting at', startPoint)
       
       // Create selection rectangle
       if (boxSelectRectRef.current) {
@@ -467,7 +436,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
         dashArray: '5, 5'
       }).addTo(mapInstance)
       
-      console.log('🔷 Box selection: rectangle created')
     }
     
     const handleMouseMove = (e: L.LeafletMouseEvent) => {
@@ -492,7 +460,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       e.originalEvent.stopPropagation()
       e.originalEvent.preventDefault()
       
-      console.log('🔷 Box selection: mouseup, finalizing selection')
       
       isBoxSelectingRef.current = false
       
@@ -529,7 +496,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       boxSelectRectRef.current = null
       startPoint = null
       
-      console.log('🔷 Box selection: selected', selectedCount, 'vertices')
     }
     
     // Listen directly on map container for capture phase to intercept before Leaflet
@@ -540,7 +506,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
         // Check if click was on a vertex marker
         const target = e.target as HTMLElement
         if (!target.closest('.pink-vertex-marker')) {
-          console.log('🔷 Direct mousedown: Shift key detected, stopping propagation')
           e.stopPropagation()
           e.stopImmediatePropagation()
           // Don't prevent default here, let our Leaflet handler deal with it
@@ -641,7 +606,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
           marker.setIcon(createIcon(true))
         }
         
-        console.log('🔷 Selected vertices:', selectedVerticesRef.current.size)
       })
       
       // Store original position when drag starts
@@ -729,7 +693,6 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
     })
     
     vertexMarkersRef.current.set(polygonId, vertexMarkers)
-    console.log('🔷 Created', vertexMarkers.length, 'pink vertex markers for polygon:', polygonId)
   }
   
   // Function to hide all vertex markers
@@ -738,12 +701,10 @@ export const usePolygonLoader = ({ mapInstance, mapLoaded, userId, mapId, active
       markers.forEach(marker => map.removeLayer(marker))
     })
     vertexMarkersRef.current.clear()
-    console.log('🔷 Removed all vertex markers')
   }
   
   // Debug: log when dependencies change
   useEffect(() => {
-    console.log('🔷 usePolygonLoader dependencies changed:', { mapLoaded, mapId, userId, hasInstance: !!mapInstance })
   }, [mapLoaded, mapId, userId, mapInstance])
   
   return { 

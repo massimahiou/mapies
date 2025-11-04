@@ -375,14 +375,6 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   }, [markers])
 
   // Get marker icon based on type
-  const getMarkerIcon = (type: string) => {
-    switch (type) {
-      case 'pharmacy': return '🏥'
-      case 'grocery': return '🛒'
-      case 'retail': return '🏪'
-      default: return '•'
-    }
-  }
 
 
   // Initialize map
@@ -1565,7 +1557,6 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                             e.currentTarget.style.backgroundColor = 'transparent'
                           }}
                         >
-                          <span className="text-lg">{getMarkerIcon(marker.type)}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate" style={{ color: mapSettings.searchBarTextColor }}>
                               {applyNameRules(marker.name, mapSettings.nameRules, true)}

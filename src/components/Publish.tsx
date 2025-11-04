@@ -8,10 +8,10 @@ interface PublishProps {
   iframeDimensions?: { width: number; height: number }
 }
 
-const Publish: React.FC<PublishProps> = ({ isOpen, onClose, currentMapId, iframeDimensions = { width: 800, height: 600 } }) => {
+const Publish: React.FC<PublishProps> = ({ isOpen, onClose, currentMapId }) => {
   const [copied, setCopied] = useState(false)
   
-  // Generate Firestore-based iframe code
+  // Generate Firestore-based iframe code (responsive)
   const generateIframeCode = () => {
     if (!currentMapId) {
       return 'Please select a map to generate embed code'
@@ -21,13 +21,12 @@ const Publish: React.FC<PublishProps> = ({ isOpen, onClose, currentMapId, iframe
     const timestamp = Date.now()
     const mapUrl = `${window.location.origin}/${currentMapId}?v=${timestamp}`
     
+    // Generate responsive iframe code with relative CSS values
     const iframeCode = `<iframe 
   src="${mapUrl}" 
-  width="${iframeDimensions.width}" 
-  height="${iframeDimensions.height}" 
   frameborder="0" 
   allow="geolocation"
-  style="border-radius: 8px;">
+  style="width: 100%; height: 50vh; min-height: 700px; display: block; margin-inline: auto; border-radius: 8px;">
 </iframe>`
     
     console.log('Generated iframe code:', iframeCode)

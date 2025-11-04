@@ -32,8 +32,10 @@ import { useToast } from './contexts/ToastContext'
 import { checkForDuplicates, checkForInternalDuplicates, AddressData } from './utils/duplicateDetection'
 import { isAdmin } from './utils/admin'
 import DuplicateNotification from './components/DuplicateNotification'
-import SubscriptionManagementModal from './components/SubscriptionManagementModal'
 import { useSharedMapFeatureAccess } from './hooks/useSharedMapFeatureAccess'
+
+// Lazy load SubscriptionManagementModal to avoid loading Stripe in public/embed routes
+const SubscriptionManagementModal = React.lazy(() => import('./components/SubscriptionManagementModal'))
 
 // Types
 interface Marker {
@@ -44,6 +46,7 @@ interface Marker {
   lng: number
   visible: boolean
   type: 'pharmacy' | 'grocery' | 'retail' | 'other'
+  order?: number // Display order for markers
 }
 
 // Start with empty markers array
@@ -462,7 +465,8 @@ const AppContent: React.FC = () => {
         lat: marker.coordinates?.lat || marker.lat,
         lng: marker.coordinates?.lng || marker.lng,
         visible: marker.visible !== false, // Default to true if not set (matches PublicMap.tsx)
-        type: marker.type as 'pharmacy' | 'grocery' | 'retail' | 'other'
+        type: marker.type as 'pharmacy' | 'grocery' | 'retail' | 'other',
+        order: marker.order // Include order field for marker ordering
       }))
       
       // Only update if markers actually changed (optimized comparison)
@@ -483,7 +487,8 @@ const AppContent: React.FC = () => {
                  prev.name !== current.name ||
                  prev.lat !== current.lat ||
                  prev.lng !== current.lng ||
-                 prev.address !== current.address
+                 prev.address !== current.address ||
+                 prev.order !== current.order
         })
         
         if (hasChanged) {
@@ -1537,7 +1542,9 @@ const AppContent: React.FC = () => {
 
        {/* Subscription Management Modal */}
        {showSubscriptionModal && (
-         <SubscriptionManagementModal onClose={() => setShowSubscriptionModal(false)} />
+         <React.Suspense fallback={null}>
+           <SubscriptionManagementModal onClose={() => setShowSubscriptionModal(false)} />
+         </React.Suspense>
        )}
     </div>
    )

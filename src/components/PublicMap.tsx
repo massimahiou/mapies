@@ -145,7 +145,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   const geocodePostalCode = async (postalCode: string): Promise<{lat: number, lng: number} | null> => {
     try {
       const cleanedPostalCode = postalCode.trim().replace(/\s+/g, '').toUpperCase()
-      console.log('🌐 Attempting to geocode postal code:', cleanedPostalCode)
       
       // PRIORITY 1: Always try Mapbox first (even if hasGeocoding is false - Mapbox public token should work for basic geocoding)
       const encodedPostalCode = encodeURIComponent(cleanedPostalCode)
@@ -153,19 +152,15 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       // Try Mapbox with postal code autocomplete/geocoding
       // Method 1: Query parameter style (more reliable for postal codes)
       const mapboxQueryUrl = `${MAPBOX_CONFIG.GEOCODING_API_URL}/${encodedPostalCode}.json?access_token=${MAPBOX_CONFIG.ACCESS_TOKEN}&country=CA&types=postcode&limit=1`
-      console.log('🌐 Mapbox query URL:', mapboxQueryUrl)
       
       try {
         const response = await fetch(mapboxQueryUrl)
         const data = await response.json()
         
-        console.log('📍 Mapbox geocoding response:', data)
-        console.log('📍 Mapbox response status:', response.status, response.ok)
         
         if (response.ok && data.features && data.features.length > 0) {
           const feature = data.features[0]
           const coordinates = feature.center
-          console.log(`✅ Mapbox found coordinates for ${cleanedPostalCode}:`, coordinates)
           return {
             lat: coordinates[1], // Mapbox returns [lng, lat]
             lng: coordinates[0]
@@ -174,12 +169,10 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         
         // If no results with types=postcode, try without types restriction
         if (!data.features || data.features.length === 0) {
-          console.log('⚠️ Mapbox returned no features with postcode type, trying without type restriction...')
           const mapboxUrlNoTypes = `${MAPBOX_CONFIG.GEOCODING_API_URL}/${encodedPostalCode}.json?access_token=${MAPBOX_CONFIG.ACCESS_TOKEN}&country=CA&limit=5`
           
           const response2 = await fetch(mapboxUrlNoTypes)
           const data2 = await response2.json()
-          console.log('📍 Mapbox response (no types, limit 5):', data2)
           
           if (response2.ok && data2.features && data2.features.length > 0) {
             // Look for postal code features first, or any Canadian location
@@ -191,7 +184,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
             
             const feature = postalCodeFeature || data2.features[0]
             const coordinates = feature.center
-            console.log(`✅ Mapbox found coordinates (broader search) for ${cleanedPostalCode}:`, coordinates)
             return {
               lat: coordinates[1],
               lng: coordinates[0]
@@ -200,18 +192,15 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         }
         
         if (data.error || data.message) {
-          console.log('⚠️ Mapbox API error:', data.error || data.message)
         }
       } catch (mapboxError) {
         console.error('⚠️ Mapbox error:', mapboxError)
       }
       
-      console.log('ℹ️ Mapbox geocoding not successful, trying free Nominatim API as fallback')
       
       // Always try Nominatim - it's FREE and works for postal codes
       // Fallback to Nominatim - full postal code
       try {
-        console.log('🔄 Trying Nominatim for full postal code:', cleanedPostalCode)
         const nominatimUrl = `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(cleanedPostalCode)}&countrycodes=ca&format=json&limit=1`
         const response = await fetch(nominatimUrl, {
           headers: {
@@ -221,11 +210,9 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         
         if (response.ok) {
           const data = await response.json()
-          console.log('📍 Nominatim geocoding response (full):', data)
           
           if (data && data.length > 0) {
             const result = data[0]
-            console.log(`✅ Nominatim found coordinates for ${cleanedPostalCode}:`, { lat: result.lat, lng: result.lon })
             return {
               lat: parseFloat(result.lat),
               lng: parseFloat(result.lon)
@@ -233,13 +220,11 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           }
         }
       } catch (nominatimError) {
-        console.log('⚠️ Nominatim error:', nominatimError)
       }
       
       // If full postal code fails, try first 3 characters (postal code prefix)
       if (cleanedPostalCode.length >= 3) {
         const postalCodePrefix = cleanedPostalCode.substring(0, 3)
-        console.log('🔄 Full postal code not found, trying prefix:', postalCodePrefix)
         
         // Try Mapbox with prefix (only if geocoding is available)
         if (hasGeocoding) {
@@ -249,11 +234,9 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
             
             if (response.ok) {
               const data = await response.json()
-              console.log('📍 Mapbox geocoding response (prefix):', data)
               
               if (data.features && data.features.length > 0) {
                 const coordinates = data.features[0].center
-                console.log(`✅ Mapbox found coordinates for prefix ${postalCodePrefix}:`, coordinates)
                 return {
                   lat: coordinates[1],
                   lng: coordinates[0]
@@ -261,13 +244,11 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               }
             }
           } catch (mapboxError) {
-            console.log('⚠️ Mapbox prefix error:', mapboxError)
           }
         }
         
         // Try Nominatim with prefix (always available, it's free)
         try {
-          console.log('🔄 Trying Nominatim for prefix:', postalCodePrefix)
           const nominatimUrl = `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(postalCodePrefix)}&countrycodes=ca&format=json&limit=1`
           const response = await fetch(nominatimUrl, {
             headers: {
@@ -277,11 +258,9 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           
           if (response.ok) {
             const data = await response.json()
-            console.log('📍 Nominatim geocoding response (prefix):', data)
             
             if (data && data.length > 0) {
               const result = data[0]
-              console.log(`✅ Nominatim found coordinates for prefix ${postalCodePrefix}:`, { lat: result.lat, lng: result.lon })
               return {
                 lat: parseFloat(result.lat),
                 lng: parseFloat(result.lon)
@@ -289,11 +268,9 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
             }
           }
         } catch (nominatimError) {
-          console.log('⚠️ Nominatim prefix error:', nominatimError)
         }
       }
       
-      console.log(`❌ No coordinates found for postal code: ${cleanedPostalCode}`)
       return null
     } catch (error) {
       console.error('Postal code geocoding error:', error)
@@ -307,7 +284,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     if (!term || !term.trim()) return false
     
     const cleaned = term.trim().replace(/\s+/g, '').toUpperCase() // Remove all spaces and normalize to uppercase
-    console.log('🔍 Checking postal code:', { original: term, cleaned })
     
     // Full postal code: A1A1A1 (6 characters)
     const fullPostalCodeRegex = /^[A-Z]\d[A-Z]\d[A-Z]\d$/
@@ -318,13 +294,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     const isPartialMatch = partialPostalCodeRegex.test(cleaned)
     const result = isFullMatch || isPartialMatch
     
-    console.log('🔍 Postal code check result:', { 
-      cleaned, 
-      isFullMatch, 
-      isPartialMatch, 
-      result,
-      length: cleaned.length 
-    })
     
     return result
   }
@@ -334,7 +303,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
 
   // Search functionality with postal code support
   const handleSearch = async (term: string) => {
-    console.log('🔍 handleSearch called with term:', term, 'Markers count:', markers.length)
     setSearchTerm(term)
     
     // Clear any existing timeout
@@ -353,10 +321,8 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     
     // PRIORITY 1: Check if it's a postal code FIRST - postal codes ONLY use geocoding, no text search fallback
     const isPostal = isPostalCode(term)
-    console.log('🔍 Postal code check for term:', term, 'Result:', isPostal)
     
     if (isPostal) {
-      console.log('✅ Detected postal code:', term, '- Starting geocoding...')
       
       // For postal codes, show loading state immediately but debounce the geocoding
       // Show empty results initially to indicate geocoding is in progress
@@ -364,17 +330,11 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       
       // Debounce postal code geocoding slightly to avoid excessive API calls
       searchTimeoutRef.current = setTimeout(async () => {
-        console.log('🌐 Starting postal code geocoding for:', term)
-        console.log('🌐 Current markers available:', markers.length)
         
         // Reverse geocode postal code to get latitude/longitude
         const coordinates = await geocodePostalCode(term)
-        console.log('🌐 Geocoding result:', coordinates)
         
         if (coordinates && coordinates.lat && coordinates.lng) {
-          console.log('✅ Postal code geocoded successfully:', coordinates)
-          console.log(`📍 Using coordinates (${coordinates.lat}, ${coordinates.lng}) to find nearest spots`)
-          console.log('📍 Total markers to calculate distance for:', markers.length)
           
           // Use the geocoded coordinates to find nearest markers
           // Calculate distance for ALL markers from the postal code location
@@ -386,32 +346,20 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
             }
           }).sort((a, b) => a.distance - b.distance)
           
-          console.log('📍 Markers with distance calculated:', markersWithDistance.length)
-          console.log('📍 First few distances:', markersWithDistance.slice(0, 5).map(m => ({ name: m.name, distance: m.distance?.toFixed(2) + 'km' })))
           
           // Show the closest markers sorted by distance (nearest first)
           const nearestMarkers = markersWithDistance.slice(0, 50) // Show up to 50 nearest
           
-          console.log(`🎯 Found ${nearestMarkers.length} nearest markers to postal code location`)
-          console.log('📍 Nearest markers:', nearestMarkers.slice(0, 10).map(m => ({ 
-            name: m.name, 
-            distance: m.distance?.toFixed(2) + 'km',
-            lat: m.lat,
-            lng: m.lng
-          })))
           
-          console.log('🎯 Setting search results to:', nearestMarkers.length, 'markers')
           setSearchResults(nearestMarkers)
           
           // Center map on postal code location
           if (mapInstance.current) {
             mapInstance.current.setView([coordinates.lat, coordinates.lng], 12)
-            console.log('📍 Map centered on postal code location')
           }
           
           // Set user location to the postal code location for distance display
           setUserLocation({ lat: coordinates.lat, lng: coordinates.lng })
-          console.log('📍 User location set to postal code coordinates')
         } else {
           console.error('❌ Could not geocode postal code:', term)
           console.error('❌ Geocoding returned null or invalid coordinates')
@@ -424,13 +372,11 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     }
     
     // Regular text search (only for non-postal-code terms)
-    console.log('📝 Performing regular text search for:', term)
     searchTimeoutRef.current = setTimeout(() => {
       const filtered = markers.filter(marker => 
         marker.name.toLowerCase().includes(term.toLowerCase()) ||
         marker.address.toLowerCase().includes(term.toLowerCase())
       )
-      console.log('📝 Filtered results:', filtered.length, filtered)
       setSearchResults(filtered)
     }, 300) // 300ms debounce for text search
   }
@@ -510,7 +456,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
 
   // Navigate to marker and show its details
   const navigateToMarker = (marker: Marker) => {
-    console.log('🎯 Navigating to marker:', marker.name, 'at', marker.lat, marker.lng)
     
     if (mapInstance.current) {
       // Smooth pan to marker location
@@ -523,7 +468,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       setTimeout(() => {
         // Get all markers from the cluster group
         const allMarkers = markerClusterRef.current?.getLayers() || []
-        console.log('🔍 Looking for marker in', allMarkers.length, 'markers')
         
         // Find the specific marker by coordinates
         const targetMarker = allMarkers.find((layer: any) => {
@@ -532,7 +476,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
             const isMatch = Math.abs(latLng.lat - marker.lat) < 0.0001 && 
                    Math.abs(latLng.lng - marker.lng) < 0.0001
             if (isMatch) {
-              console.log('✅ Found matching marker at', latLng.lat, latLng.lng)
             }
             return isMatch
           }
@@ -541,14 +484,11 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         
         // Open popup if marker found
         if (targetMarker && targetMarker.openPopup) {
-          console.log('🎉 Opening popup for marker')
           targetMarker.openPopup()
         } else {
-          console.log('❌ Marker not found or no popup method')
         }
       }, 800) // Wait for animation to complete
     } else {
-      console.log('❌ Map instance not available')
     }
   }
 
@@ -578,7 +518,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       setShowMobileResults(true) // Show results when location is activated
       
       // Show random results initially while waiting for location
-      console.log('🎲 Getting location - showing random results temporarily')
       const shuffledMarkers = [...markers].sort(() => Math.random() - 0.5)
       setSearchResults(shuffledMarkers.slice(0, 30))
       setSearchTerm('') // Clear search term
@@ -624,7 +563,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         setTimeout(() => {
           circleElement.style.animation = 'soft-breathing-glow 3s ease-in-out infinite'
           circleElement.classList.add('soft-breathing-glow-animation')
-          console.log('🎯 Soft breathing glow animation applied to location circle')
         }, 100)
       } else {
         console.error('❌ Could not get circle element for animation')
@@ -649,7 +587,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       setLocationModeActive(true)
       
       // Show nearest results to fallback location
-      console.log('📍 Geolocation not supported - showing nearest results to fallback')
       const markersWithDistance = markers.map(marker => ({
         ...marker,
         distance: calculateDistance(fallbackLat, fallbackLng, marker.lat, marker.lng)
@@ -658,7 +595,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       // Show the closest 30 markers
       const nearestMarkers = markersWithDistance.slice(0, 30)
       
-      console.log(`🎯 Showing ${nearestMarkers.length} nearest markers to fallback location`)
       setSearchResults(nearestMarkers)
       setSearchTerm('') // Clear search term to show "nearest" results
       
@@ -669,20 +605,17 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     // Check if we're in an iframe and warn user
     const isInIframe = window !== window.top
     if (isInIframe) {
-      console.log('Running in iframe - geolocation may require user permission')
     }
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords
-        console.log('Current location:', latitude, longitude)
         
         // Store user location
         setUserLocation({ lat: latitude, lng: longitude })
         setLocationModeActive(true) // Activate location mode
         
         // Show nearest results now that we have the location
-        console.log('📍 Location obtained - showing nearest results')
         const markersWithDistance = markers.map(marker => ({
           ...marker,
           distance: calculateDistance(latitude, longitude, marker.lat, marker.lng)
@@ -691,8 +624,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         // Show the closest 30 markers
         const nearestMarkers = markersWithDistance.slice(0, 30)
         
-        console.log(`🎯 Showing ${nearestMarkers.length} nearest markers to user location`)
-        console.log('📍 Nearest markers:', nearestMarkers.map(m => ({ name: m.name, distance: m.distance })))
         
         setSearchResults(nearestMarkers)
         setSearchTerm('') // Clear search term to show "nearest" results
@@ -702,7 +633,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       },
       (error) => {
         console.error('Error getting location:', error)
-        console.log('📍 Geolocation failed, using fallback location (Montreal)')
         
         // Use fallback location
         const fallbackLat = 45.5017
@@ -711,7 +641,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         setLocationModeActive(true)
         
         // Show nearest results to fallback location
-        console.log('📍 Using fallback location - showing nearest results')
         const markersWithDistance = markers.map(marker => ({
           ...marker,
           distance: calculateDistance(fallbackLat, fallbackLng, marker.lat, marker.lng)
@@ -720,7 +649,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         // Show the closest 30 markers
         const nearestMarkers = markersWithDistance.slice(0, 30)
         
-        console.log(`🎯 Showing ${nearestMarkers.length} nearest markers to fallback location`)
         setSearchResults(nearestMarkers)
         setSearchTerm('') // Clear search term to show "nearest" results
         
@@ -755,29 +683,17 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
 
   // Initialize map
   useEffect(() => {
-    console.log('Map initialization useEffect triggered:', {
-      mapRef: !!mapRef.current,
-      mapInstance: !!mapInstance.current,
-      mapRefElement: mapRef.current,
-      mapRefDimensions: mapRef.current ? {
-        width: mapRef.current.offsetWidth,
-        height: mapRef.current.offsetHeight
-      } : 'No element'
-    })
     
     const initMap = () => {
       if (!mapRef.current) {
-        console.log('Map ref not ready, retrying in 100ms...')
         setTimeout(initMap, 100)
         return
       }
       
       if (mapInstance.current) {
-        console.log('Map already initialized')
         return
       }
 
-      console.log('Initializing public map...')
       
       mapInstance.current = L.map(mapRef.current, {
         center: [45.5017, -73.5673],
@@ -804,7 +720,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       } as any).addTo(mapInstance.current)
 
       mapInstance.current.whenReady(() => {
-        console.log('Public map loaded successfully')
         setMapLoaded(true)
         
               // Initialize basic marker cluster group (will be updated when settings change)
@@ -871,26 +786,15 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           mapInstance.current.addLayer(markerClusterRef.current)
           
           // Add click event listener to cluster group for debugging
-          markerClusterRef.current.on('clusterclick', (e: any) => {
-            console.log('🔍 Cluster clicked:', {
-              cluster: e.layer,
-              childCount: e.layer.getChildCount(),
-              bounds: e.layer.getBounds()
-            })
+          markerClusterRef.current.on('clusterclick', () => {
           })
         }
-        console.log('Marker cluster group initialized and added to map')
         
         // Remove attribution control if it exists
         if (mapInstance.current && mapInstance.current.attributionControl) {
           mapInstance.current.attributionControl.remove()
         }
         
-        console.log('Map state after initialization:', {
-          mapLoaded: true,
-          mapInstance: !!mapInstance.current,
-          markerClusterRef: !!markerClusterRef.current
-        })
         
         // Listen to map move/zoom events to update visible markers in viewport
         // Event handlers will be set up in a separate useEffect to access current state
@@ -915,7 +819,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           return bounds.contains([marker.lat, marker.lng])
         })
         
-        console.log('📍 Viewport markers updated:', visibleInViewport.length, 'markers visible in viewport')
         setViewportMarkers(visibleInViewport)
         
         // Update search results to show viewport markers ONLY when location is not active and no search term
@@ -953,15 +856,11 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       }
 
       try {
-        console.log('Loading public map data for:', mapId)
         
         // Import Firebase functions dynamically
-        console.log('Importing Firebase functions...')
         const { subscribeToMapDocument, subscribeToMapMarkers } = await import('../firebase/maps')
-        console.log('Firebase functions imported successfully')
         
         // Search for the map in user collections
-        console.log('Searching for map ID:', mapId, 'in user collections...')
         const { collection, getDocs, doc, getDoc } = await import('firebase/firestore')
         const { db } = await import('../firebase/config')
         
@@ -979,19 +878,16 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           if (mapDocSnapshot.exists()) {
             mapDoc = mapDocSnapshot.data()
             foundUserId = userDoc.id
-            console.log('Found map in user collection:', userDoc.id)
             break
           }
         }
         
         if (!mapDoc || !foundUserId) {
-          console.log('Map not found')
           setError('Map not found or not publicly accessible')
           setLoading(false)
           return
         }
         
-        console.log('Found map data:', mapDoc)
         
         // Set map data
         const mapDataWithPlan = {
@@ -1013,7 +909,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           const { SUBSCRIPTION_PLANS } = await import('../config/subscriptionPlans')
           const ownerPlanLimits = SUBSCRIPTION_PLANS[ownerPlan] || SUBSCRIPTION_PLANS.freemium
           setShowWatermark(ownerPlanLimits.watermark)
-          console.log('Map owner subscription:', ownerPlan, 'watermark:', ownerPlanLimits.watermark)
           
           // Update owner plan in mapData
           mapDataWithPlan.ownerPlan = ownerPlan
@@ -1026,7 +921,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         
         // Load map settings
         if (mapDoc.settings) {
-          console.log('🎨 Loading initial map settings:', mapDoc.settings)
           const rawSettings = {
             ...mapDoc.settings,
             // Ensure markerShape defaults to 'pin' if missing (for existing maps)
@@ -1046,7 +940,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           const compliantSettings = ensureFreemiumCompliance(rawSettings, 'freemium')
           setMapSettings(compliantSettings)
         } else {
-          console.log('⚠️ No map settings found in document')
         }
         
         // Load folder icons for this map
@@ -1062,7 +955,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               }
             })
             setFolderIcons(iconStates)
-            console.log('📁 Folder icons loaded for public map:', Object.keys(iconStates).length, 'icons:', iconStates)
           } catch (error) {
             console.error('Error loading folder icons for public map:', error)
           }
@@ -1070,7 +962,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         loadFolderIcons()
         
         // Set up real-time listeners for markers and settings
-        console.log('Setting up real-time listeners...')
         
               // Use direct user markers subscription with optimized updates and throttling
               let lastUpdateTime = 0
@@ -1084,7 +975,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                 }
                 lastUpdateTime = now
                 
-                console.log('Public map markers updated:', markers.length, 'markers')
                 
                 // Transform markers to ensure correct coordinate structure
                 let transformedMarkers = markers.map((marker: any) => ({
@@ -1125,7 +1015,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                     ...otherMarkers
                   ].slice(0, 250)
                   
-                  console.log(`📍 Limited demo map to 250 markers (${quebecMontrealMarkers.length} Quebec/Montreal, ${prioritizedMarkers.length - quebecMontrealMarkers.length} others)`)
                   transformedMarkers = prioritizedMarkers
                 }
                 
@@ -1133,7 +1022,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                 setMarkers(prevMarkers => {
                   // Quick length check first
                   if (prevMarkers.length !== transformedMarkers.length) {
-                    console.log('📍 Public map markers count changed, updating')
                     return transformedMarkers as Marker[]
                   }
                   
@@ -1151,18 +1039,15 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                   })
                   
                   if (hasChanged) {
-                    console.log('📍 Public map markers content changed, updating')
                     return transformedMarkers as Marker[]
                   }
                   
-                  console.log('📍 No public map marker changes detected, keeping existing state')
                   return prevMarkers
                 })
               })
         
         const unsubscribeSettings = subscribeToMapDocument(foundUserId, mapId, (mapDoc) => {
           if (mapDoc && mapDoc.settings) {
-            console.log('🎨 Public map settings updated via real-time listener:', mapDoc.settings)
             const rawSettings = {
               ...mapDoc.settings,
               // Ensure clustering settings have defaults
@@ -1180,11 +1065,9 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
             const compliantSettings = ensureFreemiumCompliance(rawSettings, 'freemium')
             setMapSettings(compliantSettings)
           } else {
-            console.log('⚠️ Real-time listener: No settings found in map document')
           }
         })
         
-        console.log('Real-time listeners set up successfully')
         setLoading(false)
         
         // Cleanup function
@@ -1207,7 +1090,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   useEffect(() => {
     if (!mapInstance.current || !mapLoaded || !markerClusterRef.current) return
 
-    console.log('🎨 PublicMap: Updating cluster group with new settings:', mapSettings)
 
     // Remove old cluster group
     mapInstance.current.removeLayer(markerClusterRef.current)
@@ -1268,7 +1150,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   useEffect(() => {
     if (!mapInstance.current || !tileLayerRef.current || !mapLoaded) return
 
-    console.log('🎨 PublicMap: Updating map style based on settings:', effectiveSettings.style)
 
     let tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
     let tileOptions = {
@@ -1328,36 +1209,22 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         break
     }
 
-    console.log('🎨 PublicMap: Switching to tile URL:', tileUrl)
 
     // Remove old tile layer and add new one
     if (tileLayerRef.current) {
       mapInstance.current.removeLayer(tileLayerRef.current)
     }
     
-    console.log('🎨 Adding tile layer:', tileUrl, tileOptions)
     tileLayerRef.current = L.tileLayer(tileUrl, tileOptions).addTo(mapInstance.current)
   }, [effectiveSettings.style, mapLoaded])
 
   // Update markers
   useEffect(() => {
-    console.log('📍 PublicMap markers useEffect triggered:', {
-      mapInstance: !!mapInstance.current,
-      mapLoaded,
-      markerClusterRef: !!markerClusterRef.current,
-      markersCount: markers.length,
-      markers: markers,
-      folderIconsCount: Object.keys(folderIcons).length,
-      folderIcons: folderIcons,
-      loading
-    })
     
     if (!mapInstance.current || !mapLoaded || !markerClusterRef.current || loading) {
-      console.log('📍 Skipping markers update - missing requirements or still loading')
       return
     }
 
-    console.log('Updating public map markers with clustering:', markers.length)
 
     // Clear existing markers from cluster group
     markerClusterRef.current.clearLayers()
@@ -1365,14 +1232,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
 
     // Add new markers to cluster group
     const visibleMarkers = markers.filter(marker => marker.visible !== false)
-    console.log('🎯 Adding markers to cluster:', visibleMarkers.length, 'markers')
-    visibleMarkers.forEach((marker, index) => {
-      console.log(`🎯 Marker ${index + 1}:`, {
-        name: marker.name,
-        lat: marker.lat,
-        lng: marker.lng,
-        visible: marker.visible
-      })
+    visibleMarkers.forEach((marker) => {
       
       // Get business category for this marker
       const businessCategory = marker.businessCategory || detectBusinessType(marker.name, marker.address, true)
@@ -1396,13 +1256,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         }
       }
       
-      console.log('🔍 PublicMap marker icon check:', {
-        markerName: marker.name,
-        markerRenamedName,
-        folderIconUrl,
-        availableFolderIcons: Object.keys(folderIcons),
-        folderIcons
-      })
       
       // For demo map, use simple shapes. For regular maps, use full marker system
       let customIcon
@@ -1509,11 +1362,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       markerClusterRef.current.addLayer(markerInstance)
       markersRef.current.push(markerInstance)
       
-      console.log(`✅ Marker ${index + 1} added to cluster:`, {
-        name: marker.name,
-        position: [marker.lat, marker.lng],
-        clusterSize: markerClusterRef.current.getLayers().length
-      })
     })
 
     // Fit bounds to show all markers using cluster group
@@ -1526,11 +1374,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   useEffect(() => {
     if (!mapInstance.current || !markerClusterRef.current || !mapLoaded) return
 
-    console.log('🔄 Updating clustering settings:', {
-      clusteringEnabled: customSettings?.clusteringEnabled,
-      effectiveSettings: effectiveSettings.clusteringEnabled,
-      mapId
-    })
 
     // Remove existing cluster group
     if (mapInstance.current.hasLayer(markerClusterRef.current)) {
@@ -1607,18 +1450,12 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       })
     }
 
-    console.log('✅ Clustering settings updated')
   }, [customSettings?.clusteringEnabled, effectiveSettings.clusteringEnabled, effectiveSettings.markerColor, mapLoaded, mapId])
 
   // Optimized marker style updates - only update CSS, don't recreate markers
   useEffect(() => {
     if (!mapInstance.current || !mapLoaded || mapId !== 'demo-map-1000-markers') return
 
-    console.log('🎨 Updating marker styles via CSS:', {
-      markerColor: customSettings?.markerColor || effectiveSettings.markerColor,
-      markerShape: customSettings?.markerShape || effectiveSettings.markerShape,
-      markerSize: customSettings?.markerSize || effectiveSettings.markerSize
-    })
 
     // Update CSS custom properties for all markers
     const root = document.documentElement
@@ -1674,7 +1511,6 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       }
     })
 
-    console.log('✅ Marker styles updated via CSS')
   }, [customSettings?.markerColor, customSettings?.markerShape, customSettings?.markerSize, effectiveSettings.markerColor, effectiveSettings.markerShape, effectiveSettings.markerSize, mapLoaded, mapId])
 
   if (loading) {

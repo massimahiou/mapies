@@ -1,14 +1,16 @@
-import { loadStripe } from '@stripe/stripe-js'
 import { httpsCallable } from 'firebase/functions'
 import { functions } from '../firebase/config'
 
-type Stripe = Awaited<ReturnType<typeof loadStripe>>
+// Lazy load Stripe.js only when needed to avoid loading it in public/embed routes
+type Stripe = Awaited<ReturnType<typeof import('@stripe/stripe-js').loadStripe>>
 
 class StripeService {
   private stripe: Stripe | null = null
 
   async initializeStripe(publishableKey: string): Promise<void> {
     if (!this.stripe) {
+      // Dynamically import Stripe.js only when actually needed
+      const { loadStripe } = await import('@stripe/stripe-js')
       this.stripe = await loadStripe(publishableKey)
     }
   }

@@ -140,7 +140,6 @@ export const createUserDocument = async (user: User, additionalData?: Partial<Us
         lastLoginAt: serverTimestamp()
       })
 
-      console.log('User document created successfully:', user.uid)
     }
   } catch (error) {
     console.error('Error creating user document:', error)
@@ -151,19 +150,14 @@ export const createUserDocument = async (user: User, additionalData?: Partial<Us
 // Get user document
 export const getUserDocument = async (uid: string): Promise<UserDocument | null> => {
   try {
-    console.log('Attempting to get user document for UID:', uid)
     const userRef = doc(db, 'users', uid)
-    console.log('User reference created:', userRef.path)
     
     const userSnap = await getDoc(userRef)
-    console.log('Document snapshot received:', userSnap.exists())
     
     if (userSnap.exists()) {
       const data = userSnap.data() as UserDocument
-      console.log('User document data:', data)
       return data
     } else {
-      console.log('User document not found:', uid)
       return null
     }
   } catch (error) {
@@ -182,7 +176,6 @@ export const updateUserDocument = async (uid: string, updates: Partial<UserDocum
       ...updates,
       updatedAt: serverTimestamp()
     })
-    console.log('User document updated successfully:', uid)
   } catch (error) {
     console.error('Error updating user document:', error)
     throw error
@@ -197,7 +190,6 @@ export const updateUserProfile = async (uid: string, profile: Partial<UserDocume
       'profile': profile,
       updatedAt: serverTimestamp()
     })
-    console.log('User profile updated successfully:', uid)
   } catch (error) {
     console.error('Error updating user profile:', error)
     throw error
@@ -212,7 +204,6 @@ export const updateUserPreferences = async (uid: string, preferences: Partial<Us
       'preferences': preferences,
       updatedAt: serverTimestamp()
     })
-    console.log('User preferences updated successfully:', uid)
   } catch (error) {
     console.error('Error updating user preferences:', error)
     throw error
@@ -265,7 +256,6 @@ export const updateSubscriptionPlan = async (uid: string, plan: 'freemium' | 'st
     }
     
     await updateDoc(userRef, updateData)
-    console.log('Subscription plan updated successfully:', uid, plan)
   } catch (error) {
     console.error('Error updating subscription plan:', error)
     throw error
@@ -277,7 +267,6 @@ export const deleteUserDocument = async (uid: string): Promise<void> => {
   try {
     const userRef = doc(db, 'users', uid)
     await deleteDoc(userRef)
-    console.log('User document deleted successfully:', uid)
   } catch (error) {
     console.error('Error deleting user document:', error)
     throw error

@@ -101,20 +101,8 @@ const EmbedMap: React.FC = () => {
         // Force mobile for any touch device
         ('ontouchstart' in window && screenWidth <= 1024)
       
-      console.log('🔍 Mobile detection:', {
-        screenWidth,
-        userAgent: navigator.userAgent,
-        hasTouch: 'ontouchstart' in window,
-        maxTouchPoints: navigator.maxTouchPoints,
-        forceMobile,
-        inIframe,
-        isMobile: mobile,
-        windowWidth: window.innerWidth,
-        documentWidth: document.documentElement.clientWidth
-      })
       
       // Additional debugging
-      console.log('📱 Mobile search bar should show:', mobile || window.location.search.includes('mobile=true'))
       
       setIsMobile(mobile)
       
@@ -122,7 +110,6 @@ const EmbedMap: React.FC = () => {
       if (mobile) {
         document.body.classList.add('mobile-embed')
         document.documentElement.classList.add('mobile-embed')
-        console.log('📱 Mobile mode activated!')
         
         // Force mobile styles immediately
         document.body.style.setProperty('--mobile-mode', '1', 'important')
@@ -130,7 +117,6 @@ const EmbedMap: React.FC = () => {
       } else {
         document.body.classList.remove('mobile-embed')
         document.documentElement.classList.remove('mobile-embed')
-        console.log('🖥️ Desktop mode activated!')
         
         // Remove mobile styles
         document.body.style.removeProperty('--mobile-mode')
@@ -157,9 +143,7 @@ const EmbedMap: React.FC = () => {
           type: 'MAPIES_REQUEST_RESPONSIVE_IFRAME',
           source: 'mapies-embed'
         }, '*')
-        console.log('📤 Sent request to parent for responsive iframe styling')
       } catch (e) {
-        console.log('📤 Could not send message to parent (cross-origin)')
       }
     }
 
@@ -173,7 +157,6 @@ const EmbedMap: React.FC = () => {
   useEffect(() => {
     if (!mapRef.current || mapInstance.current) return
 
-    console.log('Initializing embed map...')
     
     mapInstance.current = L.map(mapRef.current, {
       center: [45.5017, -73.5673],
@@ -205,7 +188,6 @@ const EmbedMap: React.FC = () => {
     }).addTo(mapInstance.current)
 
     mapInstance.current.whenReady(() => {
-      console.log('Embed map loaded successfully')
       setMapLoaded(true)
       
       // Initialize basic marker cluster group (will be updated when settings change)
@@ -265,7 +247,6 @@ const EmbedMap: React.FC = () => {
       }
 
       try {
-        console.log('Loading map data for embed:', { mapId })
         
         // Import Firebase functions dynamically to avoid issues in embed context
         const { getMapById, getMapMarkers } = await import('../firebase/maps')
@@ -280,11 +261,9 @@ const EmbedMap: React.FC = () => {
 
         // Get the map owner's ID for loading folder icons
         const mapOwnerId = mapData.userId
-        console.log('📁 Map owner ID for folder icons:', mapOwnerId)
         setMapDataUserId(mapOwnerId)
 
         if (mapData.settings) {
-          console.log('🔍 EmbedMap: Loading map settings from Firestore:', mapData.settings)
           const rawSettings = {
             ...mapData.settings,
             // Ensure markerShape defaults to 'pin' if missing (for existing maps)
@@ -303,7 +282,6 @@ const EmbedMap: React.FC = () => {
           const compliantSettings = ensureFreemiumCompliance(rawSettings, 'freemium')
           setMapSettings(compliantSettings)
           
-          console.log('🔍 EmbedMap: Final compliant settings:', compliantSettings)
         }
 
         // Load folder icons for this map using the map owner's ID
@@ -319,7 +297,6 @@ const EmbedMap: React.FC = () => {
               }
             })
             setFolderIcons(iconStates)
-            console.log('📁 Folder icons loaded for embed map:', Object.keys(iconStates).length, 'icons:', iconStates)
           } catch (error) {
             console.error('Error loading folder icons for embed map:', error)
           }
@@ -339,7 +316,6 @@ const EmbedMap: React.FC = () => {
         }))
         
         setMarkers(localMarkers)
-        console.log('Loaded markers for embed:', localMarkers.length)
         
       } catch (error) {
         console.error('Error loading map data for embed:', error)
@@ -356,7 +332,6 @@ const EmbedMap: React.FC = () => {
   useEffect(() => {
     if (!mapInstance.current || !mapLoaded || !markerClusterRef.current) return
 
-    console.log('🎨 EmbedMap: Updating cluster group with new settings:', mapSettings)
 
     // Remove old cluster group
     mapInstance.current.removeLayer(markerClusterRef.current)
@@ -392,11 +367,6 @@ const EmbedMap: React.FC = () => {
     
     // Create new cluster group with updated settings
     const clusterOptions = createClusterOptions(mapSettings, iconCreateFunction)
-    console.log('🔍 EmbedMap: Cluster options result:', {
-      clusteringEnabled: mapSettings.clusteringEnabled,
-      clusterRadius: mapSettings.clusterRadius,
-      clusterOptions: clusterOptions ? 'enabled' : 'disabled'
-    })
     if (clusterOptions) {
       markerClusterRef.current = (L as any).markerClusterGroup(clusterOptions)
     } else {
@@ -491,7 +461,6 @@ const EmbedMap: React.FC = () => {
   useEffect(() => {
     if (!mapInstance.current || !mapLoaded || !markerClusterRef.current) return
 
-    console.log('Updating embed markers with clustering:', markers.length)
 
     // Clear existing markers from cluster group
     markerClusterRef.current.clearLayers()
@@ -614,7 +583,6 @@ const EmbedMap: React.FC = () => {
     const isInIframe = window !== window.top
     
     if (isInIframe && isMobile) {
-      console.log('Running in iframe on mobile - geolocation may require user permission')
       // Show a more helpful message for mobile iframe users
       if (confirm('To find your location, you may need to allow location access in your browser. Continue?')) {
         // User confirmed, proceed with geolocation
@@ -626,7 +594,6 @@ const EmbedMap: React.FC = () => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords
-        console.log('Current location:', latitude, longitude)
         
         // Store user location
         setUserLocation({ lat: latitude, lng: longitude })
@@ -641,7 +608,6 @@ const EmbedMap: React.FC = () => {
           setNearbyMarkers(nearby)
           setShowNearbyPlaces(true)
           
-          console.log(`Found ${nearby.length} places within 5km of your location`)
           
           // Add a temporary marker for current location
           const currentLocationIcon = L.divIcon({

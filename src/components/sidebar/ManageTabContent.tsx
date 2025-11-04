@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, Folder, GripVertical, Edit2, Check, Upload, Unlink, Maximize2, Info } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, ChevronUp, Folder, Edit2, Check, Upload, Unlink, Maximize2, Info, Square } from 'lucide-react'
 import { applyNameRules } from '../../utils/markerUtils'
 import { createMarkerGroup, updateMarkerGroup, deleteMarkerGroup, getMarkerGroupByName, uploadFolderIconBase64, updateMarkerGroupIcon, removeMarkerGroupIcon } from '../../firebase/firestore'
 import { useToast } from '../../contexts/ToastContext'
@@ -18,6 +19,7 @@ interface Marker {
   lng: number
   visible: boolean
   type: 'pharmacy' | 'grocery' | 'retail' | 'other'
+  order?: number // Display order for markers
 }
 
 interface NameRule {
@@ -63,8 +65,6 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const [groupFolders, setGroupFolders] = useState<Record<string, boolean>>({})
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
   // const [userDoc] = useState<UserDocument | null>(null)
-  const [draggedMarker, setDraggedMarker] = useState<Marker | null>(null)
-  const [dragOverMarker, setDragOverMarker] = useState<Marker | null>(null)
   const [customGroups, setCustomGroups] = useState<Record<string, string[]>>({})
   const [editingGroup, setEditingGroup] = useState<string | null>(null)
   const [editingMarker, setEditingMarker] = useState<string | null>(null)
@@ -75,6 +75,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const [markerToDelete, setMarkerToDelete] = useState<{ id: string; name: string } | null>(null)
   const [isDeletingMarker, setIsDeletingMarker] = useState(false)
   const [showLimitationModal, setShowLimitationModal] = useState<{ type: 'marker-usage' | 'name-rules' } | null>(null)
+  const [selectedMarkerIds, setSelectedMarkerIds] = useState<Set<string>>(new Set())
 
   // Transfer rules state
   const [sourceMapRules, setSourceMapRules] = useState<NameRule[]>([])
@@ -353,8 +354,24 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     }
   }, [showRules])
 
-  // Group markers by their renamed names and custom groups
-  const groupedMarkers = filteredMarkers.reduce((acc, marker) => {
+  // Local marker order state (for display reordering) - moved up for use in grouping
+  const [markerOrder, setMarkerOrder] = useState<Record<string, number>>({})
+  const [movingMarkerId, setMovingMarkerId] = useState<string | null>(null)
+
+  // Get markers in current order (defined early so it can be used in grouping)
+  const getOrderedMarkers = (markerList: Marker[]): Marker[] => {
+    return [...markerList].sort((a, b) => {
+      const orderA = markerOrder[a.id] ?? 0
+      const orderB = markerOrder[b.id] ?? 0
+      return orderA - orderB
+    })
+  }
+
+  // Sort filtered markers by order FIRST, then group them
+  const orderedFilteredMarkers = getOrderedMarkers(filteredMarkers)
+  
+  // Group markers by their renamed names and custom groups (using ordered markers)
+  const groupedMarkers = orderedFilteredMarkers.reduce((acc, marker) => {
     const renamedName = applyNameRules(marker.name, mapSettings.nameRules || [], hasSmartGrouping)
     
     // Check if this marker is part of a custom group
@@ -502,88 +519,239 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     }
   }
 
-  // Drag & Drop handlers
-  const handleDragStart = (e: React.DragEvent, marker: Marker) => {
-    console.log('🚀 Drag start:', marker.name, marker.id)
-    setDraggedMarker(marker)
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', marker.id)
-  }
-
-  const handleDragOver = (e: React.DragEvent, targetMarker?: Marker) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    if (targetMarker) {
-      console.log('🎯 Drag over marker:', targetMarker.name, 'from:', draggedMarker?.name)
-      setDragOverMarker(targetMarker)
-    }
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOverMarker(null)
-  }
-
-  const handleDragEnd = () => {
-    setDraggedMarker(null)
-    setDragOverMarker(null)
-  }
-
-  const handleDrop = async (e: React.DragEvent, targetMarker?: Marker) => {
-    e.preventDefault()
+  // Initialize marker order on mount and when markers change
+  useEffect(() => {
+    // Only update if markers array actually changed (by ID or count)
+    const currentMarkerIds = new Set(markers.map(m => m.id))
+    const existingMarkerIds = new Set(Object.keys(markerOrder))
     
-    console.log('🎯 Drop event:', { 
-      draggedMarker: draggedMarker?.name, 
-      targetMarker: targetMarker?.name, 
-      userId: !!userId,
-      mapId: !!mapId 
+    // Check if markers changed
+    const markersChanged = 
+      currentMarkerIds.size !== existingMarkerIds.size ||
+      Array.from(currentMarkerIds).some(id => !existingMarkerIds.has(id)) ||
+      markers.some(m => {
+        const existingOrder = markerOrder[m.id]
+        const firestoreOrder = m.order
+        // Update if Firestore order differs from local order
+        return firestoreOrder !== undefined && firestoreOrder !== existingOrder
+      })
+    
+    if (!markersChanged && Object.keys(markerOrder).length > 0) {
+      return // No need to update
+    }
+    
+    const order: Record<string, number> = {}
+    // Use order from Firestore if available, otherwise preserve existing or assign sequential
+    markers.forEach((marker, index) => {
+      if (marker.order !== undefined && marker.order !== null && marker.order > 0) {
+        // Use Firestore order (source of truth)
+        order[marker.id] = marker.order
+      } else if (markerOrder[marker.id] !== undefined && markerOrder[marker.id] > 0) {
+        // Preserve existing local order if Firestore doesn't have it yet
+        order[marker.id] = markerOrder[marker.id]
+      } else {
+        // Assign sequential order starting from 1
+        order[marker.id] = index + 1
+      }
     })
     
-    if (!draggedMarker || !userId || !mapId) {
-      console.warn('Missing required data for drop operation:', { draggedMarker: !!draggedMarker, userId: !!userId, mapId: !!mapId })
+    setMarkerOrder(order)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markers]) // Update when markers change (markerOrder intentionally excluded to avoid circular dependency)
+
+  // Move marker up/down handlers - REBUILT FROM SCRATCH
+  // Simple, clean, and works consistently for all markers
+  const moveMarkerUp = async (markerId: string, groupName?: string) => {
+    // Determine which list to use: folder markers or all filtered markers
+    let markersToOrder: Marker[]
+    if (groupName && groupFolders[groupName] && groupedMarkers[groupName]) {
+      // Marker is in a folder - work within that folder
+      markersToOrder = getOrderedMarkers(groupedMarkers[groupName])
+    } else {
+      // Standalone marker - work across all filtered markers
+      markersToOrder = getOrderedMarkers(filteredMarkers)
+    }
+    
+    const currentIndex = markersToOrder.findIndex(m => m.id === markerId)
+    if (currentIndex <= 0) return // Can't move up if already first
+    
+    const aboveMarkerId = markersToOrder[currentIndex - 1].id
+    const currentOrder = markerOrder[markerId]
+    const aboveOrder = markerOrder[aboveMarkerId]
+    
+    // Validate orders exist
+    if (!currentOrder || !aboveOrder) {
+      console.warn('Marker order not initialized:', { markerId, currentOrder, aboveOrder })
       return
     }
-    if (targetMarker) {
-      // Dragging onto another marker - create or update group
-      console.log('🔄 Starting group operation for markers:', draggedMarker.id, '->', targetMarker.id)
+    
+    // Set visual feedback
+    setMovingMarkerId(markerId)
+    
+    // Update local state immediately (swap orders)
+    setMarkerOrder(prev => ({
+      ...prev,
+      [markerId]: aboveOrder,
+      [aboveMarkerId]: currentOrder
+    }))
+    
+    // Save to Firestore
+    try {
+      const markerOwnerId = currentMap?.userId || userId
+      const { updateMapMarker } = await import('../../firebase/maps')
       
-      const targetGroupName = applyNameRules(targetMarker.name, mapSettings.nameRules || [], hasSmartGrouping)
+      await Promise.all([
+        updateMapMarker(markerOwnerId, mapId || '', markerId, { order: aboveOrder }),
+        updateMapMarker(markerOwnerId, mapId || '', aboveMarkerId, { order: currentOrder })
+      ])
+      
+      setTimeout(() => {
+        setMovingMarkerId(null)
+      }, 500)
+    } catch (error) {
+      console.error('Error updating marker order:', error)
+      // Revert on error
+      setMarkerOrder(prev => ({
+        ...prev,
+        [markerId]: currentOrder,
+        [aboveMarkerId]: aboveOrder
+      }))
+      setMovingMarkerId(null)
+      showToast({
+        type: 'error',
+        title: 'Move Failed',
+        message: 'Failed to save marker order'
+      })
+    }
+  }
+
+  const moveMarkerDown = async (markerId: string, groupName?: string) => {
+    // Determine which list to use: folder markers or all filtered markers
+    let markersToOrder: Marker[]
+    if (groupName && groupFolders[groupName] && groupedMarkers[groupName]) {
+      // Marker is in a folder - work within that folder
+      markersToOrder = getOrderedMarkers(groupedMarkers[groupName])
+    } else {
+      // Standalone marker - work across all filtered markers
+      markersToOrder = getOrderedMarkers(filteredMarkers)
+    }
+    
+    const currentIndex = markersToOrder.findIndex(m => m.id === markerId)
+    if (currentIndex >= markersToOrder.length - 1) return // Can't move down if already last
+    
+    const belowMarkerId = markersToOrder[currentIndex + 1].id
+    const currentOrder = markerOrder[markerId]
+    const belowOrder = markerOrder[belowMarkerId]
+    
+    // Validate orders exist
+    if (!currentOrder || !belowOrder) {
+      console.warn('Marker order not initialized:', { markerId, currentOrder, belowOrder })
+      return
+    }
+    
+    // Set visual feedback
+    setMovingMarkerId(markerId)
+    
+    // Update local state immediately (swap orders)
+    setMarkerOrder(prev => ({
+      ...prev,
+      [markerId]: belowOrder,
+      [belowMarkerId]: currentOrder
+    }))
+    
+    // Save to Firestore
+    try {
+      const markerOwnerId = currentMap?.userId || userId
+      const { updateMapMarker } = await import('../../firebase/maps')
+      
+      await Promise.all([
+        updateMapMarker(markerOwnerId, mapId || '', markerId, { order: belowOrder }),
+        updateMapMarker(markerOwnerId, mapId || '', belowMarkerId, { order: currentOrder })
+      ])
+      
+      setTimeout(() => {
+        setMovingMarkerId(null)
+      }, 500)
+    } catch (error) {
+      console.error('Error updating marker order:', error)
+      // Revert on error
+      setMarkerOrder(prev => ({
+        ...prev,
+        [markerId]: currentOrder,
+        [belowMarkerId]: belowOrder
+      }))
+      setMovingMarkerId(null)
+      showToast({
+        type: 'error',
+        title: 'Move Failed',
+        message: 'Failed to save marker order'
+      })
+    }
+  }
+
+  // Selection handlers
+  const toggleMarkerSelection = (markerId: string) => {
+    setSelectedMarkerIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(markerId)) {
+        newSet.delete(markerId)
+      } else {
+        newSet.add(markerId)
+      }
+      return newSet
+    })
+  }
+
+  const clearSelection = () => {
+    setSelectedMarkerIds(new Set())
+  }
+
+  // Group selected markers
+  const groupSelectedMarkers = async () => {
+    if (selectedMarkerIds.size < 2) {
+      showToast({
+        type: 'warning',
+        title: 'Selection Required',
+        message: 'Please select at least 2 markers to group'
+      })
+      return
+    }
+
+    const selectedMarkers = filteredMarkers.filter(m => selectedMarkerIds.has(m.id))
+    if (selectedMarkers.length < 2) return
+
+    // Use the first marker's renamed name as the group name
+    const groupName = applyNameRules(selectedMarkers[0].name, mapSettings.nameRules || [], hasSmartGrouping)
+    const markerIds = selectedMarkers.map(m => m.id)
       
       try {
         // For shared maps, use the map owner's ID
         const markerOwnerId = currentMap?.userId || userId
-        const existingGroup = await getMarkerGroupByName(markerOwnerId, targetGroupName, mapId)
+      const existingGroup = await getMarkerGroupByName(markerOwnerId, groupName, mapId)
         
         if (existingGroup) {
-          // Add to existing group if not already there
-          if (!existingGroup.markerIds.includes(draggedMarker.id)) {
+        // Add all selected markers to existing group
+        const newMarkerIds = [...new Set([...existingGroup.markerIds, ...markerIds])]
             await updateMarkerGroup(existingGroup.id, {
-              markerIds: [...existingGroup.markerIds, draggedMarker.id]
+          markerIds: newMarkerIds
             })
             
             // Update local state
             setCustomGroups(prev => ({
               ...prev,
-              [targetGroupName]: [...(prev[targetGroupName] || []), draggedMarker.id]
+          [groupName]: newMarkerIds
             }))
             
             showToast({
               type: 'success',
               title: 'Grouped Successfully',
-              message: `Marker added to "${targetGroupName}" group`
-            })
-          } else {
-            showToast({
-              type: 'info',
-              title: 'Already Grouped',
-              message: `Marker is already in "${targetGroupName}" group`
-            })
-          }
+          message: `Added ${selectedMarkers.length} marker(s) to "${groupName}" group`
+        })
         } else {
           // Create new group
           await createMarkerGroup({
-            groupName: targetGroupName,
-            markerIds: [targetMarker.id, draggedMarker.id],
+          groupName,
+          markerIds,
             userId,
             mapId: mapId || undefined
           })
@@ -591,25 +759,26 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
           // Update local state
           setCustomGroups(prev => ({
             ...prev,
-            [targetGroupName]: [targetMarker.id, draggedMarker.id]
+          [groupName]: markerIds
           }))
           
           // Enable folder
           setGroupFolders(prev => ({
             ...prev,
-            [targetGroupName]: true
+          [groupName]: true
           }))
           
           showToast({
             type: 'success',
             title: 'Group Created',
-            message: `Created "${targetGroupName}" group with 2 markers`
+          message: `Created "${groupName}" group with ${selectedMarkers.length} markers`
           })
         }
         
-        console.log('Added marker to group:', targetGroupName)
+      // Clear selection after grouping
+      clearSelection()
       } catch (error) {
-        console.error('Error adding marker to group:', error)
+      console.error('Error grouping markers:', error)
         showToast({
           type: 'error',
           title: 'Group Failed',
@@ -618,8 +787,6 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
       }
     }
     
-    handleDragEnd()
-  }
 
   // Icon handling functions
   const handleIconChange = async (groupName: string, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -831,15 +998,6 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     setEditingMarkerName('')
   }
 
-  const getMarkerIcon = (type: string) => {
-    const icons: Record<string, string> = {
-      pharmacy: '💊',
-      grocery: '🛒',
-      retail: '🛍️',
-      other: '📍'
-    }
-    return icons[type] || '📍'
-  }
 
   // Listen for unsaved polygon changes
   useEffect(() => {
@@ -958,11 +1116,11 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold text-gray-900">Manage Markers</h2>
           {/* Compact Info Icon for Usage Warning */}
-          {(showWarning || showError) && (
+      {(showWarning || showError) && (
             <button
               onClick={() => setShowLimitationModal({ type: 'marker-usage' })}
               className={`p-1 rounded-full transition-colors ${
-                showError 
+          showError 
                   ? 'text-red-500 hover:bg-red-50' 
                   : 'text-yellow-500 hover:bg-yellow-50'
               }`}
@@ -972,7 +1130,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
               }
             >
               <Info className="w-4 h-4" />
-            </button>
+              </button>
           )}
         </div>
         {onOpenModal && (
@@ -990,7 +1148,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
       <div className="mb-6">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-gray-800">Name Rules</h3>
+          <h3 className="text-sm font-semibold text-gray-800">Name Rules</h3>
             {/* Compact Info Icon for Name Rules Limitation */}
             {!hasSmartGrouping && (
               <button
@@ -1260,12 +1418,34 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
       </div>
 
       <div className="mb-4">
-        <h3 className="text-sm font-medium text-gray-700 mb-2">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-700">
           {filteredMarkers.length} markers
         </h3>
-        <p className="text-xs text-gray-500 mb-2">
-          💡 Drag markers onto each other to create folders
-        </p>
+          {selectedMarkerIds.size > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{selectedMarkerIds.size} selected</span>
+              <button
+                onClick={groupSelectedMarkers}
+                className="px-3 py-1 text-xs bg-pinz-600 text-white rounded-lg hover:bg-pinz-700 transition-colors flex items-center gap-1"
+              >
+                <Folder className="w-3 h-3" />
+                Group
+              </button>
+              <button
+                onClick={clearSelection}
+                className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+        {selectedMarkerIds.size === 0 && (
+          <p className="text-xs text-gray-500">
+            💡 Select markers and click Group to create folders
+          </p>
+        )}
       </div>
 
       <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -1281,7 +1461,9 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
         ) : (
           <>
 
-            {Object.entries(groupedMarkers).map(([groupName, groupMarkers]) => {
+            {Object.entries(groupedMarkers).map(([groupName, groupMarkersRaw]) => {
+              // Sort markers in group by order
+              const groupMarkers = getOrderedMarkers(groupMarkersRaw)
               const isFolderEnabled = groupFolders[groupName]
               const isExpanded = expandedFolders[groupName]
               
@@ -1304,7 +1486,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                         ) : (
                           <Folder className="w-4 h-4 text-blue-600 flex-shrink-0" />
                         )}
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-0 overflow-hidden">
                           {editingGroup === groupName ? (
                             <div className="flex items-center gap-1 w-full">
                               <input
@@ -1335,19 +1517,16 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                             </div>
                           ) : (
                             <>
-                              <p className="text-sm font-medium text-gray-900 truncate">
+                              <p className="text-sm font-medium text-gray-900 truncate" title={groupName}>
                                 {groupName}
                               </p>
-                       <p className="text-xs text-gray-500">
+                              <p className="text-xs text-gray-500 truncate">
                          {groupMarkers.length} marker{groupMarkers.length !== 1 ? 's' : ''}
                        </p>
                             </>
                           )}
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded-full whitespace-nowrap">
-                            {groupMarkers.filter(m => m.visible).length}/{groupMarkers.length} visible
-                          </span>
                           {isExpanded ? (
                             <ChevronDown className="w-4 h-4 text-gray-400" />
                           ) : (
@@ -1420,20 +1599,62 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                     {isExpanded && (
                       <div className="border-t border-gray-200">
                         {groupMarkers.map((marker) => (
-                          <div
+                          <motion.div
                             key={marker.id}
-                            className={`flex items-center gap-3 p-3 pl-8 bg-white hover:bg-gray-50 transition-colors ${
-                              dragOverMarker?.id === marker.id ? 'bg-blue-100 border-2 border-blue-300 border-dashed' : ''
-                            } ${draggedMarker?.id === marker.id ? 'opacity-50' : ''}`}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, marker)}
-                            onDragOver={(e) => handleDragOver(e, marker)}
-                            onDragLeave={handleDragLeave}
-                            onDrop={(e) => handleDrop(e, marker)}
-                            onDragEnd={handleDragEnd}
+                            layout
+                            initial={false}
+                            animate={{
+                              backgroundColor: movingMarkerId === marker.id ? 'rgba(244, 114, 182, 0.1)' : 'white',
+                              borderColor: movingMarkerId === marker.id ? 'rgb(236, 72, 153)' : 'transparent',
+                              scale: movingMarkerId === marker.id ? 1.02 : 1,
+                            }}
+                            transition={{
+                              layout: { duration: 0.3, ease: 'easeInOut' },
+                              backgroundColor: { duration: 0.2 },
+                              borderColor: { duration: 0.2 },
+                              scale: { duration: 0.2 },
+                            }}
+                            className={`flex items-center gap-3 p-3 pl-8 bg-white hover:bg-gray-50 ${
+                              movingMarkerId === marker.id ? 'border-2 border-pinz-500' : 'border-2 border-transparent'
+                            }`}
                           >
-                            <GripVertical className="w-4 h-4 text-gray-400 cursor-grab flex-shrink-0" />
-                            <span className="text-lg flex-shrink-0">{getMarkerIcon(marker.type)}</span>
+                            <button
+                              onClick={() => toggleMarkerSelection(marker.id)}
+                              className="flex-shrink-0 p-0.5 hover:bg-gray-200 rounded transition-colors"
+                              title="Select marker"
+                            >
+                              {selectedMarkerIds.has(marker.id) ? (
+                                <Check className="w-4 h-4 text-pinz-600" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-400" />
+                              )}
+                            </button>
+                            <div className="flex flex-col gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  e.preventDefault()
+                                  moveMarkerUp(marker.id, groupName)
+                                }}
+                                disabled={getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) <= 0}
+                                className="p-0.5 text-gray-400 hover:text-pinz-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors z-10 relative"
+                                title="Move up"
+                              >
+                                <ChevronUp className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  e.preventDefault()
+                                  moveMarkerDown(marker.id, groupName)
+                                }}
+                                disabled={getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) >= groupMarkers.length - 1}
+                                className="p-0.5 text-gray-400 hover:text-pinz-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors z-10 relative"
+                                title="Move down"
+                              >
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                            </div>
                             <div className="flex-1 min-w-0 overflow-hidden">
                               {editingMarker === marker.id ? (
                                 <div className="flex items-center gap-1 w-full min-w-0">
@@ -1524,7 +1745,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                                 </>
                               )}
                             </div>
-                          </div>
+                          </motion.div>
                         ))}
                       </div>
                     )}
@@ -1533,22 +1754,67 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
               } else {
                 // Show as individual markers (not in folder)
                 return groupMarkers.map((marker) => (
-                  <div 
+                  <motion.div
                     key={marker.id} 
-                    className={`bg-white rounded-lg border border-gray-200 p-3 hover:bg-gray-50 transition-colors ${
-                      dragOverMarker?.id === marker.id ? 'bg-blue-100 border-2 border-blue-300 border-dashed' : ''
-                    } ${draggedMarker?.id === marker.id ? 'opacity-50' : ''}`}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, marker)}
-                    onDragOver={(e) => handleDragOver(e, marker)}
-                    onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, marker)}
-                    onDragEnd={handleDragEnd}
+                    layout
+                    initial={false}
+                    animate={{
+                      backgroundColor: movingMarkerId === marker.id ? 'rgba(244, 114, 182, 0.1)' : 'white',
+                      borderColor: movingMarkerId === marker.id ? 'rgb(236, 72, 153)' : 'rgb(229, 231, 235)',
+                      scale: movingMarkerId === marker.id ? 1.02 : 1,
+                    }}
+                    transition={{
+                      layout: { duration: 0.3, ease: 'easeInOut' },
+                      backgroundColor: { duration: 0.2 },
+                      borderColor: { duration: 0.2 },
+                      scale: { duration: 0.2 },
+                    }}
+                    className={`bg-white rounded-lg border-2 p-3 hover:bg-gray-50 ${
+                      selectedMarkerIds.has(marker.id) ? 'ring-2 ring-pinz-500' : ''
+                    }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <GripVertical className="w-4 h-4 text-gray-400 cursor-grab flex-shrink-0" />
-                        <span className="text-lg flex-shrink-0">{getMarkerIcon(marker.type)}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleMarkerSelection(marker.id)
+                          }}
+                          className="flex-shrink-0 p-0.5 hover:bg-gray-200 rounded transition-colors"
+                          title="Select marker"
+                        >
+                          {selectedMarkerIds.has(marker.id) ? (
+                            <Check className="w-4 h-4 text-pinz-600" />
+                          ) : (
+                            <Square className="w-4 h-4 text-gray-400" />
+                          )}
+                        </button>
+                        <div className="flex flex-col gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              e.preventDefault()
+                              moveMarkerUp(marker.id, groupName)
+                            }}
+                            disabled={getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) <= 0}
+                            className="p-0.5 text-gray-400 hover:text-pinz-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors z-10 relative"
+                            title="Move up"
+                          >
+                            <ChevronUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              e.preventDefault()
+                              moveMarkerDown(marker.id, groupName)
+                            }}
+                            disabled={getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) >= groupMarkers.length - 1}
+                            className="p-0.5 text-gray-400 hover:text-pinz-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors z-10 relative"
+                            title="Move down"
+                          >
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
+                        </div>
                         <div className="flex-1 min-w-0 overflow-hidden">
                           {editingMarker === marker.id ? (
                             <div className="flex items-center gap-1 w-full min-w-0">
@@ -1641,7 +1907,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </motion.div>
                 ))
               }
             })}
