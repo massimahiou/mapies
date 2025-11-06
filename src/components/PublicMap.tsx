@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import L from 'leaflet'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
@@ -17,6 +17,8 @@ import { validateMapAgainstPlan } from '../utils/mapValidation'
 import { usePolygonLoader } from '../hooks/usePolygonLoader'
 import { useResponsive } from '../hooks/useResponsive'
 import SEO from './SEO'
+import { useEmbedMapLanguage } from '../hooks/useEmbedMapLanguage'
+import LanguageToggle from './LanguageToggle'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -89,8 +91,14 @@ interface PublicMapProps {
 const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings }) => {
   const urlMapId = useParams<{ mapId: string }>().mapId
   const mapId = propMapId || urlMapId
+  const [searchParams] = useSearchParams()
   const { showWatermark: defaultShowWatermark, hasGeocoding } = usePublicFeatureAccess()
   const { isMobile } = useResponsive()
+  const { language, setLanguage, t } = useEmbedMapLanguage()
+  
+  // Get language and toggle visibility from URL parameters
+  const showToggleParam = searchParams.get('showToggle')
+  const showToggle = showToggleParam === null || showToggleParam === 'true' // Default to true if not specified
   
   const [showWatermark, setShowWatermark] = useState(defaultShowWatermark)
   const mapRef = useRef<HTMLDivElement>(null)
@@ -546,7 +554,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       })
       
       const currentLocationMarker = L.marker([latitude, longitude], { icon: currentLocationIcon })
-        .bindPopup('📍 Your current location')
+        .bindPopup(t('location.currentLocation'))
         .addTo(mapInstance.current)
       
       // Add a static radius circle
@@ -580,6 +588,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   const getCurrentLocation = () => {
     if (!navigator.geolocation) {
       console.error('Geolocation is not supported by this browser.')
+      alert(t('errors.geolocationNotSupported'))
       // Use fallback location
       const fallbackLat = 45.5017
       const fallbackLng = -73.5673
@@ -654,20 +663,19 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
         
         createLocationCircles(fallbackLat, fallbackLng)
         
-        let errorMessage = 'Unable to get your location. '
+        let errorMessage = t('errors.locationUnavailable')
         
         switch (error.code) {
           case error.PERMISSION_DENIED:
-            errorMessage += 'Please allow location access and try again.'
+            errorMessage += ' ' + t('errors.allowLocationAccess')
             break
           case error.POSITION_UNAVAILABLE:
-            errorMessage += 'Location information is unavailable.'
+            errorMessage += ' ' + t('errors.locationInfoUnavailable')
             break
           case error.TIMEOUT:
-            errorMessage += 'Location request timed out.'
+            errorMessage += ' ' + t('errors.locationTimeout')
             break
           default:
-            errorMessage += 'An unknown error occurred.'
             break
         }
         
@@ -1529,7 +1537,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       <div className="w-full h-screen flex items-center justify-center bg-gray-100">
         <div className="text-center max-w-md mx-auto p-6">
           <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Map Not Found</h2>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">{t('errors.mapNotFound')}</h2>
           <p className="text-gray-600">{error}</p>
         </div>
       </div>
@@ -1546,12 +1554,12 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Map Temporarily Unavailable</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">{t('errors.mapUnavailable')}</h3>
           <p className="text-gray-600 mb-4">
-            This map is currently being updated and will be available shortly.
+            {t('errors.mapUpdating')}
           </p>
           <p className="text-sm text-gray-500">
-            Please check back later or contact the map owner for more information.
+            {t('errors.contactOwner')}
           </p>
         </div>
       </div>
@@ -1590,7 +1598,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               </div>
               <input
                 type="text"
-                placeholder="Search locations"
+                placeholder={t('search.placeholder')}
                 value={searchTerm}
                 onChange={(e) => handleSearch(e.target.value)}
                 className="block w-full pl-10 pr-20 py-3 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-lg text-base"
@@ -1612,7 +1620,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                       ? 'text-pinz-600 hover:text-pinz-700'
                       : 'text-gray-400 hover:text-gray-600'
                   }`}
-                  title={locationModeActive ? "Turn off location mode" : "Find my location"}
+                  title={t('location.findMyLocation')}
                 >
                   <Navigation className="h-4 w-4" />
                 </button>
@@ -1630,7 +1638,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                     alt="Pinz Logo"
                     style={{ height: '10px', width: 'auto' }}
                   />
-                  <span>Powered by Pinz</span>
+                  <span>{t('watermark.poweredBy')}</span>
                 </div>
               </div>
             )}
@@ -1652,6 +1660,14 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
             onToggleLocation={toggleLocationMode}
             locationModeActive={locationModeActive}
             mapSettings={mapSettings}
+          />
+          
+          {/* Language Toggle */}
+          <LanguageToggle 
+            language={language} 
+            onLanguageChange={setLanguage}
+            isMobile={isMobile}
+            showToggle={showToggle}
           />
 
           {/* Small Watermark under search bar for Demo Map */}
@@ -1778,20 +1794,30 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               />
             )}
             
-            {/* Location Button */}
-            <button
-              onClick={toggleLocationMode}
-              className={`absolute top-4 right-4 z-[1000] p-3 rounded-lg shadow-lg border transition-all duration-200 ${
-                locationModeActive
-                  ? 'bg-pinz-50 hover:bg-pinz-100 text-pinz-600 border-pinz-200 shadow-pinz-100'
-                  : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200 hover:border-gray-300 hover:shadow-xl'
-              }`}
-              title={locationModeActive ? "Turn off location mode" : "Find my location"}
-            >
-              <Navigation className={`w-5 h-5 transition-all duration-200 ${
-                locationModeActive ? 'text-pinz-600' : 'text-gray-700'
-              }`} />
-            </button>
+            {/* Language Toggle */}
+            <LanguageToggle 
+              language={language} 
+              onLanguageChange={setLanguage}
+              isMobile={isMobile}
+              showToggle={showToggle}
+            />
+
+            {/* Location Button - Desktop only (mobile has it in search bar) */}
+            {!isMobile && (
+              <button
+                onClick={toggleLocationMode}
+                className={`absolute top-16 right-4 z-[1000] p-3 rounded-lg shadow-lg border transition-all duration-200 ${
+                  locationModeActive
+                    ? 'bg-pinz-50 hover:bg-pinz-100 text-pinz-600 border-pinz-200 shadow-pinz-100'
+                    : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200 hover:border-gray-300 hover:shadow-xl'
+                }`}
+                title={t('location.findMyLocation')}
+              >
+                <Navigation className={`w-5 h-5 transition-all duration-200 ${
+                  locationModeActive ? 'text-pinz-600' : 'text-gray-700'
+                }`} />
+              </button>
+            )}
 
             {/* Show Results Button - Only show when results panel is hidden and on mobile */}
             {!showMobileResults && (
@@ -1850,53 +1876,66 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           <div className="bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-white/20 overflow-hidden">
             <div className="flex overflow-x-auto scrollbar-hide py-2 px-3 space-x-2">
               {(() => {
-                // When searching or location active, use searchResults
-                if (searchTerm || locationModeActive) {
+                // When searching, use searchResults
+                if (searchTerm) {
                   return searchResults
                 }
-                // When location is NOT active, show markers visible in current viewport
-                if (!locationModeActive && viewportMarkers.length > 0) {
-                  return viewportMarkers
-                }
-                // Fallback to random markers
-                return markers.sort(() => Math.random() - 0.5)
-              })().slice(0, 30).map((marker) => (
-                <button
-                  key={marker.id}
-                  onClick={() => navigateToMarker(marker)}
-                  className="flex-shrink-0 w-32 p-2 text-left bg-gray-50/80 hover:bg-gray-100/90 rounded-lg border border-gray-200/50 transition-all hover:shadow-sm"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900 text-xs truncate leading-tight">
-                        {renamedMarkers[marker.id] || marker.name}
-                      </div>
-                      <div className="text-xs text-gray-500 truncate mt-0.5 leading-tight">
-                        {marker.address}
-                      </div>
-                      {userLocation && (
-                        <div className="text-xs text-pinz-600 mt-0.5 leading-tight">
-                          {calculateDistance(userLocation.lat, userLocation.lng, marker.lat, marker.lng).toFixed(1)}km
+                // On mobile, show all markers but prioritize viewport markers (works with or without location mode)
+                return markers
+              })().slice(0, 30).map((marker) => {
+                // Check if marker is in viewport (on mobile, when not searching - works with location mode active)
+                const isInViewport = isMobile && !searchTerm && viewportMarkers.some(vm => vm.id === marker.id)
+                const markerOpacity = isInViewport ? 1.0 : 0.4
+                
+                return (
+                  <button
+                    key={marker.id}
+                    onClick={() => navigateToMarker(marker)}
+                    className="flex-shrink-0 w-32 p-2 text-left bg-gray-50/80 hover:bg-gray-100/90 rounded-lg border border-gray-200/50 transition-all hover:shadow-sm"
+                    style={{
+                      opacity: markerOpacity,
+                    }}
+                    onMouseEnter={(e) => {
+                      // On hover, slightly increase opacity for hidden markers
+                      if (!isInViewport) {
+                        e.currentTarget.style.opacity = '0.6'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      // Restore original opacity on mouse leave
+                      e.currentTarget.style.opacity = markerOpacity.toString()
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-gray-900 text-xs truncate leading-tight">
+                          {renamedMarkers[marker.id] || marker.name}
                         </div>
-                      )}
+                        <div className="text-xs text-gray-500 truncate mt-0.5 leading-tight">
+                          {marker.address}
+                        </div>
+                        {userLocation && (
+                          <div className="text-xs text-pinz-600 mt-0.5 leading-tight">
+                            {calculateDistance(userLocation.lat, userLocation.lng, marker.lat, marker.lng).toFixed(1)}km
+                          </div>
+                        )}
+                      </div>
+                      <MapPin className="h-2.5 w-2.5 text-gray-400 flex-shrink-0 ml-1" />
                     </div>
-                    <MapPin className="h-2.5 w-2.5 text-gray-400 flex-shrink-0 ml-1" />
-                  </div>
-                </button>
-              ))}
+                  </button>
+                )
+              })}
               
               {(() => {
-                const markersToShow = searchTerm || locationModeActive 
+                const markersToShow = searchTerm 
                   ? searchResults 
-                  : (!locationModeActive && viewportMarkers.length > 0) 
-                    ? viewportMarkers 
-                    : markers
+                  : markers
                 return markersToShow.length === 0
               })() && (
                 <div className="flex-shrink-0 w-full flex items-center justify-center py-4 text-gray-500">
                   <div className="text-center">
                     <MapPin className="h-6 w-6 mx-auto mb-1 text-gray-300" />
-                    <div className="text-xs">No locations found</div>
+                    <div className="text-xs">{t('search.noResults')}</div>
                   </div>
                 </div>
               )}

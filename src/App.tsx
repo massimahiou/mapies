@@ -13,6 +13,7 @@ import DataManagementModal from './components/DataManagementModal'
 import EditManagementModal from './components/EditManagementModal'
 import PublishManagementModal from './components/PublishManagementModal'
 import { ToastProvider } from './contexts/ToastContext'
+import { EmbedMapLanguageProvider } from './contexts/EmbedMapLanguageContext'
 import EmbedMap from './components/EmbedMap'
 import PublicMap from './components/PublicMap'
 import LandingPage from './components/LandingPage'
@@ -1580,13 +1581,21 @@ const App: React.FC = () => {
             <Route path="/" element={<LandingPage />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />
-            <Route path="/embed" element={<EmbedMap />} />
+            <Route path="/embed" element={
+              <EmbedMapLanguageProvider>
+                <EmbedMap />
+              </EmbedMapLanguageProvider>
+            } />
             <Route path="/dashboard" element={<DashboardRedirect />} />
             <Route path="/auth" element={<AppContent />} />
             <Route path="/auth/action" element={<AuthActionHandler />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/:mapId" element={<PublicMap />} />
+            <Route path="/:mapId" element={
+              <EmbedMapLanguageProvider>
+                <PublicMap />
+              </EmbedMapLanguageProvider>
+            } />
           </Routes>
         </ToastProvider>
       </AuthProvider>

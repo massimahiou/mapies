@@ -10,6 +10,8 @@ interface PublishProps {
 
 const Publish: React.FC<PublishProps> = ({ isOpen, onClose, currentMapId }) => {
   const [copied, setCopied] = useState(false)
+  const [embedLanguage, setEmbedLanguage] = useState<'auto' | 'en' | 'fr'>('auto')
+  const [showToggle, setShowToggle] = useState(true)
   
   // Generate Firestore-based iframe code (responsive)
   const generateIframeCode = () => {
@@ -17,9 +19,19 @@ const Publish: React.FC<PublishProps> = ({ isOpen, onClose, currentMapId }) => {
       return 'Please select a map to generate embed code'
     }
 
-    // Add cache-busting parameter to force refresh
-    const timestamp = Date.now()
-    const mapUrl = `${window.location.origin}/${currentMapId}?v=${timestamp}`
+    // Build URL with parameters
+    const params = new URLSearchParams()
+    params.set('v', Date.now().toString())
+    
+    // Add language parameter if not auto
+    if (embedLanguage !== 'auto') {
+      params.set('lang', embedLanguage)
+    }
+    
+    // Add showToggle parameter
+    params.set('showToggle', showToggle.toString())
+    
+    const mapUrl = `${window.location.origin}/${currentMapId}?${params.toString()}`
     
     // Generate responsive iframe code with relative CSS values
     const iframeCode = `<iframe 
@@ -75,7 +87,71 @@ const Publish: React.FC<PublishProps> = ({ isOpen, onClose, currentMapId }) => {
               </button>
             </div>
             
-            <div className="bg-gray-100 rounded-lg p-4 font-mono text-sm text-gray-800 overflow-x-auto">
+            {/* Language and Toggle Controls */}
+            <div className="mb-4 space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div>
+                <label className="block text-sm font-semibold text-gray-900 mb-3">
+                  Language Settings
+                </label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-white transition-colors">
+                    <input
+                      type="radio"
+                      name="embedLanguage"
+                      value="auto"
+                      checked={embedLanguage === 'auto'}
+                      onChange={(e) => setEmbedLanguage(e.target.value as 'auto' | 'en' | 'fr')}
+                      className="text-pinz-600 focus:ring-pinz-500"
+                    />
+                    <span className="text-sm text-gray-700">Auto (Browser default)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-white transition-colors">
+                    <input
+                      type="radio"
+                      name="embedLanguage"
+                      value="en"
+                      checked={embedLanguage === 'en'}
+                      onChange={(e) => setEmbedLanguage(e.target.value as 'auto' | 'en' | 'fr')}
+                      className="text-pinz-600 focus:ring-pinz-500"
+                    />
+                    <span className="text-sm text-gray-700">English Only</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-white transition-colors">
+                    <input
+                      type="radio"
+                      name="embedLanguage"
+                      value="fr"
+                      checked={embedLanguage === 'fr'}
+                      onChange={(e) => setEmbedLanguage(e.target.value as 'auto' | 'en' | 'fr')}
+                      className="text-pinz-600 focus:ring-pinz-500"
+                    />
+                    <span className="text-sm text-gray-700">French Only</span>
+                  </label>
+                </div>
+              </div>
+              
+              <div className="pt-3 border-t border-gray-200">
+                <label className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={showToggle}
+                    onChange={(e) => setShowToggle(e.target.checked)}
+                    className="text-pinz-600 focus:ring-pinz-500 rounded"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-gray-700">
+                      Show language toggle button
+                    </span>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Allow users to switch between English and French
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </div>
+            
+            <div className="bg-gray-100 rounded-lg p-4 font-mono text-sm text-gray-800 overflow-x-auto border border-gray-300">
+              <div className="text-xs text-gray-500 mb-2 font-sans">Embed Code (updates automatically):</div>
               {generateIframeCode()}
             </div>
             

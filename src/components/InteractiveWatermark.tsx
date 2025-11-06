@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { X, Sparkles, ArrowUpRight } from 'lucide-react'
+import { useEmbedMapLanguage } from '../hooks/useEmbedMapLanguage'
 
 interface InteractiveWatermarkProps {
   onUpgrade?: () => void
@@ -8,6 +9,7 @@ interface InteractiveWatermarkProps {
 
 const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, mode = 'dashboard' }) => {
   const [showPopup, setShowPopup] = useState(false)
+  const { t } = useEmbedMapLanguage()
 
   const handleWatermarkClick = () => {
     if (mode === 'public') {
@@ -39,7 +41,7 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
             ? '' // No cursor or hover effects for static mode
             : 'cursor-pointer hover:bg-white hover:shadow-xl' // Interactive styling for other modes
         }`}
-        title={mode === 'public' ? "Click to create your own map" : mode === 'dashboard' ? "Click to upgrade and remove watermark" : "Powered by Pinz"}
+        title={mode === 'public' ? t('watermark.clickToCreate') : mode === 'dashboard' ? t('watermark.clickToUpgrade') : t('watermark.poweredBy')}
       >
         <img 
           src="https://firebasestorage.googleapis.com/v0/b/mapies.firebasestorage.app/o/assets%2Fpinz_logo.png?alt=media&token=5ed95809-fe92-4528-8852-3ca03af0b1b5"
@@ -49,7 +51,7 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
         <span className={`text-sm text-gray-700 font-semibold transition-colors ${
           mode === 'static' ? '' : 'group-hover:text-gray-900'
         }`}>
-          Powered by Pinz
+          {t('watermark.poweredBy')}
         </span>
         {mode !== 'static' && (
           <ArrowUpRight className="w-3 h-3 text-gray-400 group-hover:text-gray-600 transition-colors" />
@@ -77,36 +79,36 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
 
               {/* Title */}
               <h3 className="text-xl font-bold text-gray-900 mb-2">
-                {mode === 'public' ? 'This won\'t be here with a plan!' : 'Remove Watermark'}
+                {mode === 'public' ? t('watermarkPopup.titlePublic') : t('watermarkPopup.titleDashboard')}
               </h3>
 
               {/* Description */}
               <p className="text-gray-600 mb-6 text-sm leading-relaxed">
                 {mode === 'public' 
-                  ? 'Create your own maps without watermarks! Get started with our Starter plan and build professional maps that represent your brand.'
-                  : 'Upgrade to any paid plan to remove the "Powered by Pinz" watermark and give your maps a professional look.'
+                  ? t('watermarkPopup.descriptionPublic')
+                  : t('watermarkPopup.descriptionDashboard')
                 }
               </p>
 
               {/* Benefits */}
               <div className="bg-gray-50 rounded-xl p-4 mb-6">
-                <h4 className="text-sm font-semibold text-gray-800 mb-3">What you'll get:</h4>
+                <h4 className="text-sm font-semibold text-gray-800 mb-3">{t('watermarkPopup.whatYouGet')}</h4>
                 <ul className="text-xs text-gray-600 space-y-2 text-left">
                   <li className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-pinz-500 rounded-full"></div>
-                    No watermark on your maps
+                    {t('watermarkPopup.noWatermark')}
                   </li>
                   <li className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-pinz-500 rounded-full"></div>
-                    More markers and maps
+                    {t('watermarkPopup.moreMarkers')}
                   </li>
                   <li className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-pinz-500 rounded-full"></div>
-                    Advanced features like geocoding
+                    {t('watermarkPopup.advancedFeatures')}
                   </li>
                   <li className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-pinz-500 rounded-full"></div>
-                    Professional customization
+                    {t('watermarkPopup.professionalCustomization')}
                   </li>
                 </ul>
               </div>
@@ -117,22 +119,19 @@ const InteractiveWatermark: React.FC<InteractiveWatermarkProps> = ({ onUpgrade, 
                   onClick={handleUpgrade}
                   className="w-full bg-gradient-to-r from-pinz-500 to-pinz-600 text-white py-3 px-4 rounded-xl font-semibold hover:from-pinz-600 hover:to-pinz-700 transition-all duration-200 shadow-lg hover:shadow-xl"
                 >
-                  {mode === 'public' ? 'Get Started - View Plans' : 'View Plans & Upgrade'}
+                  {mode === 'public' ? t('watermarkPopup.getStarted') : t('watermarkPopup.viewPlans')}
                 </button>
                 <button
                   onClick={handleClosePopup}
                   className="w-full text-gray-500 py-2 px-4 rounded-lg font-medium hover:text-gray-700 hover:bg-gray-50 transition-colors"
                 >
-                  Maybe Later
+                  {t('watermarkPopup.maybeLater')}
                 </button>
               </div>
 
               {/* Small print */}
               <p className="text-xs text-gray-400 mt-4">
-                {mode === 'public' 
-                  ? 'Starting from $14/month • Cancel anytime' 
-                  : 'Starting from $14/month • Cancel anytime'
-                }
+                {t('watermarkPopup.startingFrom')} • {t('watermarkPopup.cancelAnytime')}
               </p>
             </div>
           </div>

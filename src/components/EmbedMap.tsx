@@ -9,6 +9,8 @@ import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils
 import { formatAddressForPopup } from '../utils/addressUtils'
 import { getFreemiumCompliantDefaults, ensureFreemiumCompliance } from '../utils/freemiumDefaults'
 import { usePolygonLoader } from '../hooks/usePolygonLoader'
+import { useEmbedMapLanguage } from '../hooks/useEmbedMapLanguage'
+import LanguageToggle from './LanguageToggle'
 
 // Fix Leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -65,9 +67,14 @@ const EmbedMap: React.FC = () => {
   const [isMobile, setIsMobile] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [mapDataUserId, setMapDataUserId] = useState<string>('')
+  const { language, setLanguage, t } = useEmbedMapLanguage()
 
   // Get map ID from URL parameters
   const mapId = searchParams.get('mapId')
+  
+  // Get toggle visibility from URL parameters (language is handled by context)
+  const showToggleParam = searchParams.get('showToggle')
+  const showToggle = showToggleParam === null || showToggleParam === 'true' // Default to true if not specified
   
   // Load polygons for embedded maps
   usePolygonLoader({
@@ -573,9 +580,9 @@ const EmbedMap: React.FC = () => {
 
   // Get current location
   const getCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      console.error('Geolocation is not supported by this browser.')
-      alert('Geolocation is not supported by this browser.')
+      if (!navigator.geolocation) {
+        console.error('Geolocation is not supported by this browser.')
+        alert(t('errors.geolocationNotSupported'))
       return
     }
 
@@ -584,7 +591,7 @@ const EmbedMap: React.FC = () => {
     
     if (isInIframe && isMobile) {
       // Show a more helpful message for mobile iframe users
-      if (confirm('To find your location, you may need to allow location access in your browser. Continue?')) {
+      if (confirm(t('errors.toFindLocation'))) {
         // User confirmed, proceed with geolocation
       } else {
         return
@@ -618,7 +625,7 @@ const EmbedMap: React.FC = () => {
           })
           
           const currentLocationMarker = L.marker([latitude, longitude], { icon: currentLocationIcon })
-            .bindPopup('📍 Your current location')
+            .bindPopup(t('location.currentLocation'))
             .addTo(mapInstance.current)
           
           // Add a radius circle to show the search area
@@ -706,7 +713,7 @@ const EmbedMap: React.FC = () => {
                  <div className="flex-1 relative">
                    <input
                      type="text"
-                     placeholder="🔍 Search 255 locations..."
+                     placeholder={t('search.placeholderWithCount', { count: markers.length })}
                      value={searchQuery}
                      onChange={(e) => setSearchQuery(e.target.value)}
                      onKeyPress={(e) => e.key === 'Enter' && handleMobileSearch()}
@@ -729,25 +736,28 @@ const EmbedMap: React.FC = () => {
                  <button
                    onClick={getCurrentLocation}
                    className="bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors mobile-location-btn"
-                   title="Find my location"
+                   title={t('location.findMyLocation')}
                  >
                    <Navigation className="w-5 h-5" />
                  </button>
                </div>
-               <div className="mt-2 text-center">
-                 <span className="text-xs text-gray-600 bg-white px-2 py-1 rounded-full shadow-sm">
-                   📱 Search bar - isMobile: {isMobile ? 'true' : 'false'} | Width: {window.innerWidth}px
-                 </span>
-               </div>
              </div>
            )}
       
+      {/* Language Toggle */}
+      <LanguageToggle 
+        language={language} 
+        onLanguageChange={setLanguage}
+        isMobile={isMobile}
+        showToggle={showToggle}
+      />
+
       {/* Desktop Location Button */}
       {!isMobile && (
         <button
           onClick={getCurrentLocation}
-          className="absolute top-4 right-4 z-[1000] bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
-          title="Find my location"
+          className="absolute top-16 right-4 z-[1000] bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
+          title={t('location.findMyLocation')}
         >
           <Navigation className="w-5 h-5" />
         </button>
@@ -758,7 +768,7 @@ const EmbedMap: React.FC = () => {
         <div className={`absolute z-[1000] rounded-lg shadow-lg border border-gray-200 max-h-96 overflow-hidden mobile-nearby-panel ${isMobile ? 'top-20 left-4 right-4' : 'top-4 left-4 w-80'}`} style={{ backgroundColor: mapSettings.searchBarBackgroundColor }}>
           <div className="p-3 border-b border-gray-200 bg-blue-50">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-blue-900">📍 Places Near You</h3>
+              <h3 className="text-sm font-semibold text-blue-900">{t('location.placesNearYou')}</h3>
               <button
                 onClick={() => setShowNearbyPlaces(false)}
                 className="text-blue-600 hover:text-blue-800"
@@ -766,7 +776,7 @@ const EmbedMap: React.FC = () => {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-xs text-blue-700 mt-1">{nearbyMarkers.length} places within 5km</p>
+            <p className="text-xs text-blue-700 mt-1">{nearbyMarkers.length} {t('location.placesWithin')}</p>
           </div>
           
           <div className="max-h-80 overflow-y-auto">
@@ -803,7 +813,7 @@ const EmbedMap: React.FC = () => {
                       {marker.address}
                     </p>
                     <p className="text-xs text-blue-600 font-medium">
-                      {distance.toFixed(1)} km away
+                      {distance.toFixed(1)} {t('location.kmAway')}
                     </p>
                   </div>
                 </button>

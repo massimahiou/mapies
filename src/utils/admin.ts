@@ -2,7 +2,10 @@
  * Admin utilities
  */
 
-const ADMIN_EMAIL = 'massiairbnb@gmail.com'
+const ADMIN_EMAILS = [
+  'massiairbnb@gmail.com',
+  'tmitchell.projets@gmail.com'
+]
 
 /**
  * Check if a user email is an admin
@@ -16,15 +19,15 @@ export const isAdmin = (userEmail: string | null | undefined): boolean => {
   }
   
   const normalizedInput = userEmail.toLowerCase().trim()
-  const normalizedAdmin = ADMIN_EMAIL.toLowerCase().trim()
-  const isAdminUser = normalizedInput === normalizedAdmin
+  const normalizedAdmins = ADMIN_EMAILS.map(email => email.toLowerCase().trim())
+  const isAdminUser = normalizedAdmins.includes(normalizedInput)
   
   console.log('🔐 isAdmin check:', { 
     input: userEmail, 
     normalizedInput,
-    adminEmail: ADMIN_EMAIL, 
-    normalizedAdmin,
-    match: normalizedInput === normalizedAdmin,
+    adminEmails: ADMIN_EMAILS, 
+    normalizedAdmins,
+    match: isAdminUser,
     isAdmin: isAdminUser 
   })
   

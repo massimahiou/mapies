@@ -1,8 +1,10 @@
 import React, { useState } from 'react'
 import CuteNotification from './CuteNotification'
+import { useEmbedMapLanguage } from '../hooks/useEmbedMapLanguage'
 
 const SimpleWatermark: React.FC = () => {
   const [showNotification, setShowNotification] = useState(false)
+  const { t } = useEmbedMapLanguage()
 
   return (
     <>
@@ -39,7 +41,7 @@ const SimpleWatermark: React.FC = () => {
           alt="Pinz Logo"
           style={{ height: '16px', width: 'auto' }}
         />
-        <span>Powered by Pinz</span>
+        <span>{t('watermark.poweredBy')}</span>
         <span style={{ color: '#ff3670', fontSize: '12px' }}>→</span>
       </div>
 

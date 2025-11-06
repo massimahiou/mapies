@@ -11,6 +11,8 @@ import EditTabContent from './sidebar/EditTabContent'
 import PublishTabContent from './sidebar/PublishTabContent'
 import { useFeatureAccess, useUsageWarning } from '../hooks/useFeatureAccess'
 import { ensureFreemiumCompliance } from '../utils/freemiumDefaults'
+import { isAdmin } from '../utils/admin'
+import { getUserDocument } from '../firebase/users'
 
 interface Marker {
   id: string
@@ -85,6 +87,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   const { showToast } = useToast()
   const { canCreateMap, currentPlan } = useFeatureAccess()
   const { limit } = useUsageWarning('maps', maps.length)
+  const userIsAdmin = user?.email ? isAdmin(user.email) : false
+  
+  // Store owner emails for admin view
+  const [ownerEmails, setOwnerEmails] = useState<Record<string, string>>({})
 
   // Generate public share URL
 
@@ -247,6 +253,46 @@ const Sidebar: React.FC<SidebarProps> = ({
   useEffect(() => {
     console.log('Maps array changed:', maps.length, 'maps:', maps.map(m => ({ id: m.id, name: m.name })))
   }, [maps])
+
+  // Load owner emails for admin view
+  useEffect(() => {
+    if (!userIsAdmin || maps.length === 0) return
+
+    const loadOwnerEmails = async () => {
+      setOwnerEmails(prev => {
+        const emails: Record<string, string> = { ...prev }
+        const userIdsToFetch = new Set<string>()
+        
+        // Collect unique user IDs from maps that we don't have yet
+        maps.forEach(map => {
+          if (map.userId && !emails[map.userId]) {
+            userIdsToFetch.add(map.userId)
+          }
+        })
+
+        // Fetch emails for new user IDs
+        Promise.all(Array.from(userIdsToFetch).map(async (userId) => {
+          try {
+            const userDoc = await getUserDocument(userId)
+            if (userDoc?.email) {
+              emails[userId] = userDoc.email
+            } else {
+              emails[userId] = 'Unknown'
+            }
+          } catch (error) {
+            console.error(`Error fetching user ${userId}:`, error)
+            emails[userId] = 'Unknown'
+          }
+        })).then(() => {
+          setOwnerEmails(emails)
+        })
+
+        return prev // Return previous state immediately
+      })
+    }
+
+    loadOwnerEmails()
+  }, [maps, userIsAdmin])
 
   // Get current map name
   const getCurrentMapName = () => {
@@ -734,11 +780,18 @@ const Sidebar: React.FC<SidebarProps> = ({
                                           }}
                                           className="flex-1 text-left"
                                         >
-                                          <div className="flex items-center justify-between">
-                                            <span className="text-sm font-medium truncate">{map.name}</span>
-                                            <span className="text-xs text-gray-500">
-                                              {map.stats?.markerCount || 0} markers
-                                            </span>
+                                          <div className="flex flex-col gap-0.5">
+                                            <div className="flex items-center justify-between">
+                                              <span className="text-sm font-medium truncate">{map.name}</span>
+                                              <span className="text-xs text-gray-500">
+                                                {map.stats?.markerCount || 0} markers
+                                              </span>
+                                            </div>
+                                            {userIsAdmin && map.userId && (
+                                              <span className="text-xs text-gray-400 italic truncate">
+                                                Owner: {ownerEmails[map.userId] || 'Loading...'}
+                                              </span>
+                                            )}
                                           </div>
                                         </button>
                                         <div className="flex items-center gap-1 ml-2">

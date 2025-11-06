@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, ChevronUp, Folder, Edit2, Check, Upload, Unlink, Maximize2, Info, Square } from 'lucide-react'
 import { applyNameRules } from '../../utils/markerUtils'
@@ -357,21 +357,31 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   // Local marker order state (for display reordering) - moved up for use in grouping
   const [markerOrder, setMarkerOrder] = useState<Record<string, number>>({})
   const [movingMarkerId, setMovingMarkerId] = useState<string | null>(null)
+  const [isMoving, setIsMoving] = useState(false) // Track if any move operation is in progress
+  
+  // Queue for Firestore updates to allow rapid clicking without blocking
+  const firestoreUpdateQueueRef = React.useRef<Promise<void> | null>(null)
 
   // Get markers in current order (defined early so it can be used in grouping)
+  // Ensures markers without order fall back to a stable sort by ID
   const getOrderedMarkers = (markerList: Marker[]): Marker[] => {
     return [...markerList].sort((a, b) => {
       const orderA = markerOrder[a.id] ?? 0
       const orderB = markerOrder[b.id] ?? 0
+      if (orderA === orderB && orderA === 0) {
+        // If both have no order, use ID for stable sort
+        return a.id.localeCompare(b.id)
+      }
       return orderA - orderB
     })
   }
 
   // Sort filtered markers by order FIRST, then group them
-  const orderedFilteredMarkers = getOrderedMarkers(filteredMarkers)
+  // Use useMemo to ensure this is recalculated when markerOrder changes
+  const orderedFilteredMarkers = useMemo(() => getOrderedMarkers(filteredMarkers), [filteredMarkers, markerOrder])
   
   // Group markers by their renamed names and custom groups (using ordered markers)
-  const groupedMarkers = orderedFilteredMarkers.reduce((acc, marker) => {
+  const groupedMarkers = useMemo(() => orderedFilteredMarkers.reduce((acc, marker) => {
     const renamedName = applyNameRules(marker.name, mapSettings.nameRules || [], hasSmartGrouping)
     
     // Check if this marker is part of a custom group
@@ -385,7 +395,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     }
     acc[groupName].push(marker)
     return acc
-  }, {} as Record<string, Marker[]>)
+  }, {} as Record<string, Marker[]>), [orderedFilteredMarkers, mapSettings.nameRules, hasSmartGrouping, customGroups])
 
   const toggleFolderExpansion = (groupName: string) => {
     setExpandedFolders(prev => ({
@@ -541,6 +551,10 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     }
     
     const order: Record<string, number> = {}
+    // First pass: collect markers with valid Firestore orders
+    const markersWithOrder = markers.filter(m => m.order !== undefined && m.order !== null && m.order > 0)
+    const maxOrder = Math.max(0, ...markersWithOrder.map(m => m.order || 0))
+    
     // Use order from Firestore if available, otherwise preserve existing or assign sequential
     markers.forEach((marker, index) => {
       if (marker.order !== undefined && marker.order !== null && marker.order > 0) {
@@ -550,8 +564,8 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
         // Preserve existing local order if Firestore doesn't have it yet
         order[marker.id] = markerOrder[marker.id]
       } else {
-        // Assign sequential order starting from 1
-        order[marker.id] = index + 1
+        // Assign sequential order starting after the max existing order
+        order[marker.id] = maxOrder + index + 1
       }
     })
     
@@ -562,18 +576,41 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   // Move marker up/down handlers - REBUILT FROM SCRATCH
   // Simple, clean, and works consistently for all markers
   const moveMarkerUp = async (markerId: string, groupName?: string) => {
+    console.log('🔼 moveMarkerUp called:', { markerId, groupName, isMoving })
+    
     // Determine which list to use: folder markers or all filtered markers
     let markersToOrder: Marker[]
     if (groupName && groupFolders[groupName] && groupedMarkers[groupName]) {
       // Marker is in a folder - work within that folder
       markersToOrder = getOrderedMarkers(groupedMarkers[groupName])
+      console.log('📍 Using folder markers:', { groupName, folderSize: markersToOrder.length })
     } else {
       // Standalone marker - work across all filtered markers
       markersToOrder = getOrderedMarkers(filteredMarkers)
+      console.log('📍 Using filtered markers (standalone):', { filteredSize: markersToOrder.length })
     }
     
     const currentIndex = markersToOrder.findIndex(m => m.id === markerId)
-    if (currentIndex <= 0) return // Can't move up if already first
+    const initialPosition = currentIndex + 1 // 1-based for display
+    const totalMarkers = markersToOrder.length
+    
+    console.log('📊 Initial state:', {
+      markerId,
+      currentIndex,
+      initialPosition: `${initialPosition}/${totalMarkers}`,
+      totalMarkers,
+      markerOrder: markerOrder[markerId],
+      allMarkerOrders: markersToOrder.map(m => ({ id: m.id, name: m.name, order: markerOrder[m.id] }))
+    })
+    
+    if (currentIndex <= 0) {
+      console.log('❌ Cannot move up:', { 
+        reason: currentIndex === -1 ? 'Marker not found in list' : 'Already at first position',
+        currentIndex,
+        totalMarkers
+      })
+      return // Can't move up if already first
+    }
     
     const aboveMarkerId = markersToOrder[currentIndex - 1].id
     const currentOrder = markerOrder[markerId]
@@ -581,63 +618,197 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     
     // Validate orders exist
     if (!currentOrder || !aboveOrder) {
-      console.warn('Marker order not initialized:', { markerId, currentOrder, aboveOrder })
+      console.warn('❌ Marker order not initialized:', { 
+        markerId, 
+        currentOrder, 
+        aboveMarkerId,
+        aboveOrder,
+        reason: !currentOrder ? 'Current marker has no order' : 'Above marker has no order'
+      })
       return
     }
     
-    // Set visual feedback
+    // Set visual feedback and moving state
     setMovingMarkerId(markerId)
+    setIsMoving(true)
     
-    // Update local state immediately (swap orders)
+    // Check if orders are the same (duplicate orders issue)
+    if (currentOrder === aboveOrder) {
+      console.warn('⚠️ Cannot swap: Both markers have the same order value', {
+        markerId,
+        aboveMarkerId,
+        sharedOrder: currentOrder,
+        reason: 'Duplicate order values detected - markers need unique orders to swap'
+      })
+      
+      // Try to reassign orders to fix the duplicate
+      console.log('🔧 Attempting to fix duplicate orders by reassigning...')
+      const allMarkersInList = markersToOrder.map(m => ({
+        id: m.id,
+        currentOrder: markerOrder[m.id] ?? 0
+      }))
+      
+      // Reassign sequential orders starting from 1
+      const reassignedOrders: Record<string, number> = {}
+      allMarkersInList.forEach((m, index) => {
+        reassignedOrders[m.id] = index + 1
+      })
+      
+      console.log('🔧 Reassigning orders:', reassignedOrders)
+      
+      // Update all markers in the list with new sequential orders
+      // Queue this update but don't block
+      const markerOwnerId = currentMap?.userId || userId
+      const fixDuplicates = async () => {
+        try {
+          const { updateMapMarker } = await import('../../firebase/maps')
+          
+          const updatePromises = Object.entries(reassignedOrders).map(([id, newOrder]) =>
+            updateMapMarker(markerOwnerId, mapId || '', id, { order: newOrder })
+          )
+          
+          await Promise.all(updatePromises)
+          
+          console.log('✅ Duplicate orders fixed by reassigning all markers')
+        } catch (error) {
+          console.error('❌ Failed to fix duplicate orders:', error)
+          showToast({
+            type: 'error',
+            title: 'Move Failed',
+            message: 'Cannot move: markers have duplicate order values. Please refresh the page.'
+          })
+        }
+      }
+      
+      // Update local state immediately
+      setMarkerOrder(prev => ({
+        ...prev,
+        ...reassignedOrders
+      }))
+      
+      // Queue Firestore update
+      if (firestoreUpdateQueueRef.current) {
+        firestoreUpdateQueueRef.current = firestoreUpdateQueueRef.current.then(fixDuplicates)
+      } else {
+        firestoreUpdateQueueRef.current = fixDuplicates()
+      }
+      
+      setIsMoving(false)
+      setMovingMarkerId(null)
+      return
+    }
+    
+    console.log('🔄 Swapping orders:', {
+      markerId,
+      currentOrder,
+      aboveMarkerId,
+      aboveOrder,
+      newOrderForMarker: aboveOrder,
+      newOrderForAbove: currentOrder
+    })
+    
+    // Update local state immediately (swap orders) - this allows rapid clicking
     setMarkerOrder(prev => ({
       ...prev,
       [markerId]: aboveOrder,
       [aboveMarkerId]: currentOrder
     }))
     
-    // Save to Firestore
-    try {
-      const markerOwnerId = currentMap?.userId || userId
-      const { updateMapMarker } = await import('../../firebase/maps')
-      
-      await Promise.all([
-        updateMapMarker(markerOwnerId, mapId || '', markerId, { order: aboveOrder }),
-        updateMapMarker(markerOwnerId, mapId || '', aboveMarkerId, { order: currentOrder })
-      ])
-      
-      setTimeout(() => {
-        setMovingMarkerId(null)
-      }, 500)
-    } catch (error) {
-      console.error('Error updating marker order:', error)
-      // Revert on error
-      setMarkerOrder(prev => ({
-        ...prev,
-        [markerId]: currentOrder,
-        [aboveMarkerId]: aboveOrder
-      }))
-      setMovingMarkerId(null)
-      showToast({
-        type: 'error',
-        title: 'Move Failed',
-        message: 'Failed to save marker order'
-      })
+    // Clear moving state immediately so buttons can be clicked again (don't wait for Firestore)
+    setIsMoving(false)
+    
+    // Queue Firestore update (don't await - allows rapid clicking)
+    const markerOwnerId = currentMap?.userId || userId
+    const updateFirestore = async () => {
+      try {
+        const { updateMapMarker } = await import('../../firebase/maps')
+        await Promise.all([
+          updateMapMarker(markerOwnerId, mapId || '', markerId, { order: aboveOrder }),
+          updateMapMarker(markerOwnerId, mapId || '', aboveMarkerId, { order: currentOrder })
+        ])
+        
+        // Calculate final position after state update
+        setTimeout(() => {
+          const newMarkersToOrder = groupName && groupFolders[groupName] && groupedMarkers[groupName]
+            ? getOrderedMarkers(groupedMarkers[groupName])
+            : getOrderedMarkers(filteredMarkers)
+          const finalIndex = newMarkersToOrder.findIndex(m => m.id === markerId)
+          const finalPosition = finalIndex + 1
+          
+          console.log('✅ Firestore update completed:', {
+            markerId,
+            initialPosition: `${initialPosition}/${totalMarkers}`,
+            finalPosition: `${finalPosition}/${totalMarkers}`,
+            moved: finalIndex < currentIndex,
+            previousOrder: currentOrder,
+            newOrder: aboveOrder
+          })
+        }, 100)
+      } catch (error) {
+        console.error('❌ Error updating marker order in Firestore:', error)
+        // Revert on error
+        setMarkerOrder(prev => ({
+          ...prev,
+          [markerId]: currentOrder,
+          [aboveMarkerId]: aboveOrder
+        }))
+        showToast({
+          type: 'error',
+          title: 'Move Failed',
+          message: 'Failed to save marker order'
+        })
+      }
     }
+    
+    // Queue the update (wait for previous update to complete, but don't block the UI)
+    if (firestoreUpdateQueueRef.current) {
+      firestoreUpdateQueueRef.current = firestoreUpdateQueueRef.current.then(updateFirestore)
+    } else {
+      firestoreUpdateQueueRef.current = updateFirestore()
+    }
+    
+    // Keep visual feedback for a bit longer
+    setTimeout(() => {
+      setMovingMarkerId(null)
+    }, 300)
   }
 
   const moveMarkerDown = async (markerId: string, groupName?: string) => {
+    console.log('🔽 moveMarkerDown called:', { markerId, groupName, isMoving })
+    
     // Determine which list to use: folder markers or all filtered markers
     let markersToOrder: Marker[]
     if (groupName && groupFolders[groupName] && groupedMarkers[groupName]) {
       // Marker is in a folder - work within that folder
       markersToOrder = getOrderedMarkers(groupedMarkers[groupName])
+      console.log('📍 Using folder markers:', { groupName, folderSize: markersToOrder.length })
     } else {
       // Standalone marker - work across all filtered markers
       markersToOrder = getOrderedMarkers(filteredMarkers)
+      console.log('📍 Using filtered markers (standalone):', { filteredSize: markersToOrder.length })
     }
     
     const currentIndex = markersToOrder.findIndex(m => m.id === markerId)
-    if (currentIndex >= markersToOrder.length - 1) return // Can't move down if already last
+    const initialPosition = currentIndex + 1 // 1-based for display
+    const totalMarkers = markersToOrder.length
+    
+    console.log('📊 Initial state:', {
+      markerId,
+      currentIndex,
+      initialPosition: `${initialPosition}/${totalMarkers}`,
+      totalMarkers,
+      markerOrder: markerOrder[markerId],
+      allMarkerOrders: markersToOrder.map(m => ({ id: m.id, name: m.name, order: markerOrder[m.id] }))
+    })
+    
+    if (currentIndex >= markersToOrder.length - 1) {
+      console.log('❌ Cannot move down:', { 
+        reason: currentIndex === -1 ? 'Marker not found in list' : 'Already at last position',
+        currentIndex,
+        totalMarkers
+      })
+      return // Can't move down if already last
+    }
     
     const belowMarkerId = markersToOrder[currentIndex + 1].id
     const currentOrder = markerOrder[markerId]
@@ -645,48 +816,159 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     
     // Validate orders exist
     if (!currentOrder || !belowOrder) {
-      console.warn('Marker order not initialized:', { markerId, currentOrder, belowOrder })
+      console.warn('❌ Marker order not initialized:', { 
+        markerId, 
+        currentOrder, 
+        belowMarkerId,
+        belowOrder,
+        reason: !currentOrder ? 'Current marker has no order' : 'Below marker has no order'
+      })
       return
     }
     
-    // Set visual feedback
+    // Set visual feedback and moving state
     setMovingMarkerId(markerId)
+    setIsMoving(true)
     
-    // Update local state immediately (swap orders)
+    // Check if orders are the same (duplicate orders issue)
+    if (currentOrder === belowOrder) {
+      console.warn('⚠️ Cannot swap: Both markers have the same order value', {
+        markerId,
+        belowMarkerId,
+        sharedOrder: currentOrder,
+        reason: 'Duplicate order values detected - markers need unique orders to swap'
+      })
+      
+      // Try to reassign orders to fix the duplicate
+      console.log('🔧 Attempting to fix duplicate orders by reassigning...')
+      const allMarkersInList = markersToOrder.map(m => ({
+        id: m.id,
+        currentOrder: markerOrder[m.id] ?? 0
+      }))
+      
+      // Reassign sequential orders starting from 1
+      const reassignedOrders: Record<string, number> = {}
+      allMarkersInList.forEach((m, index) => {
+        reassignedOrders[m.id] = index + 1
+      })
+      
+      console.log('🔧 Reassigning orders:', reassignedOrders)
+      
+      // Update all markers in the list with new sequential orders
+      // Queue this update but don't block
+      const markerOwnerId = currentMap?.userId || userId
+      const fixDuplicates = async () => {
+        try {
+          const { updateMapMarker } = await import('../../firebase/maps')
+          
+          const updatePromises = Object.entries(reassignedOrders).map(([id, newOrder]) =>
+            updateMapMarker(markerOwnerId, mapId || '', id, { order: newOrder })
+          )
+          
+          await Promise.all(updatePromises)
+          
+          console.log('✅ Duplicate orders fixed by reassigning all markers')
+        } catch (error) {
+          console.error('❌ Failed to fix duplicate orders:', error)
+          showToast({
+            type: 'error',
+            title: 'Move Failed',
+            message: 'Cannot move: markers have duplicate order values. Please refresh the page.'
+          })
+        }
+      }
+      
+      // Update local state immediately
+      setMarkerOrder(prev => ({
+        ...prev,
+        ...reassignedOrders
+      }))
+      
+      // Queue Firestore update
+      if (firestoreUpdateQueueRef.current) {
+        firestoreUpdateQueueRef.current = firestoreUpdateQueueRef.current.then(fixDuplicates)
+      } else {
+        firestoreUpdateQueueRef.current = fixDuplicates()
+      }
+      
+      setIsMoving(false)
+      setMovingMarkerId(null)
+      return
+    }
+    
+    console.log('🔄 Swapping orders:', {
+      markerId,
+      currentOrder,
+      belowMarkerId,
+      belowOrder,
+      newOrderForMarker: belowOrder,
+      newOrderForBelow: currentOrder
+    })
+    
+    // Update local state immediately (swap orders) - this allows rapid clicking
     setMarkerOrder(prev => ({
       ...prev,
       [markerId]: belowOrder,
       [belowMarkerId]: currentOrder
     }))
     
-    // Save to Firestore
-    try {
-      const markerOwnerId = currentMap?.userId || userId
-      const { updateMapMarker } = await import('../../firebase/maps')
-      
-      await Promise.all([
-        updateMapMarker(markerOwnerId, mapId || '', markerId, { order: belowOrder }),
-        updateMapMarker(markerOwnerId, mapId || '', belowMarkerId, { order: currentOrder })
-      ])
-      
-      setTimeout(() => {
-        setMovingMarkerId(null)
-      }, 500)
-    } catch (error) {
-      console.error('Error updating marker order:', error)
-      // Revert on error
-      setMarkerOrder(prev => ({
-        ...prev,
-        [markerId]: currentOrder,
-        [belowMarkerId]: belowOrder
-      }))
-      setMovingMarkerId(null)
-      showToast({
-        type: 'error',
-        title: 'Move Failed',
-        message: 'Failed to save marker order'
-      })
+    // Clear moving state immediately so buttons can be clicked again (don't wait for Firestore)
+    setIsMoving(false)
+    
+    // Queue Firestore update (don't await - allows rapid clicking)
+    const markerOwnerId = currentMap?.userId || userId
+    const updateFirestore = async () => {
+      try {
+        const { updateMapMarker } = await import('../../firebase/maps')
+        await Promise.all([
+          updateMapMarker(markerOwnerId, mapId || '', markerId, { order: belowOrder }),
+          updateMapMarker(markerOwnerId, mapId || '', belowMarkerId, { order: currentOrder })
+        ])
+        
+        // Calculate final position after state update
+        setTimeout(() => {
+          const newMarkersToOrder = groupName && groupFolders[groupName] && groupedMarkers[groupName]
+            ? getOrderedMarkers(groupedMarkers[groupName])
+            : getOrderedMarkers(filteredMarkers)
+          const finalIndex = newMarkersToOrder.findIndex(m => m.id === markerId)
+          const finalPosition = finalIndex + 1
+          
+          console.log('✅ Firestore update completed:', {
+            markerId,
+            initialPosition: `${initialPosition}/${totalMarkers}`,
+            finalPosition: `${finalPosition}/${totalMarkers}`,
+            moved: finalIndex > currentIndex,
+            previousOrder: currentOrder,
+            newOrder: belowOrder
+          })
+        }, 100)
+      } catch (error) {
+        console.error('❌ Error updating marker order in Firestore:', error)
+        // Revert on error
+        setMarkerOrder(prev => ({
+          ...prev,
+          [markerId]: currentOrder,
+          [belowMarkerId]: belowOrder
+        }))
+        showToast({
+          type: 'error',
+          title: 'Move Failed',
+          message: 'Failed to save marker order'
+        })
+      }
     }
+    
+    // Queue the update (wait for previous update to complete, but don't block the UI)
+    if (firestoreUpdateQueueRef.current) {
+      firestoreUpdateQueueRef.current = firestoreUpdateQueueRef.current.then(updateFirestore)
+    } else {
+      firestoreUpdateQueueRef.current = updateFirestore()
+    }
+    
+    // Keep visual feedback for a bit longer
+    setTimeout(() => {
+      setMovingMarkerId(null)
+    }, 300)
   }
 
   // Selection handlers
@@ -1609,11 +1891,12 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                               scale: movingMarkerId === marker.id ? 1.02 : 1,
                             }}
                             transition={{
-                              layout: { duration: 0.3, ease: 'easeInOut' },
-                              backgroundColor: { duration: 0.2 },
-                              borderColor: { duration: 0.2 },
-                              scale: { duration: 0.2 },
+                              layout: { duration: 0.15, ease: [0.25, 0.1, 0.25, 1] },
+                              backgroundColor: { duration: 0.15 },
+                              borderColor: { duration: 0.15 },
+                              scale: { duration: 0.15 },
                             }}
+                            layoutId={marker.id}
                             className={`flex items-center gap-3 p-3 pl-8 bg-white hover:bg-gray-50 ${
                               movingMarkerId === marker.id ? 'border-2 border-pinz-500' : 'border-2 border-transparent'
                             }`}
@@ -1636,7 +1919,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                                   e.preventDefault()
                                   moveMarkerUp(marker.id, groupName)
                                 }}
-                                disabled={getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) <= 0}
+                                disabled={isMoving || getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) <= 0}
                                 className="p-0.5 text-gray-400 hover:text-pinz-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors z-10 relative"
                                 title="Move up"
                               >
@@ -1648,7 +1931,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                                   e.preventDefault()
                                   moveMarkerDown(marker.id, groupName)
                                 }}
-                                disabled={getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) >= groupMarkers.length - 1}
+                                disabled={isMoving || getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) >= groupMarkers.length - 1}
                                 className="p-0.5 text-gray-400 hover:text-pinz-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors z-10 relative"
                                 title="Move down"
                               >
@@ -1764,11 +2047,12 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                       scale: movingMarkerId === marker.id ? 1.02 : 1,
                     }}
                     transition={{
-                      layout: { duration: 0.3, ease: 'easeInOut' },
-                      backgroundColor: { duration: 0.2 },
-                      borderColor: { duration: 0.2 },
-                      scale: { duration: 0.2 },
+                      layout: { duration: 0.15, ease: [0.25, 0.1, 0.25, 1] },
+                      backgroundColor: { duration: 0.15 },
+                      borderColor: { duration: 0.15 },
+                      scale: { duration: 0.15 },
                     }}
+                    layoutId={marker.id}
                     className={`bg-white rounded-lg border-2 p-3 hover:bg-gray-50 ${
                       selectedMarkerIds.has(marker.id) ? 'ring-2 ring-pinz-500' : ''
                     }`}
@@ -1796,7 +2080,14 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                               e.preventDefault()
                               moveMarkerUp(marker.id, groupName)
                             }}
-                            disabled={getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) <= 0}
+                            disabled={isMoving || (() => {
+                              // For standalone markers (not in folder), check position in all filtered markers
+                              // For folder markers, check position within the folder
+                              const markersToCheck = (groupFolders[groupName] && groupedMarkers[groupName]) 
+                                ? getOrderedMarkers(groupMarkers)
+                                : getOrderedMarkers(filteredMarkers)
+                              return markersToCheck.findIndex(m => m.id === marker.id) <= 0
+                            })()}
                             className="p-0.5 text-gray-400 hover:text-pinz-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors z-10 relative"
                             title="Move up"
                           >
@@ -1808,7 +2099,14 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                               e.preventDefault()
                               moveMarkerDown(marker.id, groupName)
                             }}
-                            disabled={getOrderedMarkers(groupMarkers).findIndex(m => m.id === marker.id) >= groupMarkers.length - 1}
+                            disabled={isMoving || (() => {
+                              // For standalone markers (not in folder), check position in all filtered markers
+                              // For folder markers, check position within the folder
+                              const markersToCheck = (groupFolders[groupName] && groupedMarkers[groupName])
+                                ? getOrderedMarkers(groupMarkers)
+                                : getOrderedMarkers(filteredMarkers)
+                              return markersToCheck.findIndex(m => m.id === marker.id) >= markersToCheck.length - 1
+                            })()}
                             className="p-0.5 text-gray-400 hover:text-pinz-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors z-10 relative"
                             title="Move down"
                           >
