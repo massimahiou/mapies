@@ -49,6 +49,8 @@ export interface MapDocument {
     searchBarHoverColor: string
     // Name rules settings
     nameRules: NameRule[]
+    // Tags settings
+    tags?: string[]
   }
   stats?: {
     markerCount: number
@@ -90,6 +92,7 @@ export interface MarkerDocument {
   createdAt: Date
   updatedAt: Date
   order?: number // Display order for markers
+  tags?: string[] // Tags for filtering and categorization
   businessCategory?: {
     id: string
     name: string
@@ -1178,6 +1181,187 @@ export const deleteMapPolygon = async (
     
   } catch (error) {
     console.error('Error deleting polygon:', error)
+    throw error
+  }
+}
+
+// Tag management functions
+export const addTagToMap = async (userId: string, mapId: string, tagName: string): Promise<void> => {
+  try {
+    const mapRef = doc(db, 'users', userId, 'maps', mapId)
+    const mapDoc = await getDoc(mapRef)
+    
+    if (!mapDoc.exists()) {
+      throw new Error('Map not found')
+    }
+    
+    const currentSettings = mapDoc.data().settings || {}
+    const currentTags = currentSettings.tags || []
+    
+    // Normalize tag name (lowercase, trim)
+    const normalizedTag = tagName.toLowerCase().trim()
+    
+    // Check for duplicates (case-insensitive)
+    if (currentTags.some((tag: string) => tag.toLowerCase().trim() === normalizedTag)) {
+      throw new Error('Tag already exists')
+    }
+    
+    const updatedTags = [...currentTags, tagName.trim()]
+    
+    await updateDoc(mapRef, {
+      'settings.tags': updatedTags,
+      updatedAt: serverTimestamp()
+    })
+  } catch (error) {
+    console.error('Error adding tag to map:', error)
+    throw error
+  }
+}
+
+export const removeTagFromMap = async (userId: string, mapId: string, tagName: string, removeFromMarkers: boolean = false): Promise<void> => {
+  try {
+    const mapRef = doc(db, 'users', userId, 'maps', mapId)
+    const mapDoc = await getDoc(mapRef)
+    
+    if (!mapDoc.exists()) {
+      throw new Error('Map not found')
+    }
+    
+    const currentSettings = mapDoc.data().settings || {}
+    const currentTags = currentSettings.tags || []
+    
+    // Remove tag from map settings
+    const updatedTags = currentTags.filter((tag: string) => tag !== tagName)
+    
+    await updateDoc(mapRef, {
+      'settings.tags': updatedTags,
+      updatedAt: serverTimestamp()
+    })
+    
+    // Optionally remove tag from all markers
+    if (removeFromMarkers) {
+      const markersRef = collection(db, 'users', userId, 'maps', mapId, 'markers')
+      const markersSnapshot = await getDocs(markersRef)
+      
+      const batch = markersSnapshot.docs.map(markerDoc => {
+        const markerData = markerDoc.data()
+        const markerTags = markerData.tags || []
+        const updatedMarkerTags = markerTags.filter((tag: string) => tag !== tagName)
+        
+        if (updatedMarkerTags.length !== markerTags.length) {
+          return updateDoc(markerDoc.ref, {
+            tags: updatedMarkerTags,
+            updatedAt: serverTimestamp()
+          })
+        }
+        return Promise.resolve()
+      })
+      
+      await Promise.all(batch)
+    }
+  } catch (error) {
+    console.error('Error removing tag from map:', error)
+    throw error
+  }
+}
+
+export const updateTagName = async (userId: string, mapId: string, oldName: string, newName: string): Promise<void> => {
+  try {
+    const mapRef = doc(db, 'users', userId, 'maps', mapId)
+    const mapDoc = await getDoc(mapRef)
+    
+    if (!mapDoc.exists()) {
+      throw new Error('Map not found')
+    }
+    
+    const currentSettings = mapDoc.data().settings || {}
+    const currentTags = currentSettings.tags || []
+    
+    // Update tag in map settings
+    const updatedTags = currentTags.map((tag: string) => tag === oldName ? newName.trim() : tag)
+    
+    await updateDoc(mapRef, {
+      'settings.tags': updatedTags,
+      updatedAt: serverTimestamp()
+    })
+    
+    // Update tag in all markers
+    const markersRef = collection(db, 'users', userId, 'maps', mapId, 'markers')
+    const markersSnapshot = await getDocs(markersRef)
+    
+    const batch = markersSnapshot.docs.map(markerDoc => {
+      const markerData = markerDoc.data()
+      const markerTags = markerData.tags || []
+      const updatedMarkerTags = markerTags.map((tag: string) => tag === oldName ? newName.trim() : tag)
+      
+      if (JSON.stringify(updatedMarkerTags) !== JSON.stringify(markerTags)) {
+        return updateDoc(markerDoc.ref, {
+          tags: updatedMarkerTags,
+          updatedAt: serverTimestamp()
+        })
+      }
+      return Promise.resolve()
+    })
+    
+    await Promise.all(batch)
+  } catch (error) {
+    console.error('Error updating tag name:', error)
+    throw error
+  }
+}
+
+export const applyTagsToMarkers = async (
+  userId: string,
+  mapId: string,
+  markerIds: string[],
+  tags: string[],
+  mode: 'add' | 'replace' | 'remove'
+): Promise<void> => {
+  try {
+    const markersRef = collection(db, 'users', userId, 'maps', mapId, 'markers')
+    
+    // Process in batches of 500 (Firestore limit)
+    const batchSize = 500
+    for (let i = 0; i < markerIds.length; i += batchSize) {
+      const batch = markerIds.slice(i, i + batchSize)
+      const updatePromises = batch.map(async (markerId) => {
+        const markerRef = doc(markersRef, markerId)
+        const markerDoc = await getDoc(markerRef)
+        
+        if (!markerDoc.exists()) {
+          return Promise.resolve()
+        }
+        
+        const currentTags = markerDoc.data().tags || []
+        let updatedTags: string[]
+        
+        switch (mode) {
+          case 'add':
+            // Add tags, avoiding duplicates
+            updatedTags = [...new Set([...currentTags, ...tags])]
+            break
+          case 'replace':
+            // Replace all tags
+            updatedTags = tags
+            break
+          case 'remove':
+            // Remove specified tags
+            updatedTags = currentTags.filter((tag: string) => !tags.includes(tag))
+            break
+          default:
+            updatedTags = currentTags
+        }
+        
+        return updateDoc(markerRef, {
+          tags: updatedTags,
+          updatedAt: serverTimestamp()
+        })
+      })
+      
+      await Promise.all(updatePromises)
+    }
+  } catch (error) {
+    console.error('Error applying tags to markers:', error)
     throw error
   }
 }

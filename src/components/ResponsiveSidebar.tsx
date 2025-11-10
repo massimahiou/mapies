@@ -123,6 +123,7 @@ const ResponsiveSidebar: React.FC<ResponsiveSidebarProps> = (props) => {
               mapSettings={props.mapSettings}
               onMapSettingsChange={props.onMapSettingsChange}
               onOpenModal={props.onOpenEditManagementModal}
+              markers={props.markers}
             />
           )}
           
@@ -131,6 +132,8 @@ const ResponsiveSidebar: React.FC<ResponsiveSidebarProps> = (props) => {
               onShowPublishModal={props.onShowPublishModal}
               currentMapId={props.currentMapId}
               onOpenModal={props.onOpenPublishManagementModal}
+              mapSettings={props.mapSettings}
+              markers={props.markers}
             />
           )}
         </MobileContentPanel>

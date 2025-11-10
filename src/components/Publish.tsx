@@ -1,14 +1,20 @@
 import React, { useState } from 'react'
-import { Copy, Check, X } from 'lucide-react'
+import { Copy, Check, X, Tag } from 'lucide-react'
+
+interface MapSettings {
+  tags?: string[]
+  [key: string]: any
+}
 
 interface PublishProps {
   isOpen: boolean
   onClose: () => void
   currentMapId: string
   iframeDimensions?: { width: number; height: number }
+  mapSettings?: MapSettings
 }
 
-const Publish: React.FC<PublishProps> = ({ isOpen, onClose, currentMapId }) => {
+const Publish: React.FC<PublishProps> = ({ isOpen, onClose, currentMapId, mapSettings = {} }) => {
   const [copied, setCopied] = useState(false)
   const [embedLanguage, setEmbedLanguage] = useState<'auto' | 'en' | 'fr'>('auto')
   const [showToggle, setShowToggle] = useState(true)
@@ -168,6 +174,43 @@ const Publish: React.FC<PublishProps> = ({ isOpen, onClose, currentMapId }) => {
               </div>
             </div>
           </div>
+
+          {/* Tags Preview Section */}
+          {(mapSettings.tags || []).length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <Tag className="w-5 h-5 text-pink-600" />
+                Tags in Your Map
+              </h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Your map includes the following tags. Users can filter markers by clicking on these tags in the embedded map.
+              </p>
+              
+              {/* Preview of tags */}
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="mb-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Tag className="w-4 h-4 text-gray-500" />
+                    <span className="text-xs font-medium text-gray-700">Filter by tags</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(mapSettings.tags || []).map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium bg-pink-600 text-white shadow-sm"
+                      >
+                        <Tag className="w-3 h-3" />
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-3">
+                  💡 Users will see a "Filter by tags" menu in the embedded map. Clicking a tag filters the map to show only markers with that tag.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -1,9 +1,10 @@
 import React from 'react'
-import { Search, X, Navigation, MapPin } from 'lucide-react'
+import { Search, X, Navigation, MapPin, Tag } from 'lucide-react'
 import { applyNameRules } from '../utils/markerUtils'
 import { formatAddressForList } from '../utils/addressUtils'
 import { usePublicFeatureAccess } from '../hooks/useFeatureAccess'
 import { useEmbedMapLanguage } from '../hooks/useEmbedMapLanguage'
+import PublicMapTagFilter from './PublicMapTagFilter'
 
 interface Marker {
   id: string
@@ -13,6 +14,7 @@ interface Marker {
   lng: number
   visible: boolean
   type: 'pharmacy' | 'grocery' | 'retail' | 'other'
+  tags?: string[]
   businessCategory?: {
     id: string
     name: string
@@ -43,7 +45,13 @@ interface PublicMapSidebarProps {
     searchBarTextColor: string
     searchBarHoverColor: string
     nameRules: Array<{ id: string; contains: string; renameTo: string }>
+    tags?: string[] // Available tags from map settings
   }
+  availableTags?: string[]
+  selectedTags?: Set<string>
+  onTagToggle?: (tag: string) => void
+  onClearTagFilters?: () => void
+  tagMarkerCounts?: Record<string, number>
 }
 
 // RenamedMarkerName component for consistent naming
@@ -74,7 +82,12 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
   onToggleLocation,
   locationModeActive,
   viewportMarkers,
-  mapSettings
+  mapSettings,
+  availableTags = [],
+  selectedTags = new Set(),
+  onTagToggle,
+  onClearTagFilters,
+  tagMarkerCounts = {}
 }) => {
   const { t } = useEmbedMapLanguage()
   
@@ -126,8 +139,8 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
 
   return (
     <div className="w-80 min-w-[320px] flex flex-col h-full hidden md:flex" style={{ backgroundColor: mapSettings.searchBarBackgroundColor, color: mapSettings.searchBarTextColor }}>
-      {/* Search Bar */}
-      <div className="p-4">
+      {/* Search Bar - Flex shrink to allow content to grow */}
+      <div className="flex-shrink-0 p-3 pb-2">
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <Search className="h-4 w-4 text-gray-400" />
@@ -162,11 +175,25 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
             </button>
           </div>
         </div>
+        
+        {/* Tag Filter - Compact spacing with smooth transitions */}
+        {availableTags.length > 0 && onTagToggle && onClearTagFilters && (
+          <div className="mt-2 mb-0 transition-all duration-200 ease-in-out">
+            <PublicMapTagFilter
+              availableTags={availableTags}
+              selectedTags={selectedTags}
+              onTagToggle={onTagToggle}
+              onClearAll={onClearTagFilters}
+              markerCounts={tagMarkerCounts}
+              mapSettings={mapSettings}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-4">
+      {/* Content - Flex grow to fill remaining space, with min-h-0 for proper scrolling */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="px-4 pt-1 pb-4">
           {markersToShow.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <Search className="w-8 h-8 mx-auto mb-2 text-gray-400" />
@@ -177,7 +204,7 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
             <>
               {/* Location status header */}
               {showNearbyPlaces && nearbyMarkers.length > 0 && (
-                <div className="mb-3 px-2 py-1">
+                <div className="mb-2 px-2 py-1">
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 bg-pinz-200 rounded-full flex items-center justify-center">
                       <Navigation className="w-2 h-2 text-pinz-500" />
@@ -229,6 +256,25 @@ const PublicMapSidebar: React.FC<PublicMapSidebarProps> = ({
                       <p className="text-xs truncate" style={{ color: mapSettings.searchBarTextColor, opacity: 0.7 }}>
                         {formatAddressForList(marker.address)}
                       </p>
+                      {/* Show tags */}
+                      {(marker.tags || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {(marker.tags || []).slice(0, 2).map((tag) => (
+                            <span
+                              key={tag}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-pink-100 text-pink-700 border border-pink-200"
+                            >
+                              <Tag className="w-2.5 h-2.5" />
+                              {tag}
+                            </span>
+                          ))}
+                          {(marker.tags || []).length > 2 && (
+                            <span className="text-[10px] text-gray-500 px-1">
+                              +{(marker.tags || []).length - 2}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {/* Show distance when location mode is active */}
                       {showNearbyPlaces && distance > 0 && (
                         <p className="text-xs font-medium mt-1 text-pinz-600">

@@ -48,6 +48,7 @@ interface Marker {
   visible: boolean
   type: 'pharmacy' | 'grocery' | 'retail' | 'other'
   order?: number // Display order for markers
+  tags?: string[] // Tags for filtering and categorization
 }
 
 // Start with empty markers array
@@ -467,7 +468,8 @@ const AppContent: React.FC = () => {
         lng: marker.coordinates?.lng || marker.lng,
         visible: marker.visible !== false, // Default to true if not set (matches PublicMap.tsx)
         type: marker.type as 'pharmacy' | 'grocery' | 'retail' | 'other',
-        order: marker.order // Include order field for marker ordering
+        order: marker.order, // Include order field for marker ordering
+        tags: marker.tags || [] // Include tags field
       }))
       
       // Only update if markers actually changed (optimized comparison)
@@ -483,13 +485,22 @@ const AppContent: React.FC = () => {
         
         const hasChanged = localMarkers.some(current => {
           const prev = prevMarkersMap.get(current.id)
-          return !prev || 
-                 prev.visible !== current.visible || 
+          if (!prev) return true
+          
+          // Compare tags arrays
+          const prevTags = prev.tags || []
+          const currentTags = current.tags || []
+          const tagsChanged = prevTags.length !== currentTags.length ||
+            prevTags.some((tag, idx) => tag !== currentTags[idx]) ||
+            currentTags.some((tag, idx) => tag !== prevTags[idx])
+          
+          return prev.visible !== current.visible || 
                  prev.name !== current.name ||
                  prev.lat !== current.lat ||
                  prev.lng !== current.lng ||
                  prev.address !== current.address ||
-                 prev.order !== current.order
+                 prev.order !== current.order ||
+                 tagsChanged
         })
         
         if (hasChanged) {
@@ -527,7 +538,9 @@ const AppContent: React.FC = () => {
             searchBarTextColor: mapData.settings!.searchBarTextColor || '#000000',
             searchBarHoverColor: mapData.settings!.searchBarHoverColor || '#f3f4f6',
             // Name rules settings with defaults
-            nameRules: mapData.settings!.nameRules || []
+            nameRules: mapData.settings!.nameRules || [],
+            // Tags settings with defaults
+            tags: mapData.settings!.tags || []
           }
           
           // Automatically fix any premium settings to be freemium-compliant
@@ -1480,6 +1493,7 @@ const AppContent: React.FC = () => {
          onClose={() => setShowPublishModal(false)}
          currentMapId={currentMapId || ''}
          iframeDimensions={iframeDimensions}
+         mapSettings={mapSettings}
        />
 
        {/* Auth Modal */}
@@ -1529,6 +1543,7 @@ const AppContent: React.FC = () => {
          onClose={() => setShowPublishManagementModal(false)}
          onShowPublishModal={() => setShowPublishModal(true)}
          currentMapId={currentMapId}
+         mapSettings={mapSettings}
        />
 
        {/* Duplicate Notification */}

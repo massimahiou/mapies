@@ -4,11 +4,12 @@ import L from 'leaflet'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
-import { MapPin, Navigation, Plus, Minus, Search, X, List } from 'lucide-react'
+import { MapPin, Navigation, Plus, Minus, Search, X, List, Tag } from 'lucide-react'
 import { detectBusinessType } from '../utils/businessDetection'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
 import { formatAddressForPopup } from '../utils/addressUtils'
 import PublicMapSidebar from './PublicMapSidebar'
+import PublicMapTagFilter from './PublicMapTagFilter'
 import { MAPBOX_CONFIG } from '../config/mapbox'
 import { usePublicFeatureAccess } from '../hooks/useFeatureAccess'
 import InteractiveWatermark from './InteractiveWatermark'
@@ -37,6 +38,7 @@ interface Marker {
   lng: number
   visible: boolean
   type: 'pharmacy' | 'grocery' | 'retail' | 'other'
+  tags?: string[]
   businessCategory?: {
     id: string
     name: string
@@ -131,6 +133,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
   const [nearbyMarkers, setNearbyMarkers] = useState<Marker[]>([])
   const [showNearbyPlaces, setShowNearbyPlaces] = useState(false)
   const [locationModeActive, setLocationModeActive] = useState(false)
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
   const [renamedMarkers] = useState<Record<string, string>>({})
   const [showMobileResults, setShowMobileResults] = useState(false)
   const [viewportMarkers, setViewportMarkers] = useState<Marker[]>([]) // Markers visible in current viewport
@@ -380,8 +383,10 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     }
     
     // Regular text search (only for non-postal-code terms)
+    // Apply tag filter first, then search
+    const markersToSearch = selectedTags.size > 0 ? filteredMarkersByTags : markers
     searchTimeoutRef.current = setTimeout(() => {
-      const filtered = markers.filter(marker => 
+      const filtered = markersToSearch.filter(marker => 
         marker.name.toLowerCase().includes(term.toLowerCase()) ||
         marker.address.toLowerCase().includes(term.toLowerCase())
       )
@@ -443,9 +448,146 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     return R * c
   }
 
+  // Calculate available tags and counts
+  const availableTags = React.useMemo(() => {
+    const tagSet = new Set<string>()
+    markers.forEach(marker => {
+      (marker.tags || []).forEach(tag => tagSet.add(tag))
+    })
+    return Array.from(tagSet).sort()
+  }, [markers])
+
+  const tagMarkerCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {}
+    availableTags.forEach((tag: string) => {
+      counts[tag] = markers.filter(m => (m.tags || []).includes(tag)).length
+    })
+    return counts
+  }, [markers, availableTags])
+
+  // Filter markers by selected tags
+  const filteredMarkersByTags = React.useMemo(() => {
+    if (selectedTags.size === 0) return markers
+    return markers.filter(marker => {
+      const markerTags = marker.tags || []
+      return Array.from(selectedTags).some(tag => markerTags.includes(tag))
+    })
+  }, [markers, selectedTags])
+
+  // Function to adjust map view to show filtered markers
+  const adjustMapToFilteredMarkers = React.useCallback(() => {
+    if (!mapInstance.current || !mapLoaded || !markerClusterRef.current) {
+      return
+    }
+
+    try {
+      // Use cluster group bounds if available (more accurate with clustering)
+      if (markerClusterRef.current.getLayers().length > 0) {
+        const clusterBounds = markerClusterRef.current.getBounds()
+        if (clusterBounds.isValid()) {
+          mapInstance.current.fitBounds(clusterBounds.pad(0.1), {
+            animate: true,
+            duration: 0.5,
+            maxZoom: 15
+          })
+          return
+        }
+      }
+      
+      // Fallback: use filtered markers bounds directly
+      if (filteredMarkersByTags.length > 0) {
+        const bounds = L.latLngBounds(
+          filteredMarkersByTags.map(marker => [marker.lat, marker.lng] as [number, number])
+        )
+        
+        if (bounds.isValid()) {
+          mapInstance.current.fitBounds(bounds, {
+            padding: [50, 50],
+            maxZoom: 15,
+            animate: true,
+            duration: 0.5
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Error adjusting map to filtered markers:', error)
+    }
+  }, [filteredMarkersByTags, mapLoaded])
+
+  // Tag filter handlers
+  const toggleTagFilter = (tag: string) => {
+    setSelectedTags(prev => {
+      const newSet = new Set(prev)
+      const wasSelected = newSet.has(tag)
+      if (wasSelected) {
+        newSet.delete(tag)
+      } else {
+        newSet.add(tag)
+      }
+      
+      // On mobile, automatically open the bottom menu when a tag is selected
+      if (isMobile && !wasSelected && newSet.size > 0) {
+        setShowMobileResults(true)
+      }
+      
+      return newSet
+    })
+  }
+
+  const clearTagFilters = () => {
+    setSelectedTags(new Set())
+    // Optionally close mobile menu when clearing filters, or keep it open
+    // setShowMobileResults(false)
+  }
+
+  // Auto-adjust map view when tags are selected/deselected
+  React.useEffect(() => {
+    if (!mapLoaded || !markerClusterRef.current) return
+
+    if (selectedTags.size > 0 && filteredMarkersByTags.length > 0) {
+      // Small delay to ensure markers are rendered and clustered
+      const timer = setTimeout(() => {
+        adjustMapToFilteredMarkers()
+      }, 400)
+      return () => clearTimeout(timer)
+    } else if (selectedTags.size === 0 && mapInstance.current && markerClusterRef.current) {
+      // Reset to show all markers when filters are cleared
+      try {
+        // Use cluster group bounds if available
+        if (markerClusterRef.current.getLayers().length > 0) {
+          const clusterBounds = markerClusterRef.current.getBounds()
+          if (clusterBounds.isValid()) {
+            mapInstance.current.fitBounds(clusterBounds.pad(0.1), {
+              animate: true,
+              duration: 0.5,
+              maxZoom: 12
+            })
+            return
+          }
+        }
+        
+        // Fallback: use all markers bounds
+        const allBounds = L.latLngBounds(
+          markers.map(marker => [marker.lat, marker.lng] as [number, number])
+        )
+        if (allBounds.isValid()) {
+          mapInstance.current.fitBounds(allBounds, {
+            padding: [50, 50],
+            maxZoom: 12,
+            animate: true,
+            duration: 0.5
+          })
+        }
+      } catch (error) {
+        console.error('Error resetting map view:', error)
+      }
+    }
+  }, [selectedTags.size, filteredMarkersByTags.length, adjustMapToFilteredMarkers, mapLoaded, markers])
+
   // Find nearby markers within a certain radius
   const findNearbyMarkers = (userLat: number, userLng: number, radiusKm: number = 5): Marker[] => {
-    return markers.filter(marker => {
+    const markersToUse = selectedTags.size > 0 ? filteredMarkersByTags : markers
+    return markersToUse.filter(marker => {
       const distance = calculateDistance(userLat, userLng, marker.lat, marker.lng)
       return distance <= radiusKm
     }).sort((a, b) => {
@@ -822,7 +964,8 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       
       try {
         const bounds = mapInstance.current.getBounds()
-        const visibleInViewport = markers.filter(marker => {
+        const markersToCheck = selectedTags.size > 0 ? filteredMarkersByTags : markers
+        const visibleInViewport = markersToCheck.filter(marker => {
           // Check if marker is within the current map viewport bounds
           return bounds.contains([marker.lat, marker.lng])
         })
@@ -1038,12 +1181,21 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                   
                   const hasChanged = transformedMarkers.some(current => {
                     const prev = prevMarkersMap.get(current.id)
-                    return !prev || 
-                           prev.visible !== current.visible || 
+                    if (!prev) return true
+                    
+                    // Compare tags arrays
+                    const prevTags = prev.tags || []
+                    const currentTags = current.tags || []
+                    const tagsChanged = prevTags.length !== currentTags.length ||
+                      prevTags.some((tag: string, idx: number) => tag !== currentTags[idx]) ||
+                      currentTags.some((tag: string, idx: number) => tag !== prevTags[idx])
+                    
+                    return prev.visible !== current.visible || 
                            prev.name !== current.name ||
                            prev.lat !== current.lat ||
                            prev.lng !== current.lng ||
-                           prev.address !== current.address
+                           prev.address !== current.address ||
+                           tagsChanged
                   })
                   
                   if (hasChanged) {
@@ -1066,7 +1218,9 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               searchBarTextColor: mapDoc.settings.searchBarTextColor || '#000000',
               searchBarHoverColor: mapDoc.settings.searchBarHoverColor || '#f3f4f6',
               // Name rules settings with defaults
-              nameRules: mapDoc.settings.nameRules || []
+              nameRules: mapDoc.settings.nameRules || [],
+              // Tags settings with defaults
+              tags: mapDoc.settings.tags || []
             }
             
             // Automatically fix any premium settings to be freemium-compliant
@@ -1239,7 +1393,9 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
     markersRef.current = []
 
     // Add new markers to cluster group
-    const visibleMarkers = markers.filter(marker => marker.visible !== false)
+    // Apply tag filter first, then filter by visibility
+    const markersToDisplay = selectedTags.size > 0 ? filteredMarkersByTags : markers
+    const visibleMarkers = markersToDisplay.filter(marker => marker.visible !== false)
     visibleMarkers.forEach((marker) => {
       
       // Get business category for this marker
@@ -1372,11 +1528,25 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
       
     })
 
-    // Fit bounds to show all markers using cluster group
-    if (visibleMarkers.length > 0 && markerClusterRef.current) {
-      mapInstance.current.fitBounds(markerClusterRef.current.getBounds().pad(0.1))
+    // Fit bounds to show all markers using cluster group (only if no tag filters are active)
+    // If tags are selected, the useEffect will handle the bounds adjustment
+    if (visibleMarkers.length > 0 && markerClusterRef.current && selectedTags.size === 0) {
+      // Small delay to ensure all markers are properly clustered
+      setTimeout(() => {
+        if (markerClusterRef.current && mapInstance.current) {
+          const clusterBounds = markerClusterRef.current.getBounds()
+          if (clusterBounds.isValid()) {
+            // Adjust bounds with optimal zoom - not too zoomed out, but showing all markers
+            mapInstance.current.fitBounds(clusterBounds.pad(0.15), {
+              animate: false, // No animation on initial load
+              maxZoom: 13, // Prevent being too zoomed in
+              padding: [40, 40] // Add padding for better view
+            })
+          }
+        }
+      }, 100)
     }
-  }, [markers, mapLoaded, folderIcons, loading])
+  }, [markers, mapLoaded, folderIcons, loading, selectedTags.size])
 
   // Update clustering when settings change
   useEffect(() => {
@@ -1627,6 +1797,20 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               </div>
             </div>
             
+            {/* Mobile Tag Filter - Under search bar - Compact with smooth transitions */}
+            {isMobile && availableTags.length > 0 && (
+              <div className="mt-1.5 px-1 transition-all duration-200 ease-in-out">
+                <PublicMapTagFilter
+                  availableTags={availableTags}
+                  selectedTags={selectedTags}
+                  onTagToggle={toggleTagFilter}
+                  onClearAll={clearTagFilters}
+                  markerCounts={tagMarkerCounts}
+                  mapSettings={mapSettings}
+                />
+              </div>
+            )}
+            
             {/* Mobile Watermark - Under search bar */}
             {isMobile && mapId !== 'demo-map-1000-markers' && showWatermark && (
               <div className="mt-2 flex justify-center">
@@ -1655,11 +1839,16 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
             userLocation={userLocation}
             calculateDistance={calculateDistance}
             renamedMarkers={renamedMarkers}
-            allMarkers={markers}
+            allMarkers={selectedTags.size > 0 ? filteredMarkersByTags : markers}
             viewportMarkers={viewportMarkers}
             onToggleLocation={toggleLocationMode}
             locationModeActive={locationModeActive}
             mapSettings={mapSettings}
+            availableTags={availableTags}
+            selectedTags={selectedTags}
+            onTagToggle={toggleTagFilter}
+            onClearTagFilters={clearTagFilters}
+            tagMarkerCounts={tagMarkerCounts}
           />
           
           {/* Language Toggle */}
@@ -1876,12 +2065,12 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
           <div className="bg-white/95 backdrop-blur-sm rounded-xl shadow-xl border border-white/20 overflow-hidden">
             <div className="flex overflow-x-auto scrollbar-hide py-2 px-3 space-x-2">
               {(() => {
-                // When searching, use searchResults
+                // When searching, use searchResults (already filtered by tags)
                 if (searchTerm) {
                   return searchResults
                 }
-                // On mobile, show all markers but prioritize viewport markers (works with or without location mode)
-                return markers
+                // On mobile, show filtered markers but prioritize viewport markers (works with or without location mode)
+                return selectedTags.size > 0 ? filteredMarkersByTags : markers
               })().slice(0, 30).map((marker) => {
                 // Check if marker is in viewport (on mobile, when not searching - works with location mode active)
                 const isInViewport = isMobile && !searchTerm && viewportMarkers.some(vm => vm.id === marker.id)
@@ -1906,7 +2095,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                       e.currentTarget.style.opacity = markerOpacity.toString()
                     }}
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-start justify-between gap-1">
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-gray-900 text-xs truncate leading-tight">
                           {renamedMarkers[marker.id] || marker.name}
@@ -1914,13 +2103,32 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
                         <div className="text-xs text-gray-500 truncate mt-0.5 leading-tight">
                           {marker.address}
                         </div>
+                        {/* Show tags - compact for mobile */}
+                        {(marker.tags || []).length > 0 && (
+                          <div className="flex flex-wrap gap-0.5 mt-1">
+                            {(marker.tags || []).slice(0, 1).map((tag) => (
+                              <span
+                                key={tag}
+                                className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium bg-pink-100 text-pink-700 border border-pink-200"
+                              >
+                                <Tag className="w-2 h-2" />
+                                {tag}
+                              </span>
+                            ))}
+                            {(marker.tags || []).length > 1 && (
+                              <span className="text-[9px] text-gray-400 px-0.5">
+                                +{(marker.tags || []).length - 1}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {userLocation && (
                           <div className="text-xs text-pinz-600 mt-0.5 leading-tight">
                             {calculateDistance(userLocation.lat, userLocation.lng, marker.lat, marker.lng).toFixed(1)}km
                           </div>
                         )}
                       </div>
-                      <MapPin className="h-2.5 w-2.5 text-gray-400 flex-shrink-0 ml-1" />
+                      <MapPin className="h-2.5 w-2.5 text-gray-400 flex-shrink-0 mt-0.5" />
                     </div>
                   </button>
                 )
@@ -1929,7 +2137,7 @@ const PublicMap: React.FC<PublicMapProps> = ({ mapId: propMapId, customSettings 
               {(() => {
                 const markersToShow = searchTerm 
                   ? searchResults 
-                  : markers
+                  : (selectedTags.size > 0 ? filteredMarkersByTags : markers)
                 return markersToShow.length === 0
               })() && (
                 <div className="flex-shrink-0 w-full flex items-center justify-center py-4 text-gray-500">

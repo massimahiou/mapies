@@ -1015,6 +1015,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             mapSettings={mapSettings}
             onMapSettingsChange={onMapSettingsChange}
             onOpenModal={onOpenEditManagementModal}
+            markers={markers}
           />
         )}
 
@@ -1572,6 +1573,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             onShowPublishModal={onShowPublishModal}
             currentMapId={currentMapId}
             onOpenModal={onOpenPublishManagementModal}
+            mapSettings={mapSettings}
+            markers={markers}
           />
         )}
 

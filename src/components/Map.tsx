@@ -5,11 +5,13 @@ import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import 'leaflet-draw'
 import 'leaflet-draw/dist/leaflet.draw.css'
-import { Navigation, MapPin, Search, X, List, Shapes } from 'lucide-react'
+import { Navigation, MapPin, Search, X, List, Shapes, Tag } from 'lucide-react'
 import { Rnd } from 'react-rnd'
-import PublicMapSidebar from './PublicMapSidebar'
+import PublicMapTagFilter from './PublicMapTagFilter'
+import LanguageToggle from './LanguageToggle'
 import { createMarkerHTML, createClusterOptions, applyNameRules } from '../utils/markerUtils'
-import { formatAddressForPopup } from '../utils/addressUtils'
+import { useEmbedMapLanguage } from '../hooks/useEmbedMapLanguage'
+import { formatAddressForPopup, formatAddressForList } from '../utils/addressUtils'
 import { useSharedMapFeatureAccess } from '../hooks/useSharedMapFeatureAccess'
 import MapFeatureLevelHeader from './MapFeatureLevelHeader'
 import { useResponsive } from '../hooks/useResponsive'
@@ -38,6 +40,7 @@ interface Marker {
   lng: number
   visible: boolean
   type: 'pharmacy' | 'grocery' | 'retail' | 'other'
+  tags?: string[]
   businessCategory?: {
     id: string
     name: string
@@ -93,7 +96,115 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   const [locationModeActive, setLocationModeActive] = useState(false)
   const [isSettingLocation, setIsSettingLocation] = useState(false) // Track when location is being set
   const [searchResults, setSearchResults] = useState<Marker[]>([])
-  const [renamedMarkers] = useState<Record<string, string>>({})
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
+  const { language, setLanguage } = useEmbedMapLanguage()
+
+  // Calculate available tags and counts
+  const availableTags = React.useMemo(() => {
+    const tagSet = new Set<string>()
+    markers.forEach(marker => {
+      (marker.tags || []).forEach(tag => tagSet.add(tag))
+    })
+    return Array.from(tagSet).sort()
+  }, [markers])
+
+  const tagMarkerCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {}
+    availableTags.forEach((tag: string) => {
+      counts[tag] = markers.filter(m => (m.tags || []).includes(tag)).length
+    })
+    return counts
+  }, [markers, availableTags])
+
+  // Filter markers by selected tags
+  const filteredMarkersByTags = React.useMemo(() => {
+    if (selectedTags.size === 0) return markers
+    return markers.filter(marker => {
+      const markerTags = marker.tags || []
+      return Array.from(selectedTags).some(tag => markerTags.includes(tag))
+    })
+  }, [markers, selectedTags])
+
+  // Tag filter handlers
+  const toggleTagFilter = (tag: string) => {
+    setSelectedTags(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(tag)) {
+        newSet.delete(tag)
+      } else {
+        newSet.add(tag)
+      }
+      return newSet
+    })
+  }
+
+  const clearTagFilters = () => {
+    setSelectedTags(new Set())
+  }
+
+  // Function to adjust map view to show filtered markers
+  const adjustMapToFilteredMarkers = React.useCallback(() => {
+    if (!mapInstance.current || !mapLoaded || !markerClusterRef.current) {
+      return
+    }
+
+    try {
+      if (markerClusterRef.current.getLayers().length > 0) {
+        const clusterBounds = markerClusterRef.current.getBounds()
+        if (clusterBounds.isValid()) {
+          mapInstance.current.fitBounds(clusterBounds.pad(0.1), {
+            animate: true,
+            duration: 0.5,
+            maxZoom: 15
+          })
+          return
+        }
+      }
+      if (filteredMarkersByTags.length > 0) {
+        const bounds = L.latLngBounds(
+          filteredMarkersByTags.map(marker => [marker.lat, marker.lng] as [number, number])
+        )
+        if (bounds.isValid()) {
+          mapInstance.current.fitBounds(bounds, {
+            padding: [50, 50],
+            maxZoom: 15,
+            animate: true,
+            duration: 0.5
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Error adjusting map to filtered markers:', error)
+    }
+  }, [filteredMarkersByTags, mapLoaded])
+
+  // Auto-adjust map view when tags are selected/deselected
+  React.useEffect(() => {
+    if (!mapLoaded || !markerClusterRef.current) return
+
+    if (selectedTags.size > 0 && filteredMarkersByTags.length > 0) {
+      const timer = setTimeout(() => {
+        adjustMapToFilteredMarkers()
+      }, 300)
+      return () => clearTimeout(timer)
+    } else if (selectedTags.size === 0 && markers.length > 0) {
+      // Reset to show all markers when filters are cleared
+      const timer = setTimeout(() => {
+        if (markerClusterRef.current && mapInstance.current) {
+          const clusterBounds = markerClusterRef.current.getBounds()
+          if (clusterBounds.isValid()) {
+            mapInstance.current.fitBounds(clusterBounds.pad(0.15), {
+              animate: true,
+              duration: 0.5,
+              maxZoom: 13,
+              padding: [40, 40]
+            })
+          }
+        }
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+  }, [selectedTags, filteredMarkersByTags, mapLoaded, adjustMapToFilteredMarkers, markers.length])
   
   // Listen for polygon edit mode toggle from ManageTabContent
   useEffect(() => {
@@ -171,10 +282,11 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     }
   }, [polygonLoaderResult])
   
-  const visibleMarkers = useMemo(() => 
-    markers.filter(marker => marker.visible !== false), 
-    [markers]
-  )
+  // Use filtered markers by tags if tags are selected, otherwise use all visible markers
+  const visibleMarkers = useMemo(() => {
+    const baseMarkers = selectedTags.size > 0 ? filteredMarkersByTags : markers
+    return baseMarkers.filter(marker => marker.visible !== false)
+  }, [markers, selectedTags, filteredMarkersByTags])
   
   // Determine if this is a shared map or owned map
   const isOwnedMap = currentMap && user ? isMapOwnedByUser(currentMap, user.uid, user.email) : true
@@ -341,7 +453,9 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
   // Search functionality
   const handleSearch = (term: string) => {
     setSearchTerm(term)
-    const filteredMarkersToUse = markers.filter(marker => 
+    // Use filtered markers by tags if tags are selected
+    const markersToSearch = selectedTags.size > 0 ? filteredMarkersByTags : markers
+    const filteredMarkersToUse = markersToSearch.filter(marker => 
       marker.name.toLowerCase().includes(term.toLowerCase()) ||
       marker.address.toLowerCase().includes(term.toLowerCase())
     )
@@ -349,7 +463,7 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
     if (term.trim()) {
       setSearchResults(filteredMarkersToUse)
     } else {
-      setSearchResults(markers) // Show all markers when search is cleared
+      setSearchResults(markersToSearch) // Show all markers when search is cleared
     }
   }
 
@@ -1354,24 +1468,164 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
               
               {/* Actual Map Content */}
               <div className="flex-1 flex overflow-hidden">
-                {/* Sidebar */}
-                <div className={`${isMobile ? 'hidden' : 'w-80'} flex-shrink-0`}>
-                  <PublicMapSidebar
-                    searchTerm={searchTerm}
-                    onSearchChange={handleSearch}
-                    searchResults={searchResults}
-                    nearbyMarkers={nearbyMarkers}
-                    showNearbyPlaces={showNearbyPlaces}
-                    onNavigateToMarker={navigateToMarker}
-                    userLocation={userLocation}
-                    calculateDistance={calculateDistance}
-                    renamedMarkers={renamedMarkers}
-                    allMarkers={visibleMarkers}
-                    onToggleLocation={locationModeActive ? clearLocationMode : getCurrentLocation}
-                    locationModeActive={locationModeActive}
-                    mapSettings={mapSettings}
-                  />
-                </div>
+                {/* Sidebar - Only show on desktop */}
+                {!isMobile && (
+                  <div className="w-80 flex-shrink-0 flex flex-col" style={{ backgroundColor: mapSettings.searchBarBackgroundColor, color: mapSettings.searchBarTextColor }}>
+                    {/* Search Bar */}
+                    <div className="flex-shrink-0 p-3 pb-2">
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <Search className="h-4 w-4 text-gray-400" />
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="Search locations"
+                          value={searchTerm}
+                          onChange={(e) => handleSearch(e.target.value)}
+                          className="block w-full pl-10 pr-12 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-sm min-w-0"
+                        />
+                        <div className="absolute inset-y-0 right-0 flex items-center pr-1">
+                          {searchTerm ? (
+                            <button
+                              onClick={() => handleSearch('')}
+                              className="flex items-center justify-center w-8 h-8 text-gray-400 hover:text-gray-600 rounded transition-colors"
+                              title="Clear search"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          ) : null}
+                          <button
+                            onClick={locationModeActive ? clearLocationMode : getCurrentLocation}
+                            className={`flex items-center justify-center w-8 h-8 rounded transition-colors ${
+                              locationModeActive
+                                ? 'text-pinz-600 hover:text-pinz-700'
+                                : 'text-gray-400 hover:text-gray-600'
+                            }`}
+                            title="Find my location"
+                          >
+                            <Navigation className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {/* Tag Filter */}
+                      {availableTags.length > 0 && (
+                        <div className="mt-2 mb-0 transition-all duration-200 ease-in-out">
+                          <PublicMapTagFilter
+                            availableTags={availableTags}
+                            selectedTags={selectedTags}
+                            onTagToggle={toggleTagFilter}
+                            onClearAll={clearTagFilters}
+                            markerCounts={tagMarkerCounts}
+                            mapSettings={mapSettings}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      <div className="px-4 pt-1 pb-4">
+                        {(() => {
+                          const markersToShow = searchTerm.trim() !== '' ? searchResults : (selectedTags.size > 0 ? filteredMarkersByTags : visibleMarkers)
+                          
+                          const sortedMarkers = markersToShow.sort((a, b) => {
+                            if (showNearbyPlaces && userLocation) {
+                              const aDistance = calculateDistance(userLocation.lat, userLocation.lng, a.lat, a.lng)
+                              const bDistance = calculateDistance(userLocation.lat, userLocation.lng, b.lat, b.lng)
+                              return aDistance - bDistance
+                            }
+                            return a.name.localeCompare(b.name)
+                          })
+
+                          if (sortedMarkers.length === 0) {
+                            return (
+                              <div className="text-center py-8 text-gray-500">
+                                <Search className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                                <p className="text-sm">No results found</p>
+                                <p className="text-xs mt-1">Try adjusting your search</p>
+                              </div>
+                            )
+                          }
+
+                          return (
+                            <>
+                              {showNearbyPlaces && nearbyMarkers.length > 0 && (
+                                <div className="mb-2 px-2 py-1">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-3 h-3 bg-pinz-200 rounded-full flex items-center justify-center">
+                                      <Navigation className="w-2 h-2 text-pinz-500" />
+                                    </div>
+                                    <span className="text-xs text-pinz-600 font-medium">
+                                      Sorted by distance
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {sortedMarkers.map((marker) => {
+                                const distance = userLocation ? calculateDistance(userLocation.lat, userLocation.lng, marker.lat, marker.lng) : 0
+                                const isNearby = nearbyMarkers.some(nearby => nearby.id === marker.id)
+                                
+                                return (
+                                  <button
+                                    key={marker.id}
+                                    onClick={() => navigateToMarker(marker)}
+                                    className="w-full flex items-center gap-3 p-3 transition-all duration-200 text-left rounded-lg mb-2 group"
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.backgroundColor = mapSettings.searchBarHoverColor
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.backgroundColor = 'transparent'
+                                    }}
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium truncate" style={{ color: mapSettings.searchBarTextColor }}>
+                                        {applyNameRules(marker.name, mapSettings.nameRules, true)}
+                                      </p>
+                                      <p className="text-xs truncate" style={{ color: mapSettings.searchBarTextColor, opacity: 0.7 }}>
+                                        {formatAddressForList(marker.address)}
+                                      </p>
+                                      {(marker.tags || []).length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-1.5">
+                                          {(marker.tags || []).slice(0, 2).map((tag) => (
+                                            <span
+                                              key={tag}
+                                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-pink-100 text-pink-700 border border-pink-200"
+                                            >
+                                              <Tag className="w-2.5 h-2.5" />
+                                              {tag}
+                                            </span>
+                                          ))}
+                                          {(marker.tags || []).length > 2 && (
+                                            <span className="text-[10px] text-gray-500 px-1">
+                                              +{(marker.tags || []).length - 2}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                      {showNearbyPlaces && distance > 0 && (
+                                        <p className="text-xs font-medium mt-1 text-pinz-600">
+                                          {distance.toFixed(1)} km away
+                                        </p>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      {isNearby && showNearbyPlaces && (
+                                        <div className="w-2 h-2 bg-pinz-500 rounded-full"></div>
+                                      )}
+                                      <MapPin className="w-4 h-4 transition-colors" style={{ color: mapSettings.searchBarTextColor }} />
+                                    </div>
+                                  </button>
+                                )
+                              })}
+                            </>
+                          )
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Map */}
                 <div className="flex-1 relative overflow-hidden min-w-0 min-h-0">
@@ -1462,9 +1716,10 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
           )}
           {/* Store Locator List - Only show on Edit tab */}
           {activeTab === 'edit' && (
-            <div className="absolute top-0 left-0 z-10 w-80 h-full flex flex-col" style={{ backgroundColor: mapSettings.searchBarBackgroundColor }}>
+            <>
+              <div className="absolute top-0 left-0 z-10 w-80 h-full flex flex-col" style={{ backgroundColor: mapSettings.searchBarBackgroundColor, color: mapSettings.searchBarTextColor }}>
                 {/* Search Bar */}
-                <div className="p-4">
+                <div className="flex-shrink-0 p-3 pb-2">
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Search className="h-4 w-4 text-gray-400" />
@@ -1473,129 +1728,181 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                       type="text"
                       placeholder="Search locations"
                       value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="block w-full pl-10 pr-20 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-sm"
+                      onChange={(e) => handleSearch(e.target.value)}
+                      className="block w-full pl-10 pr-12 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-sm text-sm min-w-0"
                     />
-                    <div className="absolute inset-y-0 right-0 flex items-center">
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-1">
                       {searchTerm ? (
                         <button
-                          onClick={() => setSearchTerm('')}
-                          className="absolute inset-y-0 right-12 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                          onClick={() => handleSearch('')}
+                          className="flex items-center justify-center w-8 h-8 text-gray-400 hover:text-gray-600 rounded transition-colors"
+                          title="Clear search"
                         >
                           <X className="h-4 w-4" />
                         </button>
                       ) : null}
                       <button
                         onClick={locationModeActive ? clearLocationMode : getCurrentLocation}
-                        className={`absolute inset-y-0 right-0 pr-3 flex items-center transition-colors ${
+                        className={`flex items-center justify-center w-8 h-8 rounded transition-colors ${
                           locationModeActive
                             ? 'text-pinz-600 hover:text-pinz-700'
                             : 'text-gray-400 hover:text-gray-600'
                         }`}
-                        title={locationModeActive ? "Turn off location mode" : "Find my location"}
+                        title="Find my location"
                       >
                         <Navigation className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
+                  
+                  {/* Tag Filter */}
+                  {availableTags.length > 0 && (
+                    <div className="mt-2 mb-0 transition-all duration-200 ease-in-out">
+                      <PublicMapTagFilter
+                        availableTags={availableTags}
+                        selectedTags={selectedTags}
+                        onTagToggle={toggleTagFilter}
+                        onClearAll={clearTagFilters}
+                        markerCounts={tagMarkerCounts}
+                        mapSettings={mapSettings}
+                      />
+                    </div>
+                  )}
                 </div>
-                
-                <div className="p-3">
-                  <div>
-                    <h3 className="text-sm font-semibold" style={{ color: mapSettings.searchBarTextColor }}>
-                      {showNearbyPlaces && locationModeActive ? 'Places Near You' : 'Store Locations'}
-                    </h3>
-                    <p className="text-xs" style={{ color: mapSettings.searchBarTextColor, opacity: 0.7 }}>
-                      {showNearbyPlaces && locationModeActive
-                        ? `${nearbyMarkers.length} within 5km`
-                        : `${visibleMarkers.length} locations`
+
+                {/* Content */}
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  <div className="px-4 pt-1 pb-4">
+                    {(() => {
+                      // Determine which markers to show
+                      const markersToShow = searchTerm.trim() !== '' ? searchResults : (selectedTags.size > 0 ? filteredMarkersByTags : visibleMarkers)
+                      
+                      // Sort markers
+                      const sortedMarkers = markersToShow.sort((a, b) => {
+                        // If location mode is active, sort by distance
+                        if (showNearbyPlaces && userLocation) {
+                          const aDistance = calculateDistance(userLocation.lat, userLocation.lng, a.lat, a.lng)
+                          const bDistance = calculateDistance(userLocation.lat, userLocation.lng, b.lat, b.lng)
+                          return aDistance - bDistance
+                        }
+                        // Otherwise sort alphabetically
+                        return a.name.localeCompare(b.name)
+                      })
+
+                      if (sortedMarkers.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-gray-500">
+                            <Search className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                            <p className="text-sm">No results found</p>
+                            <p className="text-xs mt-1">Try adjusting your search</p>
+                          </div>
+                        )
                       }
-                    </p>
+
+                      return (
+                        <>
+                          {/* Location status header */}
+                          {showNearbyPlaces && nearbyMarkers.length > 0 && (
+                            <div className="mb-2 px-2 py-1">
+                              <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 bg-pinz-200 rounded-full flex items-center justify-center">
+                                  <Navigation className="w-2 h-2 text-pinz-500" />
+                                </div>
+                                <span className="text-xs text-pinz-600 font-medium">
+                                  Sorted by distance
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Marker list */}
+                          {sortedMarkers.map((marker) => {
+                            const distance = userLocation ? calculateDistance(userLocation.lat, userLocation.lng, marker.lat, marker.lng) : 0
+                            const isNearby = nearbyMarkers.some(nearby => nearby.id === marker.id)
+                            
+                            return (
+                              <button
+                                key={marker.id}
+                                onClick={() => navigateToMarker(marker)}
+                                className="w-full flex items-center gap-3 p-3 transition-all duration-200 text-left rounded-lg mb-2 group"
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = mapSettings.searchBarHoverColor
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = 'transparent'
+                                }}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate" style={{ color: mapSettings.searchBarTextColor }}>
+                                    {applyNameRules(marker.name, mapSettings.nameRules, true)}
+                                  </p>
+                                  <p className="text-xs truncate" style={{ color: mapSettings.searchBarTextColor, opacity: 0.7 }}>
+                                    {formatAddressForList(marker.address)}
+                                  </p>
+                                  {/* Show tags */}
+                                  {(marker.tags || []).length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1.5">
+                                      {(marker.tags || []).slice(0, 2).map((tag) => (
+                                        <span
+                                          key={tag}
+                                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-pink-100 text-pink-700 border border-pink-200"
+                                        >
+                                          <Tag className="w-2.5 h-2.5" />
+                                          {tag}
+                                        </span>
+                                      ))}
+                                      {(marker.tags || []).length > 2 && (
+                                        <span className="text-[10px] text-gray-500 px-1">
+                                          +{(marker.tags || []).length - 2}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  {/* Show distance when location mode is active */}
+                                  {showNearbyPlaces && distance > 0 && (
+                                    <p className="text-xs font-medium mt-1 text-pinz-600">
+                                      {distance.toFixed(1)} km away
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {isNearby && showNearbyPlaces && (
+                                    <div className="w-2 h-2 bg-pinz-500 rounded-full"></div>
+                                  )}
+                                  <MapPin className="w-4 h-4 transition-colors" style={{ color: mapSettings.searchBarTextColor }} />
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
-                
-                <div className="flex-1 overflow-y-auto p-3">
-                  {(() => {
-                    const displayMarkers = visibleMarkers
-                    
-                    if (displayMarkers.length === 0) {
-                      return (
-                        <div className="text-center text-sm" style={{ color: mapSettings.searchBarTextColor, opacity: 0.7 }}>
-                          {searchTerm ? (
-                            <>
-                              <p>No stores found</p>
-                              <p className="text-xs mt-1">Try adjusting your search</p>
-                            </>
-                          ) : showNearbyPlaces && locationModeActive ? (
-                            <>
-                              <p>No nearby stores</p>
-                              <p className="text-xs mt-1">No stores within 5km radius</p>
-                            </>
-                          ) : (
-                            <>
-                              <p>No stores added yet</p>
-                              <p className="text-xs mt-1">Add stores using the sidebar</p>
-                            </>
-                          )}
-                        </div>
-                      )
-                    }
-                    
-                    return displayMarkers.map((marker: Marker) => {
-                      const distance = userLocation ? calculateDistance(userLocation.lat, userLocation.lng, marker.lat, marker.lng) : 0
-                      const isNearby = nearbyMarkers.some(nearby => nearby.id === marker.id)
-                      
-                      return (
-                        <button
-                          key={marker.id}
-                          onClick={() => navigateToMarker(marker)}
-                          className="w-full flex items-center gap-3 p-3 transition-all duration-200 text-left group"
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = mapSettings.searchBarHoverColor
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent'
-                          }}
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate" style={{ color: mapSettings.searchBarTextColor }}>
-                              {applyNameRules(marker.name, mapSettings.nameRules, true)}
-                            </p>
-                            <p className="text-xs truncate" style={{ color: mapSettings.searchBarTextColor, opacity: 0.7 }}>
-                              {marker.address}
-                            </p>
-                            {showNearbyPlaces && locationModeActive && distance > 0 && (
-                              <p className="text-xs text-pinz-600 font-medium mt-1">
-                                {distance.toFixed(1)} km away
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {isNearby && showNearbyPlaces && locationModeActive && (
-                              <div className="w-2 h-2 bg-pinz-500 rounded-full"></div>
-                            )}
-                            <MapPin className="w-4 h-4 transition-colors" style={{ color: mapSettings.searchBarTextColor }} />
-                          </div>
-                        </button>
-                      )
-                    })
-                  })()}
-                </div>
               </div>
-            )}
+              
+              {/* Language Toggle */}
+              <LanguageToggle 
+                language={language} 
+                onLanguageChange={setLanguage}
+                isMobile={isMobile}
+                showToggle={true}
+              />
+            </>
+          )}
           {locationError && (
                <div className="absolute top-16 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded text-sm z-10 max-w-xs">
                  <div className="font-semibold">Location Error</div>
                  <div className="text-xs mt-1">{locationError}</div>
                </div>
              )}
-             {/* Location Button */}
+             {/* Location Button - Positioned below LanguageToggle */}
              <button
                onClick={locationModeActive ? clearLocationMode : getCurrentLocation}
-               className={`absolute top-4 right-4 rounded-lg p-2 shadow-lg z-10 transition-all duration-200 ${
-                 locationModeActive 
-                   ? 'bg-pinz-50 border-2 border-pinz-300 hover:bg-pinz-100' 
-                   : 'bg-white hover:bg-gray-50 border border-gray-300'
+               className={`absolute top-16 right-4 z-[1000] p-3 rounded-lg shadow-lg border transition-all duration-200 ${
+                 locationModeActive
+                   ? 'bg-pinz-50 hover:bg-pinz-100 text-pinz-600 border-pinz-200 shadow-pinz-100'
+                   : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200 hover:border-gray-300 hover:shadow-xl'
                }`}
                title={locationModeActive ? "Clear location mode" : "Use my location"}
              >
@@ -1604,18 +1911,18 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                }`} />
              </button>
              
-             {/* Zoom Controls */}
-             <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1">
+             {/* Zoom Controls - Desktop only, positioned like PublicMap */}
+             <div className="hidden md:flex absolute bottom-4 right-4 z-[1000] flex-col gap-1">
                <button
                  onClick={() => {
                    if (mapInstance.current) {
                      mapInstance.current.zoomIn()
                    }
                  }}
-                 className="bg-white hover:bg-gray-50 border border-gray-300 rounded-lg p-2 shadow-lg transition-colors"
+                 className="bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
                  title="Zoom in"
                >
-                 <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                  </svg>
                </button>
@@ -1625,10 +1932,10 @@ const Map: React.FC<MapProps> = ({ markers, activeTab, mapSettings, isPublishMod
                      mapInstance.current.zoomOut()
                    }
                  }}
-                 className="bg-white hover:bg-gray-50 border border-gray-300 rounded-lg p-2 shadow-lg transition-colors"
+                 className="bg-white hover:bg-gray-50 text-gray-700 p-3 rounded-lg shadow-lg border border-gray-200 transition-colors"
                  title="Zoom out"
                >
-                 <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
                  </svg>
                </button>

@@ -2,18 +2,25 @@ import React from 'react'
 import { X } from 'lucide-react'
 import PublishTabContent from './sidebar/PublishTabContent'
 
+interface MapSettings {
+  tags?: string[]
+  [key: string]: any
+}
+
 interface PublishManagementModalProps {
   isOpen: boolean
   onClose: () => void
   onShowPublishModal: () => void
   currentMapId: string | null
+  mapSettings?: MapSettings
 }
 
 const PublishManagementModal: React.FC<PublishManagementModalProps> = ({
   isOpen,
   onClose,
   onShowPublishModal,
-  currentMapId
+  currentMapId,
+  mapSettings = {}
 }) => {
   if (!isOpen) return null
 
@@ -37,6 +44,7 @@ const PublishManagementModal: React.FC<PublishManagementModalProps> = ({
           <PublishTabContent
             onShowPublishModal={onShowPublishModal}
             currentMapId={currentMapId}
+            mapSettings={mapSettings}
             // Don't pass onOpenModal to avoid recursive modal opening
           />
         </div>

@@ -282,7 +282,9 @@ const EmbedMap: React.FC = () => {
             searchBarTextColor: mapData.settings.searchBarTextColor || '#000000',
             searchBarHoverColor: mapData.settings.searchBarHoverColor || '#f3f4f6',
             // Name rules settings with defaults
-            nameRules: mapData.settings.nameRules || []
+            nameRules: mapData.settings.nameRules || [],
+            // Tags settings with defaults
+            tags: mapData.settings.tags || []
           }
           
           // Automatically fix any premium settings to be freemium-compliant

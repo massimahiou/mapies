@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, ChevronUp, Folder, Edit2, Check, Upload, Unlink, Maximize2, Info, Square } from 'lucide-react'
+import { Search, Eye, EyeOff, Trash2, X, Settings, ChevronDown, ChevronRight, ChevronUp, Folder, Edit2, Check, Upload, Unlink, Maximize2, Info, Square, Tag } from 'lucide-react'
+import TagLegend from '../TagLegend'
+import TagManagement from '../TagManagement'
+import TagSelector from '../TagSelector'
 import { applyNameRules } from '../../utils/markerUtils'
 import { createMarkerGroup, updateMarkerGroup, deleteMarkerGroup, getMarkerGroupByName, uploadFolderIconBase64, updateMarkerGroupIcon, removeMarkerGroupIcon } from '../../firebase/firestore'
 import { useToast } from '../../contexts/ToastContext'
@@ -20,6 +23,7 @@ interface Marker {
   visible: boolean
   type: 'pharmacy' | 'grocery' | 'retail' | 'other'
   order?: number // Display order for markers
+  tags?: string[] // Tags for filtering
 }
 
 interface NameRule {
@@ -70,12 +74,15 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const [editingMarker, setEditingMarker] = useState<string | null>(null)
   const [editingGroupName, setEditingGroupName] = useState('')
   const [editingMarkerName, setEditingMarkerName] = useState('')
+  const [editingMarkerTags, setEditingMarkerTags] = useState<string | null>(null) // Marker ID being edited for tags
+  const [selectedMarkerTags, setSelectedMarkerTags] = useState<string[]>([]) // Tags selected for the marker being edited
   const [folderIcons, setFolderIcons] = useState<Record<string, string>>({})
   const [isUngrouping, setIsUngrouping] = useState(false)
   const [markerToDelete, setMarkerToDelete] = useState<{ id: string; name: string } | null>(null)
   const [isDeletingMarker, setIsDeletingMarker] = useState(false)
   const [showLimitationModal, setShowLimitationModal] = useState<{ type: 'marker-usage' | 'name-rules' } | null>(null)
   const [selectedMarkerIds, setSelectedMarkerIds] = useState<Set<string>>(new Set())
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
 
   // Transfer rules state
   const [sourceMapRules, setSourceMapRules] = useState<NameRule[]>([])
@@ -296,10 +303,54 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     }
   }
 
-  const filteredMarkers = markers.filter(marker =>
+  // Filter markers by search term and tags
+  const filteredMarkers = useMemo(() => {
+    return markers.filter(marker => {
+      // Search filter
+      const matchesSearch = 
     marker.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     marker.address.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+      
+      if (!matchesSearch) return false
+      
+      // Tag filter - if tags are selected, marker must have at least one
+      if (selectedTags.size > 0) {
+        const markerTags = marker.tags || []
+        return Array.from(selectedTags).some(tag => markerTags.includes(tag))
+      }
+      
+      return true
+    })
+  }, [markers, searchTerm, selectedTags])
+
+  // Calculate marker counts per tag
+  const tagMarkerCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    const availableTags = mapSettings.tags || []
+    
+    availableTags.forEach((tag: string) => {
+      counts[tag] = markers.filter(m => (m.tags || []).includes(tag)).length
+    })
+    
+    return counts
+  }, [markers, mapSettings.tags])
+
+  // Tag filter handlers
+  const toggleTagFilter = (tag: string) => {
+    setSelectedTags(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(tag)) {
+        newSet.delete(tag)
+      } else {
+        newSet.add(tag)
+      }
+      return newSet
+    })
+  }
+
+  const clearTagFilters = () => {
+    setSelectedTags(new Set())
+  }
 
   // Load existing marker groups on component mount and when dependencies change
   useEffect(() => {
@@ -1278,6 +1329,59 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
     setEditingMarker(null)
     setEditingGroupName('')
     setEditingMarkerName('')
+    setEditingMarkerTags(null)
+    setSelectedMarkerTags([])
+  }
+
+  // Tag editing functions
+  const startEditingMarkerTags = (markerId: string, currentTags: string[] = []) => {
+    setEditingMarkerTags(markerId)
+    setSelectedMarkerTags(currentTags)
+  }
+
+  const saveMarkerTags = async (markerId: string) => {
+    try {
+      const { updateMapMarker } = await import('../../firebase/maps')
+      const { deleteField } = await import('firebase/firestore')
+      
+      // For shared maps, use the map owner's ID
+      const markerOwnerId = currentMap?.userId || userId
+      
+      console.log('💾 Saving marker tags:', {
+        markerId,
+        markerOwnerId,
+        mapId,
+        tags: selectedMarkerTags,
+        tagsLength: selectedMarkerTags.length
+      })
+      
+      // Prepare update data - updateMapMarker will add updatedAt
+      const updateData: any = {}
+      
+      if (selectedMarkerTags.length > 0) {
+        updateData.tags = selectedMarkerTags
+      } else {
+        // Use deleteField to remove tags if array is empty
+        updateData.tags = deleteField()
+      }
+      
+      await updateMapMarker(markerOwnerId, mapId || '', markerId, updateData)
+      
+      console.log('✅ Marker tags updated successfully in Firestore:', markerId, selectedMarkerTags)
+      showToast({
+        type: 'success',
+        title: 'Tags Updated',
+        message: 'Marker tags have been updated'
+      })
+      cancelEdit()
+    } catch (error) {
+      console.error('❌ Error updating marker tags:', error)
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'Failed to update marker tags'
+      })
+    }
   }
 
 
@@ -1687,6 +1791,21 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
         )}
       </div>
 
+      {/* Tags Management Section */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-800">Tags</h3>
+        </div>
+        {userId && mapId && (
+          <TagManagement
+            userId={userId}
+            mapId={mapId}
+            currentTags={mapSettings.tags || []}
+            onTagsChange={(tags) => onMapSettingsChange({ ...mapSettings, tags })}
+          />
+        )}
+      </div>
+
       {/* Search */}
       <div className="flex items-center gap-2 mb-4">
         <Search className="w-4 h-4 text-gray-400" />
@@ -1698,6 +1817,17 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
           className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
         />
       </div>
+
+      {/* Tag Legend - Lightweight filter */}
+      {(mapSettings.tags || []).length > 0 && (
+        <TagLegend
+          availableTags={mapSettings.tags || []}
+          selectedTags={selectedTags}
+          onTagToggle={toggleTagFilter}
+          onClearAll={clearTagFilters}
+          markerCounts={tagMarkerCounts}
+        />
+      )}
 
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
@@ -1980,6 +2110,62 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                                       Original: {marker.name}
                                     </p>
                                   )}
+                                  {/* Tag badges - subtle and compact */}
+                                  {editingMarkerTags === marker.id ? (
+                                    <div className="mt-2 space-y-2">
+                                      <TagSelector
+                                        availableTags={mapSettings.tags || []}
+                                        selectedTags={selectedMarkerTags}
+                                        onTagsChange={setSelectedMarkerTags}
+                                      />
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={() => saveMarkerTags(marker.id)}
+                                          className="px-2 py-1 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 transition-colors flex items-center gap-1"
+                                        >
+                                          <Check className="w-3 h-3" />
+                                          Save
+                                        </button>
+                                        <button
+                                          onClick={cancelEdit}
+                                          className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded transition-colors flex items-center gap-1"
+                                        >
+                                          <X className="w-3 h-3" />
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-wrap gap-1 mt-1 items-center">
+                                      {(marker.tags || []).length > 0 ? (
+                                        <>
+                                          {(marker.tags || []).slice(0, 2).map((tag) => (
+                                            <span
+                                              key={tag}
+                                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-pink-50 text-pink-700 border border-pink-200"
+                                            >
+                                              <Tag className="w-2.5 h-2.5" />
+                                              {tag}
+                                            </span>
+                                          ))}
+                                          {(marker.tags || []).length > 2 && (
+                                            <span className="text-[10px] text-gray-400 px-1">
+                                              +{(marker.tags || []).length - 2}
+                                            </span>
+                                  )}
+                                </>
+                                      ) : (
+                                        <span className="text-[10px] text-gray-400 italic">No tags</span>
+                                      )}
+                                      <button
+                                        onClick={() => startEditingMarkerTags(marker.id, marker.tags || [])}
+                                        className="ml-1 p-0.5 text-gray-400 hover:text-pink-600 hover:bg-pink-50 rounded transition-colors"
+                                        title="Edit tags"
+                                      >
+                                        <Tag className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -2154,6 +2340,62 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                                 <p className="text-xs text-gray-400 truncate italic">
                                   Original: {marker.name}
                                 </p>
+                              )}
+                              {/* Tag badges - subtle and compact */}
+                              {editingMarkerTags === marker.id ? (
+                                <div className="mt-2 space-y-2">
+                                  <TagSelector
+                                    availableTags={mapSettings.tags || []}
+                                    selectedTags={selectedMarkerTags}
+                                    onTagsChange={setSelectedMarkerTags}
+                                  />
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => saveMarkerTags(marker.id)}
+                                      className="px-2 py-1 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 transition-colors flex items-center gap-1"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                      Save
+                                    </button>
+                                    <button
+                                      onClick={cancelEdit}
+                                      className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded transition-colors flex items-center gap-1"
+                                    >
+                                      <X className="w-3 h-3" />
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap gap-1 mt-1 items-center">
+                                  {(marker.tags || []).length > 0 ? (
+                                    <>
+                                      {(marker.tags || []).slice(0, 2).map((tag) => (
+                                        <span
+                                          key={tag}
+                                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-pink-50 text-pink-700 border border-pink-200"
+                                        >
+                                          <Tag className="w-2.5 h-2.5" />
+                                          {tag}
+                                        </span>
+                                      ))}
+                                      {(marker.tags || []).length > 2 && (
+                                        <span className="text-[10px] text-gray-400 px-1">
+                                          +{(marker.tags || []).length - 2}
+                                        </span>
+                              )}
+                            </>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-400 italic">No tags</span>
+                                  )}
+                                  <button
+                                    onClick={() => startEditingMarkerTags(marker.id, marker.tags || [])}
+                                    className="ml-1 p-0.5 text-gray-400 hover:text-pink-600 hover:bg-pink-50 rounded transition-colors"
+                                    title="Edit tags"
+                                  >
+                                    <Tag className="w-3 h-3" />
+                                  </button>
+                                </div>
                               )}
                             </>
                           )}

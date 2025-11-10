@@ -3,6 +3,7 @@ import { X, Plus, Trash2 } from 'lucide-react'
 import { addMarkerToMap, getMapMarkers } from '../firebase/maps'
 import { checkForDuplicates, AddressData } from '../utils/duplicateDetection'
 import { useFeatureAccess } from '../hooks/useFeatureAccess'
+import TagSelector from './TagSelector'
 
 interface Marker {
   id: string
@@ -12,6 +13,7 @@ interface Marker {
   lng: number
   visible: boolean
   type: 'pharmacy' | 'grocery' | 'retail' | 'other'
+  tags?: string[]
 }
 
 interface AddMarkerModalProps {
@@ -52,6 +54,28 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
     { id: '1', name: '', address: '' }
   ])
   const [isProcessing, setIsProcessing] = useState(false)
+  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [availableTags, setAvailableTags] = useState<string[]>([])
+
+  // Load available tags from map settings
+  useEffect(() => {
+    const loadTags = async () => {
+      if (!userId || !currentMapId) return
+      try {
+        const { getUserMaps } = await import('../firebase/maps')
+        const userMaps = await getUserMaps(userId)
+        const currentMap = userMaps.find(m => m.id === currentMapId)
+        if (currentMap?.settings?.tags) {
+          setAvailableTags(currentMap.settings.tags)
+        }
+      } catch (error) {
+        console.error('Error loading tags:', error)
+      }
+    }
+    if (isOpen) {
+      loadTags()
+    }
+  }, [userId, currentMapId, isOpen])
 
   // Geocoding function using OpenStreetMap Nominatim
   // Note: Marker-by-marker geocoding is allowed for all users (including freemium)
@@ -264,7 +288,8 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
               lat: coordinates.lat,
               lng: coordinates.lng,
               type: 'other',
-              visible: true
+              visible: true,
+              tags: selectedTags.length > 0 ? selectedTags : undefined
             }, hasSmartGrouping)
             
             // Also add to local state for immediate UI update
@@ -275,7 +300,8 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
               lat: coordinates.lat,
               lng: coordinates.lng,
               visible: true,
-              type: 'other'
+              type: 'other',
+              tags: selectedTags.length > 0 ? selectedTags : undefined
             }
             newMarkers.push(marker)
           } catch (error) {
@@ -414,6 +440,18 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
           <Plus className="w-4 h-4 text-gray-400" />
           <span className="text-sm text-gray-600">Add another marker</span>
         </button>
+
+        {/* Tag Selector */}
+        {availableTags.length > 0 && (
+          <div className="mb-4 p-3 border border-gray-200 rounded-lg bg-gray-50">
+            <TagSelector
+              availableTags={availableTags}
+              selectedTags={selectedTags}
+              onTagsChange={setSelectedTags}
+              disabled={isProcessing || isUploading}
+            />
+          </div>
+        )}
 
         {/* Loading State */}
         {isUploading && (

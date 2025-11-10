@@ -1,7 +1,8 @@
 import React from 'react'
-import { Maximize2, Lock, MapPin } from 'lucide-react'
+import { Maximize2, Lock, MapPin, Tag } from 'lucide-react'
 import { useFeatureAccess } from '../../hooks/useFeatureAccess'
 import { isSettingFreemiumCompliant } from '../../utils/freemiumDefaults'
+import PublicMapPreview from '../PublicMapPreview'
 
 interface MapSettings {
   style: string
@@ -19,18 +20,32 @@ interface MapSettings {
   searchBarHoverColor: string
   // Name rules settings
   nameRules: Array<{ id: string; contains: string; renameTo: string }>
+  // Tags settings
+  tags?: string[]
+}
+
+interface Marker {
+  id: string
+  name: string
+  address: string
+  lat: number
+  lng: number
+  visible: boolean
+  tags?: string[]
 }
 
 interface EditTabContentProps {
   mapSettings: MapSettings
   onMapSettingsChange: (settings: MapSettings) => void
   onOpenModal?: () => void
+  markers?: Marker[]
 }
 
 const EditTabContent: React.FC<EditTabContentProps> = ({
   mapSettings,
   onMapSettingsChange,
-  onOpenModal
+  onOpenModal,
+  markers = []
 }) => {
   const { customizationLevel } = useFeatureAccess()
 
@@ -767,6 +782,76 @@ const EditTabContent: React.FC<EditTabContentProps> = ({
             </div>
           </div>
         )}
+      </div>
+
+      {/* Public Map Preview */}
+      <div className="mb-8">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Public Map Preview</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          This is how your map will appear to public users. All customizations (colors, search bar, tags, watermark) are shown here.
+        </p>
+        {markers.length > 0 ? (
+          <PublicMapPreview 
+            markers={markers.filter(m => m.visible)} 
+            mapSettings={mapSettings}
+            height="500px"
+          />
+        ) : (
+          <div className="p-8 bg-gray-50 rounded-lg border border-gray-200 text-center">
+            <MapPin className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-sm text-gray-500 mb-2">No markers to preview</p>
+            <p className="text-xs text-gray-400">
+              Add markers in the <strong>Data</strong> tab to see the preview.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Tags Preview Section */}
+      <div className="mb-8">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <Tag className="w-5 h-5 text-pink-600" />
+          Tags Preview
+        </h3>
+        <p className="text-sm text-gray-600 mb-4">
+          This is how your tags will appear in the public map. Users can filter markers by clicking on tags.
+        </p>
+        
+        {/* Preview of tag filter UI */}
+        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+          {(mapSettings.tags || []).length > 0 ? (
+            <>
+              <div className="mb-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Tag className="w-4 h-4 text-gray-500" />
+                  <span className="text-xs font-medium text-gray-700">Filter by tags</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(mapSettings.tags || []).map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-pink-600 text-white shadow-sm"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-3">
+                💡 Tags are managed in the <strong>Manage</strong> tab. Users can click tags to filter markers on the map.
+              </p>
+            </>
+          ) : (
+            <div className="text-center py-4">
+              <Tag className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+              <p className="text-sm text-gray-500 mb-2">No tags yet</p>
+              <p className="text-xs text-gray-400">
+                Create tags in the <strong>Manage</strong> tab to categorize your markers.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
