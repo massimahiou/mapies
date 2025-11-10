@@ -49,7 +49,7 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
   onShowDuplicateNotification
 }) => {
   console.log('AddMarkerModal rendering, isOpen:', isOpen)
-  const { hasSmartGrouping, canAddMarkers } = useFeatureAccess()
+  const { hasSmartGrouping, canAddMarkers, hasTags } = useFeatureAccess()
   const [markerRows, setMarkerRows] = useState<MarkerRow[]>([
     { id: '1', name: '', address: '' }
   ])
@@ -442,7 +442,7 @@ const AddMarkerModal: React.FC<AddMarkerModalProps> = ({
         </button>
 
         {/* Tag Selector */}
-        {availableTags.length > 0 && (
+        {hasTags && availableTags.length > 0 && (
           <div className="mb-4 p-3 border border-gray-200 rounded-lg bg-gray-50">
             <TagSelector
               availableTags={availableTags}

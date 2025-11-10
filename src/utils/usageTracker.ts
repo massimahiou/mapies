@@ -87,7 +87,7 @@ export class UsageTracker {
    */
   static async checkFeatureAccess(
     userId: string, 
-    feature: 'watermark' | 'bulkImport' | 'geocoding' | 'smartGrouping'
+    feature: 'watermark' | 'bulkImport' | 'geocoding' | 'smartGrouping' | 'tags'
   ): Promise<boolean> {
     try {
       const userDoc = await getDoc(doc(db, 'users', userId))

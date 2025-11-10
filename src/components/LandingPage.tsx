@@ -5,14 +5,14 @@ import {
   Upload, 
   Zap, 
   Globe, 
-  Users, 
   CheckCircle, 
   Star,
   ArrowRight,
   Sparkles,
   Heart,
   ChevronDown,
-  Languages
+  Languages,
+  Tag
 } from 'lucide-react'
 import { SUBSCRIPTION_PLANS } from '../config/subscriptionPlans'
 import AuthModal from './AuthModal'
@@ -402,7 +402,7 @@ const LandingPage: React.FC = () => {
   }
 
   const features = t.features.items.map((item, index) => {
-    const icons = [MapPin, Upload, Zap, Star, Globe, Users]
+    const icons = [MapPin, Upload, Zap, Tag, Star, Globe]
     const colors = [
       "from-pink-500 to-rose-500",
       "from-rose-500 to-pink-600",
@@ -1257,6 +1257,10 @@ const LandingPage: React.FC = () => {
                   <div className="flex items-center">
                     <CheckCircle className="w-5 h-5 text-green-500 mr-3" />
                     <span className="text-gray-700">{plan.smartGrouping ? t.pricing.smartGrouping : t.pricing.basicGrouping}</span>
+                  </div>
+                  <div className="flex items-center">
+                    <CheckCircle className="w-5 h-5 text-green-500 mr-3" />
+                    <span className="text-gray-700">{plan.tags ? t.pricing.tags : t.pricing.noTags}</span>
                   </div>
                   <div className="flex items-center">
                     <CheckCircle className="w-5 h-5 text-green-500 mr-3" />

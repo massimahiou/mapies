@@ -11,6 +11,7 @@ export interface SubscriptionPlan {
   bulkImport: boolean
   geocoding: boolean
   smartGrouping: boolean
+  tags: boolean
   
   // Customization levels
   customizationLevel: 'basic' | 'premium'
@@ -38,6 +39,7 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     bulkImport: false,
     geocoding: false,
     smartGrouping: false,
+    tags: false,
     customizationLevel: 'basic',
     maxStorageMB: 10,
     price: 0,
@@ -54,6 +56,7 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     bulkImport: true,
     geocoding: true,
     smartGrouping: false,
+    tags: false,
     customizationLevel: 'premium',
     maxStorageMB: 100,
     price: 14,
@@ -70,6 +73,7 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     bulkImport: true,
     geocoding: true,
     smartGrouping: true,
+    tags: true,
     customizationLevel: 'premium',
     maxStorageMB: 500,
     price: 32,
@@ -87,6 +91,7 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     bulkImport: true,
     geocoding: true,
     smartGrouping: true,
+    tags: true,
     customizationLevel: 'premium',
     maxStorageMB: 2000,
     price: 48,
@@ -120,6 +125,7 @@ export const canPerformAction = (
     case 'bulkImport':
     case 'geocoding':
     case 'smartGrouping':
+    case 'tags':
       return plan[action] as boolean
     
     case 'customizationLevel':

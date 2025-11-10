@@ -16,6 +16,7 @@ export interface FeatureAccess {
   hasGeocoding: boolean
   hasSmartGrouping: boolean
   hasBulkImport: boolean
+  hasTags: boolean
   showWatermark: boolean
   
   // Customization
@@ -63,6 +64,7 @@ export const usePublicFeatureAccess = (): FeatureAccess => {
     hasGeocoding: planLimits.geocoding,
     hasSmartGrouping: planLimits.smartGrouping,
     hasBulkImport: planLimits.bulkImport,
+    hasTags: planLimits.tags,
     showWatermark: planLimits.watermark,
     customizationLevel: planLimits.customizationLevel,
     usage: null,
@@ -127,6 +129,7 @@ export const useFeatureAccess = (): FeatureAccess => {
     hasGeocoding: userLimits?.geocoding ?? (planLimits?.geocoding || false),
     hasSmartGrouping: userLimits?.smartGrouping ?? (planLimits?.smartGrouping || false),
     hasBulkImport: userLimits?.bulkImport ?? (planLimits?.bulkImport || false),
+    hasTags: userLimits?.tags ?? (planLimits?.tags || false),
     showWatermark: userLimits?.watermark ?? (planLimits?.watermark || false),
     customizationLevel: userLimits?.customizationLevel ?? (planLimits?.customizationLevel || 'basic'),
     usage,

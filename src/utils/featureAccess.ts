@@ -14,6 +14,7 @@ export interface UserLimits {
   bulkImport: boolean
   geocoding: boolean
   smartGrouping: boolean
+  tags: boolean
   customizationLevel: 'basic' | 'premium'
   maxStorageMB: number
 }
@@ -34,6 +35,7 @@ export const getUserLimits = (userDocument: UserDocument | null, plan: string = 
       bulkImport: userDocument.limits.bulkImport ?? planLimits.bulkImport,
       geocoding: userDocument.limits.geocoding ?? planLimits.geocoding,
       smartGrouping: userDocument.limits.smartGrouping ?? planLimits.smartGrouping,
+      tags: userDocument.limits.tags ?? planLimits.tags,
       customizationLevel: userDocument.limits.customizationLevel ?? planLimits.customizationLevel,
       maxStorageMB: userDocument.limits.maxStorageMB ?? planLimits.maxStorageMB
     }
@@ -48,6 +50,7 @@ export const getUserLimits = (userDocument: UserDocument | null, plan: string = 
     bulkImport: planLimits.bulkImport,
     geocoding: planLimits.geocoding,
     smartGrouping: planLimits.smartGrouping,
+    tags: planLimits.tags,
     customizationLevel: planLimits.customizationLevel,
     maxStorageMB: planLimits.maxStorageMB
   }
@@ -58,7 +61,7 @@ export const getUserLimits = (userDocument: UserDocument | null, plan: string = 
  */
 export const canUserPerformAction = (
   userDocument: UserDocument | null,
-  action: 'addMarker' | 'createMap' | 'useGeocoding' | 'useBulkImport' | 'useSmartGrouping',
+  action: 'addMarker' | 'createMap' | 'useGeocoding' | 'useBulkImport' | 'useSmartGrouping' | 'useTags',
   currentCount?: number
 ): boolean => {
   const limits = getUserLimits(userDocument, userDocument?.subscription?.plan)
@@ -79,6 +82,9 @@ export const canUserPerformAction = (
     case 'useSmartGrouping':
       return limits.smartGrouping
     
+    case 'useTags':
+      return limits.tags
+    
     default:
       return false
   }
@@ -94,6 +100,7 @@ export const getFeatureAccess = (userDocument: UserDocument | null) => {
     hasGeocoding: limits.geocoding,
     hasBulkImport: limits.bulkImport,
     hasSmartGrouping: limits.smartGrouping,
+    hasTags: limits.tags,
     showWatermark: limits.watermark,
     customizationLevel: limits.customizationLevel,
     maxMarkersPerMap: limits.maxMarkersPerMap,

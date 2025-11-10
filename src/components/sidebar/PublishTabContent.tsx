@@ -1,7 +1,6 @@
 import React from 'react'
-import { Globe, Copy, Maximize2, Tag, MapPin } from 'lucide-react'
+import { Globe, Copy, Maximize2 } from 'lucide-react'
 import { useToast } from '../../contexts/ToastContext'
-import PublicMapPreview from '../PublicMapPreview'
 
 interface MapSettings {
   style?: string
@@ -40,9 +39,7 @@ interface PublishTabContentProps {
 const PublishTabContent: React.FC<PublishTabContentProps> = ({
   onShowPublishModal,
   currentMapId,
-  onOpenModal,
-  mapSettings = {},
-  markers = []
+  onOpenModal
 }) => {
   const { showToast } = useToast()
 
@@ -124,72 +121,6 @@ const PublishTabContent: React.FC<PublishTabContentProps> = ({
             <Globe className="w-4 h-4" />
             Get Embed Code
           </button>
-        </div>
-      </div>
-
-      {/* Public Map Preview */}
-      <div className="mb-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Public Map Preview</h3>
-        <p className="text-sm text-gray-600 mb-4">
-          This is how your map will appear to public users. All customizations (colors, search bar, tags, watermark) are shown here.
-        </p>
-        {markers.length > 0 ? (
-          <PublicMapPreview 
-            markers={markers.filter(m => m.visible)} 
-            mapSettings={mapSettings as any}
-            height="500px"
-          />
-        ) : (
-          <div className="p-8 bg-gray-50 rounded-lg border border-gray-200 text-center">
-            <MapPin className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm text-gray-500 mb-2">No markers to preview</p>
-            <p className="text-xs text-gray-400">
-              Add markers in the <strong>Data</strong> tab to see the preview.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Tags Preview Section */}
-      <div className="mb-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <Tag className="w-5 h-5 text-pink-600" />
-          Tags in Your Map
-        </h3>
-        <p className="text-sm text-gray-600 mb-4">
-          {((mapSettings.tags || []).length > 0) 
-            ? "Your map includes the following tags. Users can filter markers by clicking on these tags in the public view."
-            : "Tags help users filter markers on your public map. Create tags in the Manage tab to get started."}
-        </p>
-        
-        {/* Preview of tags */}
-        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-          {(mapSettings.tags || []).length > 0 ? (
-            <>
-              <div className="flex flex-wrap gap-2">
-                {(mapSettings.tags || []).map((tag) => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium bg-pink-600 text-white shadow-sm"
-                  >
-                    <Tag className="w-3 h-3" />
-                    {tag}
-                  </span>
-                ))}
-              </div>
-              <p className="text-xs text-gray-500 mt-3">
-                💡 Tags appear as a filter menu in the public map. Users can click tags to show only markers with those tags.
-              </p>
-            </>
-          ) : (
-            <div className="text-center py-4">
-              <Tag className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-sm text-gray-500 mb-2">No tags yet</p>
-              <p className="text-xs text-gray-400">
-                Go to the <strong>Manage</strong> tab to create tags for your markers.
-              </p>
-            </div>
-          )}
         </div>
       </div>
 

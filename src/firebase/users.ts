@@ -55,6 +55,7 @@ export interface UserDocument {
     bulkImport: boolean
     geocoding: boolean
     smartGrouping: boolean
+    tags: boolean
     customizationLevel: 'basic' | 'premium'
     // Additional fields
     maps: number
@@ -117,6 +118,7 @@ export const createUserDocument = async (user: User, additionalData?: Partial<Us
           bulkImport: planLimits.bulkImport,
           geocoding: planLimits.geocoding,
           smartGrouping: planLimits.smartGrouping,
+          tags: planLimits.tags,
           customizationLevel: planLimits.customizationLevel,
           // Additional fields
           maps: planLimits.maxMaps,

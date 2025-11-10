@@ -95,12 +95,14 @@ export interface LandingPageTranslations {
     manualEntry: string
     autoGeocoding: string
     manualCoordinates: string
-    smartGrouping: string
-    basicGrouping: string
-    withWatermark: string
-    noWatermark: string
-    getStartedFree: string
-    startTrial: string
+      smartGrouping: string
+      basicGrouping: string
+      tags: string
+      noTags: string
+      withWatermark: string
+      noWatermark: string
+      getStartedFree: string
+      startTrial: string
   }
   
   // CTA Section
@@ -235,16 +237,16 @@ export const translations: Record<Language, LandingPageTranslations> = {
           description: 'Automatically group and categorize your markers with AI-powered insights'
         },
         {
+          title: 'Tags & Filtering',
+          description: 'Organize and filter your markers with custom tags for better navigation and discovery'
+        },
+        {
           title: 'Custom Branding',
           description: 'Remove watermarks and customize your maps with your brand colors'
         },
         {
           title: 'Public Sharing',
           description: 'Share your maps publicly or embed them in your website'
-        },
-        {
-          title: 'Team Collaboration',
-          description: 'Invite team members to collaborate on maps with different permission levels'
         }
       ]
     },
@@ -263,6 +265,8 @@ export const translations: Record<Language, LandingPageTranslations> = {
       manualCoordinates: 'Manual Coordinates',
       smartGrouping: 'Smart Grouping',
       basicGrouping: 'Basic Grouping',
+      tags: 'Tags & Filtering',
+      noTags: 'No Tags',
       withWatermark: 'With Watermark',
       noWatermark: 'No Watermark',
       getStartedFree: 'Get Started Free',
@@ -391,16 +395,16 @@ export const translations: Record<Language, LandingPageTranslations> = {
           description: 'Regroupez et catégorisez automatiquement vos repères avec des informations alimentées par l\'IA'
         },
         {
+          title: 'Tags et filtrage',
+          description: 'Organisez et filtrez vos repères avec des tags personnalisés pour une meilleure navigation et découverte'
+        },
+        {
           title: 'Personnalisation de marque',
           description: 'Supprimez les filigranes et personnalisez vos cartes avec les couleurs de votre marque'
         },
         {
           title: 'Partage public',
           description: 'Partagez vos cartes publiquement ou intégrez-les dans votre site web'
-        },
-        {
-          title: 'Collaboration d\'équipe',
-          description: 'Invitez les membres de l\'équipe à collaborer sur les cartes avec différents niveaux d\'autorisation'
         }
       ]
     },
@@ -419,6 +423,8 @@ export const translations: Record<Language, LandingPageTranslations> = {
       manualCoordinates: 'Coordonnées manuelles',
       smartGrouping: 'Regroupement intelligent',
       basicGrouping: 'Regroupement de base',
+      tags: 'Tags et filtrage',
+      noTags: 'Pas de tags',
       withWatermark: 'Avec filigrane',
       noWatermark: 'Sans filigrane',
       getStartedFree: 'Commencer gratuitement',

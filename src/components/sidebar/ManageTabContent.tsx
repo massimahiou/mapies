@@ -9,7 +9,7 @@ import { createMarkerGroup, updateMarkerGroup, deleteMarkerGroup, getMarkerGroup
 import { useToast } from '../../contexts/ToastContext'
 import { getUserMaps, getMapPolygons, deleteMapPolygon, updateMapPolygon, PolygonDocument } from '../../firebase/maps'
 import PolygonEditModal from '../PolygonEditModal'
-import { useUsageWarning } from '../../hooks/useFeatureAccess'
+import { useUsageWarning, useFeatureAccess } from '../../hooks/useFeatureAccess'
 import { useSharedMapFeatureAccess } from '../../hooks/useSharedMapFeatureAccess'
 import DeleteMarkerDialog from '../DeleteMarkerDialog'
 import LimitationInfoModal from '../LimitationInfoModal'
@@ -64,6 +64,7 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
   const { showToast } = useToast()
   const { showWarning, showError, limit, currentCount } = useUsageWarning('markers', markers.length)
   const { hasSmartGrouping, customizationLevel } = useSharedMapFeatureAccess(currentMap)
+  const { hasTags } = useFeatureAccess()
   const [showRules, setShowRules] = useState(false)
   const [newRule, setNewRule] = useState({ contains: '', renameTo: '' })
   const [groupFolders, setGroupFolders] = useState<Record<string, boolean>>({})
@@ -1792,19 +1793,21 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
       </div>
 
       {/* Tags Management Section */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-800">Tags</h3>
+      {hasTags && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-800">Tags</h3>
+          </div>
+          {userId && mapId && (
+            <TagManagement
+              userId={userId}
+              mapId={mapId}
+              currentTags={mapSettings.tags || []}
+              onTagsChange={(tags) => onMapSettingsChange({ ...mapSettings, tags })}
+            />
+          )}
         </div>
-        {userId && mapId && (
-          <TagManagement
-            userId={userId}
-            mapId={mapId}
-            currentTags={mapSettings.tags || []}
-            onTagsChange={(tags) => onMapSettingsChange({ ...mapSettings, tags })}
-          />
-        )}
-      </div>
+      )}
 
       {/* Search */}
       <div className="flex items-center gap-2 mb-4">
@@ -2111,60 +2114,64 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                                     </p>
                                   )}
                                   {/* Tag badges - subtle and compact */}
-                                  {editingMarkerTags === marker.id ? (
-                                    <div className="mt-2 space-y-2">
-                                      <TagSelector
-                                        availableTags={mapSettings.tags || []}
-                                        selectedTags={selectedMarkerTags}
-                                        onTagsChange={setSelectedMarkerTags}
-                                      />
-                                      <div className="flex items-center gap-2">
-                                        <button
-                                          onClick={() => saveMarkerTags(marker.id)}
-                                          className="px-2 py-1 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 transition-colors flex items-center gap-1"
-                                        >
-                                          <Check className="w-3 h-3" />
-                                          Save
-                                        </button>
-                                        <button
-                                          onClick={cancelEdit}
-                                          className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded transition-colors flex items-center gap-1"
-                                        >
-                                          <X className="w-3 h-3" />
-                                          Cancel
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="flex flex-wrap gap-1 mt-1 items-center">
-                                      {(marker.tags || []).length > 0 ? (
-                                        <>
-                                          {(marker.tags || []).slice(0, 2).map((tag) => (
-                                            <span
-                                              key={tag}
-                                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-pink-50 text-pink-700 border border-pink-200"
+                                  {hasTags && (
+                                    <>
+                                      {editingMarkerTags === marker.id ? (
+                                        <div className="mt-2 space-y-2">
+                                          <TagSelector
+                                            availableTags={mapSettings.tags || []}
+                                            selectedTags={selectedMarkerTags}
+                                            onTagsChange={setSelectedMarkerTags}
+                                          />
+                                          <div className="flex items-center gap-2">
+                                            <button
+                                              onClick={() => saveMarkerTags(marker.id)}
+                                              className="px-2 py-1 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 transition-colors flex items-center gap-1"
                                             >
-                                              <Tag className="w-2.5 h-2.5" />
-                                              {tag}
-                                            </span>
-                                          ))}
-                                          {(marker.tags || []).length > 2 && (
-                                            <span className="text-[10px] text-gray-400 px-1">
-                                              +{(marker.tags || []).length - 2}
-                                            </span>
-                                  )}
-                                </>
+                                              <Check className="w-3 h-3" />
+                                              Save
+                                            </button>
+                                            <button
+                                              onClick={cancelEdit}
+                                              className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded transition-colors flex items-center gap-1"
+                                            >
+                                              <X className="w-3 h-3" />
+                                              Cancel
+                                            </button>
+                                          </div>
+                                        </div>
                                       ) : (
-                                        <span className="text-[10px] text-gray-400 italic">No tags</span>
+                                        <div className="flex flex-wrap gap-1 mt-1 items-center">
+                                          {(marker.tags || []).length > 0 ? (
+                                            <>
+                                              {(marker.tags || []).slice(0, 2).map((tag) => (
+                                                <span
+                                                  key={tag}
+                                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-pink-50 text-pink-700 border border-pink-200"
+                                                >
+                                                  <Tag className="w-2.5 h-2.5" />
+                                                  {tag}
+                                                </span>
+                                              ))}
+                                              {(marker.tags || []).length > 2 && (
+                                                <span className="text-[10px] text-gray-400 px-1">
+                                                  +{(marker.tags || []).length - 2}
+                                                </span>
+                                              )}
+                                            </>
+                                          ) : (
+                                            <span className="text-[10px] text-gray-400 italic">No tags</span>
+                                          )}
+                                          <button
+                                            onClick={() => startEditingMarkerTags(marker.id, marker.tags || [])}
+                                            className="ml-1 p-0.5 text-gray-400 hover:text-pink-600 hover:bg-pink-50 rounded transition-colors"
+                                            title="Edit tags"
+                                          >
+                                            <Tag className="w-3 h-3" />
+                                          </button>
+                                        </div>
                                       )}
-                                      <button
-                                        onClick={() => startEditingMarkerTags(marker.id, marker.tags || [])}
-                                        className="ml-1 p-0.5 text-gray-400 hover:text-pink-600 hover:bg-pink-50 rounded transition-colors"
-                                        title="Edit tags"
-                                      >
-                                        <Tag className="w-3 h-3" />
-                                      </button>
-                                    </div>
+                                    </>
                                   )}
                                 </>
                               )}
@@ -2342,60 +2349,64 @@ const ManageTabContent: React.FC<ManageTabContentProps> = ({
                                 </p>
                               )}
                               {/* Tag badges - subtle and compact */}
-                              {editingMarkerTags === marker.id ? (
-                                <div className="mt-2 space-y-2">
-                                  <TagSelector
-                                    availableTags={mapSettings.tags || []}
-                                    selectedTags={selectedMarkerTags}
-                                    onTagsChange={setSelectedMarkerTags}
-                                  />
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() => saveMarkerTags(marker.id)}
-                                      className="px-2 py-1 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 transition-colors flex items-center gap-1"
-                                    >
-                                      <Check className="w-3 h-3" />
-                                      Save
-                                    </button>
-                                    <button
-                                      onClick={cancelEdit}
-                                      className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded transition-colors flex items-center gap-1"
-                                    >
-                                      <X className="w-3 h-3" />
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex flex-wrap gap-1 mt-1 items-center">
-                                  {(marker.tags || []).length > 0 ? (
-                                    <>
-                                      {(marker.tags || []).slice(0, 2).map((tag) => (
-                                        <span
-                                          key={tag}
-                                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-pink-50 text-pink-700 border border-pink-200"
+                              {hasTags && (
+                                <>
+                                  {editingMarkerTags === marker.id ? (
+                                    <div className="mt-2 space-y-2">
+                                      <TagSelector
+                                        availableTags={mapSettings.tags || []}
+                                        selectedTags={selectedMarkerTags}
+                                        onTagsChange={setSelectedMarkerTags}
+                                      />
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={() => saveMarkerTags(marker.id)}
+                                          className="px-2 py-1 text-xs bg-pink-600 text-white rounded hover:bg-pink-700 transition-colors flex items-center gap-1"
                                         >
-                                          <Tag className="w-2.5 h-2.5" />
-                                          {tag}
-                                        </span>
-                                      ))}
-                                      {(marker.tags || []).length > 2 && (
-                                        <span className="text-[10px] text-gray-400 px-1">
-                                          +{(marker.tags || []).length - 2}
-                                        </span>
-                              )}
-                            </>
+                                          <Check className="w-3 h-3" />
+                                          Save
+                                        </button>
+                                        <button
+                                          onClick={cancelEdit}
+                                          className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded transition-colors flex items-center gap-1"
+                                        >
+                                          <X className="w-3 h-3" />
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
                                   ) : (
-                                    <span className="text-[10px] text-gray-400 italic">No tags</span>
+                                    <div className="flex flex-wrap gap-1 mt-1 items-center">
+                                      {(marker.tags || []).length > 0 ? (
+                                        <>
+                                          {(marker.tags || []).slice(0, 2).map((tag) => (
+                                            <span
+                                              key={tag}
+                                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-pink-50 text-pink-700 border border-pink-200"
+                                            >
+                                              <Tag className="w-2.5 h-2.5" />
+                                              {tag}
+                                            </span>
+                                          ))}
+                                          {(marker.tags || []).length > 2 && (
+                                            <span className="text-[10px] text-gray-400 px-1">
+                                              +{(marker.tags || []).length - 2}
+                                            </span>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <span className="text-[10px] text-gray-400 italic">No tags</span>
+                                      )}
+                                      <button
+                                        onClick={() => startEditingMarkerTags(marker.id, marker.tags || [])}
+                                        className="ml-1 p-0.5 text-gray-400 hover:text-pink-600 hover:bg-pink-50 rounded transition-colors"
+                                        title="Edit tags"
+                                      >
+                                        <Tag className="w-3 h-3" />
+                                      </button>
+                                    </div>
                                   )}
-                                  <button
-                                    onClick={() => startEditingMarkerTags(marker.id, marker.tags || [])}
-                                    className="ml-1 p-0.5 text-gray-400 hover:text-pink-600 hover:bg-pink-50 rounded transition-colors"
-                                    title="Edit tags"
-                                  >
-                                    <Tag className="w-3 h-3" />
-                                  </button>
-                                </div>
+                                </>
                               )}
                             </>
                           )}
